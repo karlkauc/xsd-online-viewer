@@ -48,7 +48,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
   indexById: new Map(),
   usagesByTarget: new Map(),
 
-  activeTab: "tree",
+  activeTab: "diagram",
   selectedId: null,
   expandedIds: new Set(),
   filterKinds: new Set(ALL_KINDS),

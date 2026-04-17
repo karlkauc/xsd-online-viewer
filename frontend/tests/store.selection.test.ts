@@ -29,4 +29,8 @@ describe("selectionStore", () => {
     useSelection.getState().toggleExpanded("x");
     expect(useSelection.getState().expandedIds.has("x")).toBe(false);
   });
+
+  it("defaults to the diagram tab", () => {
+    expect(useSelection.getState().activeTab).toBe("diagram");
+  });
 });

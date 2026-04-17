@@ -1,21 +1,54 @@
 // Builds a React-Flow graph from the schema model.
 //
-// Strategy: top-level global elements are root nodes. When expanded, a node
-// unfolds its particle children. A lightweight layered layout places each
-// tree vertically, with children to the right.
+// Layout: classic XSD-diagram style (à la XMLSpy / Oxygen).
+// A parent element and its compositor sit on the same horizontal baseline,
+// with the compositor's children stacked vertically to its right and the
+// compositor vertically centered on the children's span.
+//
+//   [Parent] ── [Seq] ── Child 1
+//                    ├── Child 2   ← compositor on Y-midpoint of children
+//                    └── Child 3
+//
+// Algorithm: bottom-up recursion. Children are placed first; their combined
+// vertical span determines the Y-center on which the parent/compositor are
+// then aligned.
 
 import type { Edge, Node } from "@xyflow/react";
 import type {
   ComplexType,
   ElementDecl,
+  Facet,
   Particle,
   SchemaModel,
+  SimpleType,
 } from "../../types/schema";
 
-const NODE_WIDTH = 220;
-const NODE_HEIGHT = 56;
-const X_GAP = 100;
+export const NODE_WIDTH = 220;
+export const NODE_HEIGHT = 56; // base height for a plain element node
+export const COMPOSITOR_WIDTH = 70;
+export const COMPOSITOR_HEIGHT = 40;
+
+// Pixel budget per body row. Matches the `text-[11px]` / `text-[10px]`
+// line heights in ElementNode.tsx; if you change the CSS, adjust these.
+const HEADER_H = 24;
+const TYPE_H = 20;
+const ROW_H = 14;
+const DOC_LINE_H = 16;
+const SECTION_PAD = 4;
+const EXPAND_HINT_H = 14;
+const MAX_INLINE_ATTRS = 4;
+const MAX_INLINE_FACETS = 4;
+const MAX_DOC_LINES = 2;
+
+const X_GAP = 60;
 const Y_GAP = 24;
+const TREE_GAP = Y_GAP * 2;
+
+interface Span {
+  topY: number;
+  bottomY: number;
+  centerY: number;
+}
 
 interface BuildContext {
   model: SchemaModel;
@@ -23,12 +56,12 @@ interface BuildContext {
   selectedId: string | null;
   nodes: Node[];
   edges: Edge[];
-  y: number;
   idCounter: number;
   typeIndex: Map<string, ComplexType>;
+  simpleIndex: Map<string, SimpleType>;
 }
 
-function uniqueId(context: BuildContext): string {
+function nextId(context: BuildContext): string {
   context.idCounter += 1;
   return `node-${context.idCounter}`;
 }
@@ -36,12 +69,22 @@ function uniqueId(context: BuildContext): string {
 function buildTypeIndex(model: SchemaModel): Map<string, ComplexType> {
   const index = new Map<string, ComplexType>();
   for (const complex of model.complex_types) {
-    if (complex.name) {
-      index.set(complex.name, complex);
-      // Also register the namespaced expansion so "tns:Foo" lookups work.
-      if (model.target_namespace) {
-        index.set(`{${model.target_namespace}}${complex.name}`, complex);
-      }
+    if (!complex.name) continue;
+    index.set(complex.name, complex);
+    if (model.target_namespace) {
+      index.set(`{${model.target_namespace}}${complex.name}`, complex);
+    }
+  }
+  return index;
+}
+
+function buildSimpleIndex(model: SchemaModel): Map<string, SimpleType> {
+  const index = new Map<string, SimpleType>();
+  for (const simple of model.simple_types) {
+    if (!simple.name) continue;
+    index.set(simple.name, simple);
+    if (model.target_namespace) {
+      index.set(`{${model.target_namespace}}${simple.name}`, simple);
     }
   }
   return index;
@@ -58,72 +101,38 @@ function resolveComplex(
   return context.typeIndex.get(local);
 }
 
-function addElementNode(
-  element: ElementDecl,
-  x: number,
-  y: number,
-  parentId: string | null,
-  particle: Particle | null,
+function resolveSimple(
+  typeRef: string | null | undefined,
   context: BuildContext,
-): string {
-  const id = uniqueId(context);
-  const expandable =
-    element.type_inline_complex != null || resolveComplex(element.type_name, context) != null;
-  context.nodes.push({
-    id,
-    position: { x, y },
-    data: {
-      schemaId: element.id,
-      kind: "element",
-      label: element.name ?? element.ref ?? "?",
-      type: element.type_name,
-      occurs: particle ? formatOccurs(particle.min_occurs, particle.max_occurs) : null,
-      expandable,
-      expanded: context.expandedIds.has(element.id),
-      selected: context.selectedId === element.id,
-      attributes: element.type_inline_complex?.attributes ?? [],
-    },
-    type: "element",
-    width: NODE_WIDTH,
-    height: NODE_HEIGHT,
-  });
-  if (parentId) {
-    context.edges.push({
-      id: `${parentId}-${id}`,
-      source: parentId,
-      target: id,
-      type: "smoothstep",
-    });
-  }
-  return id;
+): SimpleType | undefined {
+  if (!typeRef) return undefined;
+  const direct = context.simpleIndex.get(typeRef);
+  if (direct) return direct;
+  const local = typeRef.includes(":") ? typeRef.split(":").pop()! : typeRef;
+  return context.simpleIndex.get(local);
 }
 
-function addCompositorNode(
-  kind: "sequence" | "choice" | "all" | "any" | "group-ref",
-  label: string,
-  x: number,
-  y: number,
-  parentId: string | null,
-  context: BuildContext,
-): string {
-  const id = uniqueId(context);
-  context.nodes.push({
-    id,
-    position: { x, y },
-    data: { kind, label },
-    type: "compositor",
-    width: 70,
-    height: 40,
-  });
-  if (parentId) {
-    context.edges.push({
-      id: `${parentId}-${id}`,
-      source: parentId,
-      target: id,
-      type: "smoothstep",
-    });
+// Walks an element's type reference and returns the facets that constrain
+// the element's value. Preference order: inline simpleType → named
+// simpleType → complexType.simple_content_facets.
+function collectFacets(element: ElementDecl, context: BuildContext): Facet[] {
+  if (element.type_inline_simple?.facets?.length) {
+    return element.type_inline_simple.facets;
   }
-  return id;
+  const simple = resolveSimple(element.type_name, context);
+  if (simple?.facets?.length) return simple.facets;
+  const complex = resolveComplex(element.type_name, context);
+  if (complex?.simple_content_facets?.length) return complex.simple_content_facets;
+  return [];
+}
+
+function collectDocumentation(element: ElementDecl): string | null {
+  const docs = element.annotation?.documentation ?? [];
+  for (const frag of docs) {
+    const trimmed = frag.text?.trim();
+    if (trimmed) return trimmed;
+  }
+  return null;
 }
 
 function formatOccurs(min: number, max: number | "unbounded"): string | null {
@@ -131,67 +140,283 @@ function formatOccurs(min: number, max: number | "unbounded"): string | null {
   return `[${min}..${max === "unbounded" ? "∞" : max}]`;
 }
 
-function expandParticle(
-  particle: Particle,
-  x: number,
-  parentFlowId: string,
+interface ElementDisplay {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: Record<string, any>;
+  height: number;
+}
+
+function isEnumerationCollapsable(facets: Facet[]): boolean {
+  if (facets.length === 0) return false;
+  if (!facets.every((f) => f.kind === "enumeration")) return false;
+  const totalChars = facets.reduce((s, f) => s + f.value.length, 0) + facets.length * 3;
+  return totalChars <= 30;
+}
+
+function truncateDocLines(doc: string | null): string[] {
+  if (!doc) return [];
+  const lines = doc.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  return lines.slice(0, MAX_DOC_LINES);
+}
+
+function computeElementDisplay(
+  element: ElementDecl,
+  hostParticle: Particle | null,
   context: BuildContext,
-): number {
-  // Returns the max Y coordinate used.
-  let localY = context.y;
+): ElementDisplay {
+  const attrs = element.type_inline_complex?.attributes ?? [];
+  const facets = collectFacets(element, context);
+  const docFull = collectDocumentation(element);
+  const docLines = truncateDocLines(docFull);
+  const expandable =
+    element.type_inline_complex != null || resolveComplex(element.type_name, context) != null;
+  const enumCollapsed = isEnumerationCollapsable(facets);
+
+  // Row counts that actually render in ElementNode.tsx.
+  const attrRows =
+    Math.min(attrs.length, MAX_INLINE_ATTRS) + (attrs.length > MAX_INLINE_ATTRS ? 1 : 0);
+  const facetRows = enumCollapsed
+    ? 1
+    : Math.min(facets.length, MAX_INLINE_FACETS) +
+      (facets.length > MAX_INLINE_FACETS ? 1 : 0);
+
+  let height = HEADER_H + TYPE_H;
+  if (attrRows) height += SECTION_PAD + attrRows * ROW_H;
+  if (facetRows) height += SECTION_PAD + facetRows * ROW_H;
+  if (docLines.length) height += SECTION_PAD + docLines.length * DOC_LINE_H;
+  if (expandable) height += EXPAND_HINT_H;
+  // Ensure the expanded-case header/title always has room.
+  height = Math.max(height, NODE_HEIGHT);
+
+  const data = {
+    schemaId: element.id,
+    kind: "element",
+    label: element.name ?? element.ref ?? "?",
+    type: element.type_name,
+    occurs: hostParticle ? formatOccurs(hostParticle.min_occurs, hostParticle.max_occurs) : null,
+    expandable,
+    expanded: context.expandedIds.has(element.id),
+    selected: context.selectedId === element.id,
+    attributes: attrs,
+    facets,
+    enumerationCollapsed: enumCollapsed,
+    documentationLines: docLines,
+    documentationFull: docFull,
+  };
+  return { data, height };
+}
+
+function addElementNode(
+  id: string,
+  display: ElementDisplay,
+  x: number,
+  y: number,
+  context: BuildContext,
+): void {
+  context.nodes.push({
+    id,
+    position: { x, y },
+    data: display.data,
+    type: "element",
+    width: NODE_WIDTH,
+    height: display.height,
+  });
+}
+
+function addCompositorNode(
+  id: string,
+  kind: "sequence" | "choice" | "all" | "any" | "group-ref",
+  label: string,
+  x: number,
+  y: number,
+  context: BuildContext,
+): void {
+  context.nodes.push({
+    id,
+    position: { x, y },
+    data: { kind, label },
+    type: "compositor",
+    width: COMPOSITOR_WIDTH,
+    height: COMPOSITOR_HEIGHT,
+  });
+}
+
+function addEdge(context: BuildContext, source: string, target: string): void {
+  context.edges.push({
+    id: `${source}-${target}`,
+    source,
+    target,
+    type: "smoothstep",
+  });
+}
+
+function getExpandedParticle(
+  element: ElementDecl,
+  context: BuildContext,
+): Particle | null {
+  if (!context.expandedIds.has(element.id)) return null;
+  const complex = element.type_inline_complex ?? resolveComplex(element.type_name, context);
+  return complex?.particle ?? null;
+}
+
+// Places an element, recursing into its content model if expanded.
+// Returns the vertical span consumed by the entire sub-tree.
+function placeElement(
+  element: ElementDecl,
+  x: number,
+  topY: number,
+  hostParticle: Particle | null,
+  context: BuildContext,
+): { flowId: string; span: Span } {
+  const display = computeElementDisplay(element, hostParticle, context);
+  const expandedParticle = getExpandedParticle(element, context);
+
+  if (!expandedParticle) {
+    const flowId = nextId(context);
+    addElementNode(flowId, display, x, topY, context);
+    return {
+      flowId,
+      span: {
+        topY,
+        bottomY: topY + display.height,
+        centerY: topY + display.height / 2,
+      },
+    };
+  }
+
+  // Expanded: lay out the particle subtree to the right, then center the
+  // element (and the compositor) vertically on the span of the children.
+  const compositorX = x + NODE_WIDTH + X_GAP;
+  const childrenX = compositorX + COMPOSITOR_WIDTH + X_GAP;
+
+  const elementFlowId = nextId(context);
+
+  const particleResult = placeParticle(
+    expandedParticle,
+    compositorX,
+    childrenX,
+    topY,
+    context,
+  );
+  const center = particleResult.span.centerY;
+
+  // Parent element sits on the same midline as the compositor.
+  const elementTopY = center - display.height / 2;
+  addElementNode(elementFlowId, display, x, elementTopY, context);
+  addEdge(context, elementFlowId, particleResult.rootFlowId);
+
+  const finalSpan: Span = {
+    topY: Math.min(particleResult.span.topY, elementTopY),
+    bottomY: Math.max(particleResult.span.bottomY, elementTopY + display.height),
+    centerY: center,
+  };
+  return { flowId: elementFlowId, span: finalSpan };
+}
+
+// Places a particle. For sequence/choice/all: creates a compositor node
+// plus every child; for element-particles: delegates to placeElement;
+// for any/group-ref: single leaf node.
+// Returns a flowId representing the root node the caller should connect to,
+// plus the span consumed.
+function placeParticle(
+  particle: Particle,
+  compositorX: number,
+  childrenX: number,
+  topY: number,
+  context: BuildContext,
+): { rootFlowId: string; span: Span } {
   if (particle.kind === "element" && particle.element) {
-    const element = particle.element;
-    const elementId = addElementNode(
-      element,
-      x,
-      context.y,
-      parentFlowId,
+    const { flowId, span } = placeElement(
+      particle.element,
+      compositorX,
+      topY,
       particle,
       context,
     );
-    context.y += NODE_HEIGHT + Y_GAP;
-    localY = context.y;
-    if (context.expandedIds.has(element.id)) {
-      const complex = element.type_inline_complex ?? resolveComplex(element.type_name, context);
-      if (complex?.particle) {
-        localY = expandParticle(complex.particle, x + NODE_WIDTH + X_GAP, elementId, context);
-      }
-    }
-  } else if (particle.kind === "group-ref") {
+    return { rootFlowId: flowId, span };
+  }
+
+  if (particle.kind === "any") {
+    const flowId = nextId(context);
+    addCompositorNode(flowId, "any", "any", compositorX, topY, context);
+    return {
+      rootFlowId: flowId,
+      span: {
+        topY,
+        bottomY: topY + COMPOSITOR_HEIGHT,
+        centerY: topY + COMPOSITOR_HEIGHT / 2,
+      },
+    };
+  }
+
+  if (particle.kind === "group-ref") {
+    const flowId = nextId(context);
     addCompositorNode(
+      flowId,
       "group-ref",
       particle.group_ref ?? "group",
-      x,
-      context.y,
-      parentFlowId,
+      compositorX,
+      topY,
       context,
     );
-    context.y += NODE_HEIGHT + Y_GAP;
-    localY = context.y;
-  } else if (particle.kind === "any") {
-    addCompositorNode("any", "any", x, context.y, parentFlowId, context);
-    context.y += NODE_HEIGHT + Y_GAP;
-    localY = context.y;
-  } else {
-    // sequence / choice / all → add a compositor and expand children to its right
-    const compositorId = addCompositorNode(
-      particle.kind as "sequence" | "choice" | "all",
-      particle.kind,
-      x,
-      context.y,
-      parentFlowId,
-      context,
-    );
-    context.y += NODE_HEIGHT + Y_GAP;
-    const childrenX = x + NODE_WIDTH + X_GAP;
-    let maxY = context.y;
-    for (const child of particle.children) {
-      const used = expandParticle(child, childrenX, compositorId, context);
-      maxY = Math.max(maxY, used);
-    }
-    localY = maxY;
+    return {
+      rootFlowId: flowId,
+      span: {
+        topY,
+        bottomY: topY + COMPOSITOR_HEIGHT,
+        centerY: topY + COMPOSITOR_HEIGHT / 2,
+      },
+    };
   }
-  return Math.max(localY, context.y);
+
+  // sequence | choice | all — stack children vertically to the right, then
+  // center the compositor on their combined span.
+  const compositorId = nextId(context);
+
+  const grandchildX = childrenX + NODE_WIDTH + X_GAP + COMPOSITOR_WIDTH + X_GAP;
+  let cursorY = topY;
+  const childResults: { rootFlowId: string; span: Span }[] = [];
+
+  for (const child of particle.children) {
+    const result = placeParticle(child, childrenX, grandchildX, cursorY, context);
+    childResults.push(result);
+    cursorY = result.span.bottomY + Y_GAP;
+  }
+
+  let childrenSpan: Span;
+  if (childResults.length === 0) {
+    childrenSpan = {
+      topY,
+      bottomY: topY + COMPOSITOR_HEIGHT,
+      centerY: topY + COMPOSITOR_HEIGHT / 2,
+    };
+  } else {
+    const first = childResults[0].span.topY;
+    const last = childResults[childResults.length - 1].span.bottomY;
+    childrenSpan = { topY: first, bottomY: last, centerY: (first + last) / 2 };
+  }
+
+  const compositorY = childrenSpan.centerY - COMPOSITOR_HEIGHT / 2;
+  addCompositorNode(
+    compositorId,
+    particle.kind as "sequence" | "choice" | "all",
+    particle.kind,
+    compositorX,
+    compositorY,
+    context,
+  );
+  for (const child of childResults) {
+    addEdge(context, compositorId, child.rootFlowId);
+  }
+
+  return {
+    rootFlowId: compositorId,
+    span: {
+      topY: Math.min(childrenSpan.topY, compositorY),
+      bottomY: Math.max(childrenSpan.bottomY, compositorY + COMPOSITOR_HEIGHT),
+      centerY: childrenSpan.centerY,
+    },
+  };
 }
 
 export function buildDiagramGraph(
@@ -205,21 +430,15 @@ export function buildDiagramGraph(
     selectedId,
     nodes: [],
     edges: [],
-    y: 0,
     idCounter: 0,
     typeIndex: buildTypeIndex(model),
+    simpleIndex: buildSimpleIndex(model),
   };
 
+  let nextTopY = 0;
   for (const element of model.elements) {
-    const elementId = addElementNode(element, 0, context.y, null, null, context);
-    context.y += NODE_HEIGHT + Y_GAP;
-    if (expandedIds.has(element.id)) {
-      const complex = element.type_inline_complex ?? resolveComplex(element.type_name, context);
-      if (complex?.particle) {
-        expandParticle(complex.particle, NODE_WIDTH + X_GAP, elementId, context);
-      }
-    }
-    context.y += Y_GAP * 2; // extra space between top-level trees
+    const { span } = placeElement(element, 0, nextTopY, null, context);
+    nextTopY = span.bottomY + TREE_GAP;
   }
 
   return { nodes: context.nodes, edges: context.edges };

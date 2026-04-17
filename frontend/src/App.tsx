@@ -25,6 +25,7 @@ export default function App() {
   const setActiveTab = useSelection((s) => s.setActiveTab);
   const selectedId = useSelection((s) => s.selectedId);
   const setSelected = useSelection((s) => s.setSelected);
+  const showSidebar = activeTab === "tree";
 
   // Keyboard shortcut: Ctrl/Cmd-K opens the search palette. Handled via a
   // custom event so multiple components can subscribe.
@@ -114,10 +115,19 @@ export default function App() {
 
           <Diagnostics />
 
-          <section className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[minmax(280px,28%)_1fr] gap-0">
-            <aside className="min-h-0 overflow-hidden border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
-              <TreeView />
-            </aside>
+          <section
+            className={
+              "flex-1 min-h-0 grid gap-0 " +
+              (showSidebar
+                ? "grid-cols-1 md:grid-cols-[minmax(280px,28%)_1fr]"
+                : "grid-cols-1")
+            }
+          >
+            {showSidebar && (
+              <aside className="min-h-0 overflow-hidden border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
+                <TreeView />
+              </aside>
+            )}
             <section className="min-h-0 overflow-hidden flex flex-col">
               <div className="flex-1 min-h-0">
                 {activeTab === "tree" && <DetailPanel />}
