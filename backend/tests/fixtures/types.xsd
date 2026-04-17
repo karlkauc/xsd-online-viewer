@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:lib="http://example.com/library"
+           targetNamespace="http://example.com/library"
+           elementFormDefault="qualified">
+
+  <xs:simpleType name="ISBNType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9]{3}-[0-9]{10}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>

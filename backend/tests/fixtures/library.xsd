@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:lib="http://example.com/library"
+           targetNamespace="http://example.com/library"
+           elementFormDefault="qualified">
+
+  <xs:include schemaLocation="types.xsd"/>
+
+  <xs:element name="Library">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Book" type="lib:BookType" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:complexType name="BookType">
+    <xs:sequence>
+      <xs:element name="Title" type="xs:string"/>
+      <xs:element name="Author" type="xs:string" maxOccurs="unbounded"/>
+      <xs:element name="ISBN" type="lib:ISBNType"/>
+    </xs:sequence>
+  </xs:complexType>
+
+</xs:schema>

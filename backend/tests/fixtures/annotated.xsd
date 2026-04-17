@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:tns="http://example.com/annotated"
+           targetNamespace="http://example.com/annotated"
+           elementFormDefault="qualified">
+
+  <xs:annotation>
+    <xs:documentation xml:lang="en">Top-level schema documentation.</xs:documentation>
+    <xs:appinfo source="http://example.com/appinfo">
+      <meta version="1.0"/>
+    </xs:appinfo>
+  </xs:annotation>
+
+  <!-- This is a comment describing ColorType -->
+  <xs:simpleType name="ColorType">
+    <xs:annotation>
+      <xs:documentation xml:lang="en">Allowed colours for widgets.</xs:documentation>
+      <xs:documentation xml:lang="de">Erlaubte Farben für Widgets.</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="red"/>
+      <xs:enumeration value="green"/>
+      <xs:enumeration value="blue"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:element name="Widget">
+    <xs:annotation>
+      <xs:documentation>A configurable widget element.</xs:documentation>
+    </xs:annotation>
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Color" type="tns:ColorType"/>
+        <xs:element name="Size" minOccurs="0">
+          <xs:simpleType>
+            <xs:restriction base="xs:int">
+              <xs:minInclusive value="1"/>
+              <xs:maxInclusive value="100"/>
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

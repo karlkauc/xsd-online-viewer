@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE schema [
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://example.com/xxe">
+  <xs:element name="Leak">
+    <xs:simpleType>
+      <xs:restriction base="xs:string">
+        <xs:enumeration value="&xxe;"/>
+      </xs:restriction>
+    </xs:simpleType>
+  </xs:element>
+</xs:schema>

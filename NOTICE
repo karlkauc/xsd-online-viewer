@@ -1,0 +1,27 @@
+Online XSD/XML Viewer
+Copyright (c) 2026 Karl Kauc
+
+This product includes software developed by third parties:
+
+Backend:
+  - lxml (BSD-3-Clause) — https://lxml.de/
+  - FastAPI (MIT) — https://fastapi.tiangolo.com/
+  - uvicorn (BSD-3-Clause) — https://www.uvicorn.org/
+  - pydantic (MIT) — https://docs.pydantic.dev/
+  - httpx (BSD-3-Clause) — https://www.python-httpx.org/
+
+Frontend:
+  - React (MIT) — https://react.dev/
+  - Vite (MIT) — https://vitejs.dev/
+  - TypeScript (Apache-2.0) — https://www.typescriptlang.org/
+  - Tailwind CSS (MIT) — https://tailwindcss.com/
+  - React Flow / @xyflow/react (MIT) — https://reactflow.dev/
+  - CodeMirror 6 (MIT) — https://codemirror.net/
+  - Zustand (MIT) — https://github.com/pmndrs/zustand
+  - react-virtuoso (MIT) — https://virtuoso.dev/
+
+Tests:
+  - pytest (MIT) — https://pytest.org/
+  - Vitest (MIT) — https://vitest.dev/
+  - React Testing Library (MIT) — https://testing-library.com/
+  - Playwright (Apache-2.0) — https://playwright.dev/

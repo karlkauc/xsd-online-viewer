@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:tns="http://example.com/simple"
+           targetNamespace="http://example.com/simple"
+           elementFormDefault="qualified">
+
+  <xs:element name="Person" type="tns:PersonType"/>
+
+  <xs:complexType name="PersonType">
+    <xs:sequence>
+      <xs:element name="FirstName" type="xs:string"/>
+      <xs:element name="LastName" type="xs:string"/>
+      <xs:element name="Age" type="tns:AgeType" minOccurs="0"/>
+      <xs:element name="Email" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:ID" use="required"/>
+    <xs:attribute name="country" type="xs:string" default="DE"/>
+  </xs:complexType>
+
+  <xs:simpleType name="AgeType">
+    <xs:restriction base="xs:int">
+      <xs:minInclusive value="0"/>
+      <xs:maxInclusive value="130"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>

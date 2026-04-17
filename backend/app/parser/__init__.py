@@ -1,0 +1,1 @@
+"""XSD parser package."""
