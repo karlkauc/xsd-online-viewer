@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { xml } from "@codemirror/lang-xml";
 import { EditorView } from "@codemirror/view";
@@ -12,6 +12,7 @@ export function TextView() {
   const selectedId = useSelection((s) => s.selectedId);
   const indexById = useSelection((s) => s.indexById);
 
+  const viewRef = useRef<EditorView | null>(null);
   const [activeFileId, setActiveFileId] = useState<string | null>(
     () => model?.files[0]?.id ?? null,
   );
@@ -21,6 +22,15 @@ export function TextView() {
     [model, activeFileId],
   );
 
+  // If the selection points into another file, switch the tab so the
+  // highlight is visible. Keeps Tree/Diagram ↔ Text selection in lock-step.
+  useEffect(() => {
+    if (!selectedId) return;
+    const entry = indexById.get(selectedId);
+    const fileId = entry?.source_ref?.file_id;
+    if (fileId && fileId !== activeFileId) setActiveFileId(fileId);
+  }, [selectedId, indexById, activeFileId]);
+
   const targetLine = useMemo(() => {
     if (!selectedId) return null;
     const entry = indexById.get(selectedId);
@@ -28,6 +38,24 @@ export function TextView() {
     if (entry.source_ref.file_id !== activeFile?.id) return null;
     return entry.source_ref.line ?? null;
   }, [selectedId, indexById, activeFile]);
+
+  const scrollToLine = useCallback((view: EditorView, line: number) => {
+    const clamped = Math.max(1, Math.min(line, view.state.doc.lines));
+    const docLine = view.state.doc.line(clamped);
+    view.dispatch({
+      selection: { anchor: docLine.from },
+      effects: EditorView.scrollIntoView(docLine.from, { y: "start" }),
+    });
+  }, []);
+
+  // Re-scroll whenever the target line changes — covers the case where the
+  // user switches tab, changes selection via the search palette, or clicks a
+  // Find Usages link while the Text tab is already visible.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || targetLine == null) return;
+    scrollToLine(view, targetLine);
+  }, [targetLine, scrollToLine]);
 
   if (!model || !activeFile) return null;
 
@@ -67,13 +95,8 @@ export function TextView() {
           theme={isDark() ? "dark" : "light"}
           height="100%"
           onCreateEditor={(view) => {
-            if (targetLine != null) {
-              const line = view.state.doc.line(Math.min(targetLine, view.state.doc.lines));
-              view.dispatch({
-                selection: { anchor: line.from },
-                effects: EditorView.scrollIntoView(line.from, { y: "start" }),
-              });
-            }
+            viewRef.current = view;
+            if (targetLine != null) scrollToLine(view, targetLine);
           }}
         />
       </div>

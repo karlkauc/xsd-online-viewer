@@ -15,6 +15,7 @@ import { buildDiagramGraph } from "./buildGraph";
 import { ElementNode } from "./ElementNode";
 import { CompositorNode } from "./CompositorNode";
 import { exportFlowAsPng, exportFlowAsSvg } from "./exportImage";
+import { collectExpandableElementIds } from "../../lib/expandAll";
 
 const NODE_TYPES = {
   element: ElementNode as unknown as React.ComponentType<NodeProps>,
@@ -35,6 +36,7 @@ function DiagramInner() {
   const expandedIds = useSelection((s) => s.expandedIds);
   const setSelected = useSelection((s) => s.setSelected);
   const toggleExpanded = useSelection((s) => s.toggleExpanded);
+  const setExpandedIds = useSelection((s) => s.setExpandedIds);
 
   const { nodes, edges } = useMemo<{ nodes: Node[]; edges: Edge[] }>(() => {
     if (!model) return { nodes: [], edges: [] };
@@ -75,9 +77,36 @@ function DiagramInner() {
     [],
   );
 
+  const onExpandAll = useCallback(() => {
+    if (!model) return;
+    setExpandedIds(collectExpandableElementIds(model));
+  }, [model, setExpandedIds]);
+
+  const onCollapseAll = useCallback(() => {
+    setExpandedIds(new Set());
+  }, [setExpandedIds]);
+
   return (
     <div ref={wrapperRef} className="relative h-full w-full">
       <div className="absolute top-2 right-2 z-10 flex gap-1">
+        <button
+          type="button"
+          className="btn"
+          onClick={onExpandAll}
+          disabled={!model}
+          title="Expand every element that has child content"
+        >
+          Expand all
+        </button>
+        <button
+          type="button"
+          className="btn"
+          onClick={onCollapseAll}
+          disabled={expandedIds.size === 0}
+          title="Collapse every expanded element"
+        >
+          Collapse all
+        </button>
         <button type="button" className="btn" onClick={() => onExport("svg")}>
           Export SVG
         </button>

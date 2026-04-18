@@ -28,6 +28,7 @@ interface SelectionState {
   setSelected: (id: string | null) => void;
   toggleExpanded: (id: string) => void;
   setExpanded: (id: string, expanded: boolean) => void;
+  setExpandedIds: (ids: Set<string>) => void;
   setFilterKinds: (kinds: Set<SchemaNodeKind>) => void;
   setSearchQuery: (query: string) => void;
 }
@@ -100,6 +101,8 @@ export const useSelection = create<SelectionState>((set, get) => ({
     else next.delete(id);
     set({ expandedIds: next });
   },
+
+  setExpandedIds: (ids) => set({ expandedIds: new Set(ids) }),
 
   setFilterKinds: (kinds) => set({ filterKinds: kinds }),
   setSearchQuery: (query) => set({ searchQuery: query }),

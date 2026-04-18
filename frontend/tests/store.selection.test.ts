@@ -33,4 +33,15 @@ describe("selectionStore", () => {
   it("defaults to the diagram tab", () => {
     expect(useSelection.getState().activeTab).toBe("diagram");
   });
+
+  it("replaces the entire expanded set via setExpandedIds", () => {
+    useSelection.getState().setSchema("id", smallModel);
+    useSelection.getState().toggleExpanded("a");
+    useSelection.getState().toggleExpanded("b");
+    useSelection.getState().setExpandedIds(new Set(["x", "y", "z"]));
+    const state = useSelection.getState();
+    expect(state.expandedIds.has("a")).toBe(false);
+    expect(state.expandedIds.has("x")).toBe(true);
+    expect(state.expandedIds.size).toBe(3);
+  });
 });

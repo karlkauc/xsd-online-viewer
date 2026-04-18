@@ -6,29 +6,30 @@ import { dirname, resolve } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SIMPLE_XSD = resolve(__dirname, "../../backend/tests/fixtures/simple.xsd");
 
-test("upload XSD, navigate tree, switch tabs", async ({ page }) => {
+test("upload XSD, switch tabs, and inspect the tree detail", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Online XSD Viewer" })).toBeVisible();
 
-  // Upload the sample file.
   const fileInput = page.locator('input[type="file"]');
   await fileInput.setInputFiles(SIMPLE_XSD);
 
-  // Tree view shows Person (from the fixture).
+  // Default tab is Diagram — the React Flow surface should appear immediately.
+  await expect(page.locator(".react-flow")).toBeVisible();
+  await expect(
+    page.locator(".react-flow__node-element").filter({ hasText: "Person" }).first(),
+  ).toBeVisible();
+
+  // Switch to the Tree tab — sidebar appears with the element list.
+  await page.getByRole("button", { name: "Tree" }).click();
   const person = page.getByRole("treeitem").filter({ hasText: "Person" }).first();
   await expect(person).toBeVisible();
   await person.click();
 
-  // Detail panel shows Element info with the referenced type.
   await expect(page.getByRole("heading", { name: "Element" })).toBeVisible();
   await expect(page.getByText("tns:PersonType").first()).toBeVisible();
 
-  // Diagram tab renders.
-  await page.getByRole("button", { name: "Diagram" }).click();
-  await expect(page.locator(".react-flow")).toBeVisible();
-
-  // Text tab renders with the XSD source.
+  // Text tab renders the XSD source with syntax highlighting.
   await page.getByRole("button", { name: "Text" }).click();
   await expect(page.locator(".cm-content")).toContainText("PersonType");
 });

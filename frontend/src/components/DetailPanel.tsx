@@ -16,6 +16,7 @@ export function DetailPanel() {
   const indexById = useSelection((s) => s.indexById);
   const usagesByTarget = useSelection((s) => s.usagesByTarget);
   const setSelected = useSelection((s) => s.setSelected);
+  const setActiveTab = useSelection((s) => s.setActiveTab);
 
   const entry = selectedId ? indexById.get(selectedId) : undefined;
 
@@ -38,11 +39,15 @@ export function DetailPanel() {
         }
       }
     }
-    // Also search by bare label in any qname (covers prefix variance).
+    // Catch prefix-variant references (tns:Foo, ex:Foo, bare Foo) by
+    // matching the local name against every stored reference target.
     const label = entry.label;
     if (label) {
       for (const [target, list] of usagesByTarget.entries()) {
-        if (target.endsWith(":" + label) || target.endsWith("}" + label)) {
+        const matchesPrefixed = target.endsWith(":" + label);
+        const matchesExpanded = target.endsWith("}" + label);
+        const matchesBare = target === label;
+        if (matchesPrefixed || matchesExpanded || matchesBare) {
           for (const hit of list) {
             if (!seen.has(hit.id)) {
               seen.add(hit.id);
@@ -77,9 +82,19 @@ export function DetailPanel() {
           </p>
         )}
         {entry.source_ref && (
-          <p className="text-xs text-slate-400 mt-1">
-            Source: file <code>{entry.source_ref.file_id}</code>, line {entry.source_ref.line}
-          </p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-xs text-slate-400">
+              Source: file <code>{entry.source_ref.file_id}</code>, line{" "}
+              {entry.source_ref.line}
+            </p>
+            <button
+              type="button"
+              className="text-xs text-accent hover:underline"
+              onClick={() => setActiveTab("text")}
+            >
+              View in source →
+            </button>
+          </div>
         )}
       </div>
 

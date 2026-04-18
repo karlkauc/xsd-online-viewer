@@ -81,7 +81,10 @@ export function ElementNode({ data }: { data: ElementNodeData }) {
           {data.expanded ? "click to collapse" : "click to expand"}
         </div>
       )}
-      <Handle type="source" position={Position.Right} />
+      {/* The right-side source handle only appears when the node has
+          something to connect to — so leaves are visually distinct from
+          expandable nodes. */}
+      {data.expandable && <Handle type="source" position={Position.Right} />}
     </div>
   );
 }
