@@ -99,9 +99,9 @@ class SimpleType(BaseModel):
     derivation: SimpleTypeDerivation
     base: QName | None = None
     item_type: QName | None = None
-    item_inline: "SimpleType | None" = None
+    item_inline: SimpleType | None = None
     member_types: list[QName] = Field(default_factory=list)
-    member_inline: list["SimpleType"] = Field(default_factory=list)
+    member_inline: list[SimpleType] = Field(default_factory=list)
     facets: list[Facet] = Field(default_factory=list)
     annotation: Annotation | None = None
     source_ref: SourceRef | None = None
@@ -162,10 +162,10 @@ class Particle(BaseModel):
     kind: ParticleKind
     min_occurs: int = 1
     max_occurs: int | Literal["unbounded"] = 1
-    element: "ElementDecl | None" = None
+    element: ElementDecl | None = None
     group_ref: QName | None = None
-    group_inline: "Group | None" = None
-    children: list["Particle"] = Field(default_factory=list)
+    group_inline: Group | None = None
+    children: list[Particle] = Field(default_factory=list)
     wildcard_namespace: str | None = None
     wildcard_process_contents: Literal["strict", "lax", "skip"] | None = None
     annotation: Annotation | None = None
@@ -178,7 +178,7 @@ class ElementDecl(BaseModel):
     ref: QName | None = None
     type_name: QName | None = None
     type_inline_simple: SimpleType | None = None
-    type_inline_complex: "ComplexType | None" = None
+    type_inline_complex: ComplexType | None = None
     min_occurs: int = 1
     max_occurs: int | Literal["unbounded"] = 1
     default: str | None = None

@@ -375,25 +375,20 @@ class XsdParser:
         self, elem: etree._Element, loaded: _LoadedFile, model: SchemaModel
     ) -> None:
         _, local = _namespace_and_local(elem.tag)
-        source_ref = SourceRef(file_id=loaded.file_id, line=elem.sourceline)
         if local == "element":
-            model.elements.append(
-                self._parse_element(elem, loaded, source_ref, is_global=True)
-            )
+            model.elements.append(self._parse_element(elem, loaded, is_global=True))
         elif local == "attribute":
             model.attributes.append(
-                self._parse_attribute(elem, loaded, source_ref, is_global=True)
+                self._parse_attribute(elem, loaded, is_global=True)
             )
         elif local == "simpleType":
-            model.simple_types.append(self._parse_simple_type(elem, loaded, source_ref))
+            model.simple_types.append(self._parse_simple_type(elem, loaded))
         elif local == "complexType":
-            model.complex_types.append(self._parse_complex_type(elem, loaded, source_ref))
+            model.complex_types.append(self._parse_complex_type(elem, loaded))
         elif local == "group":
-            model.groups.append(self._parse_group(elem, loaded, source_ref))
+            model.groups.append(self._parse_group(elem, loaded))
         elif local == "attributeGroup":
-            model.attribute_groups.append(
-                self._parse_attribute_group(elem, loaded, source_ref)
-            )
+            model.attribute_groups.append(self._parse_attribute_group(elem, loaded))
         # include/import/redefine/override/annotation/notation — skip here:
         # references were followed in _follow_references; top-level annotation
         # is attached to the schema node but we omit it from the model for now.
@@ -404,7 +399,6 @@ class XsdParser:
         self,
         elem: etree._Element,
         loaded: _LoadedFile,
-        source_ref: SourceRef,
         *,
         is_global: bool,
     ) -> ElementDecl:
@@ -420,9 +414,9 @@ class XsdParser:
                 continue
             _, local = _namespace_and_local(child.tag)
             if local == "simpleType":
-                type_inline_simple = self._parse_simple_type(child, loaded, source_ref)
+                type_inline_simple = self._parse_simple_type(child, loaded)
             elif local == "complexType":
-                type_inline_complex = self._parse_complex_type(child, loaded, source_ref)
+                type_inline_complex = self._parse_complex_type(child, loaded)
 
         qname = self._compose_qname(loaded, name) if name and is_global else None
         identifier = self._make_id("element", qname or ref or f"anon-{self.state.next_anon()}")
@@ -446,14 +440,13 @@ class XsdParser:
             target_namespace=loaded.target_ns if is_global else None,
             is_global=is_global,
             annotation=annotation,
-            source_ref=source_ref,
+            source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
         )
 
     def _parse_attribute(
         self,
         elem: etree._Element,
         loaded: _LoadedFile,
-        source_ref: SourceRef,
         *,
         is_global: bool,
     ) -> AttributeDecl:
@@ -468,7 +461,7 @@ class XsdParser:
                 continue
             _, local = _namespace_and_local(child.tag)
             if local == "simpleType":
-                type_inline = self._parse_simple_type(child, loaded, source_ref)
+                type_inline = self._parse_simple_type(child, loaded)
 
         qname = self._compose_qname(loaded, name) if name and is_global else None
         identifier = self._make_id(
@@ -493,11 +486,11 @@ class XsdParser:
             target_namespace=loaded.target_ns if is_global else None,
             is_global=is_global,
             annotation=annotation,
-            source_ref=source_ref,
+            source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
         )
 
     def _parse_simple_type(
-        self, elem: etree._Element, loaded: _LoadedFile, source_ref: SourceRef
+        self, elem: etree._Element, loaded: _LoadedFile
     ) -> SimpleType:
         name = elem.get("name")
         anonymous = name is None
@@ -522,20 +515,20 @@ class XsdParser:
             base = restriction.get("base")
             inline_base = restriction.find(_xsd("simpleType"))
             if inline_base is not None and base is None:
-                member_inline.append(self._parse_simple_type(inline_base, loaded, source_ref))
+                member_inline.append(self._parse_simple_type(inline_base, loaded))
             facets = self._parse_facets(restriction)
         elif list_elem is not None:
             derivation = "list"
             item_type = list_elem.get("itemType")
             inline_item = list_elem.find(_xsd("simpleType"))
             if inline_item is not None:
-                item_inline = self._parse_simple_type(inline_item, loaded, source_ref)
+                item_inline = self._parse_simple_type(inline_item, loaded)
         elif union is not None:
             derivation = "union"
             member_types_attr = union.get("memberTypes") or ""
             member_types = [t for t in member_types_attr.split() if t]
             for child in union.findall(_xsd("simpleType")):
-                member_inline.append(self._parse_simple_type(child, loaded, source_ref))
+                member_inline.append(self._parse_simple_type(child, loaded))
 
         return SimpleType(
             id=identifier,
@@ -549,11 +542,11 @@ class XsdParser:
             member_types=member_types,
             member_inline=member_inline,
             annotation=annotation,
-            source_ref=source_ref,
+            source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
         )
 
     def _parse_complex_type(
-        self, elem: etree._Element, loaded: _LoadedFile, source_ref: SourceRef
+        self, elem: etree._Element, loaded: _LoadedFile
     ) -> ComplexType:
         name = elem.get("name")
         anonymous = name is None
@@ -591,7 +584,7 @@ class XsdParser:
                 simple_content_base = base
                 if restr is not None:
                     simple_content_facets = self._parse_facets(restr)
-                attrs, groups = self._parse_attribute_children(inner, loaded, source_ref)
+                attrs, groups = self._parse_attribute_children(inner, loaded)
                 attributes.extend(attrs)
                 attribute_group_refs.extend(groups)
         elif complex_content is not None:
@@ -602,15 +595,15 @@ class XsdParser:
             if inner is not None:
                 derivation = "restriction" if restr is not None else "extension"
                 base = inner.get("base")
-                particle = self._parse_content_model(inner, loaded, source_ref)
-                attrs, groups = self._parse_attribute_children(inner, loaded, source_ref)
+                particle = self._parse_content_model(inner, loaded)
+                attrs, groups = self._parse_attribute_children(inner, loaded)
                 attributes.extend(attrs)
                 attribute_group_refs.extend(groups)
         else:
-            particle = self._parse_content_model(elem, loaded, source_ref)
+            particle = self._parse_content_model(elem, loaded)
             if particle is not None:
                 content_kind = "mixed" if mixed else "complex"
-            attrs, groups = self._parse_attribute_children(elem, loaded, source_ref)
+            attrs, groups = self._parse_attribute_children(elem, loaded)
             attributes.extend(attrs)
             attribute_group_refs.extend(groups)
 
@@ -629,11 +622,11 @@ class XsdParser:
             simple_content_base=simple_content_base,
             simple_content_facets=simple_content_facets,
             annotation=annotation,
-            source_ref=source_ref,
+            source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
         )
 
     def _parse_group(
-        self, elem: etree._Element, loaded: _LoadedFile, source_ref: SourceRef
+        self, elem: etree._Element, loaded: _LoadedFile
     ) -> Group:
         name = elem.get("name")
         ref = elem.get("ref")
@@ -644,18 +637,18 @@ class XsdParser:
             else ref or f"anon-group-{self.state.next_anon()}"
         )
         identifier = self._make_id("group", qname)
-        particle = self._parse_content_model(elem, loaded, source_ref)
+        particle = self._parse_content_model(elem, loaded)
         return Group(
             id=identifier,
             name=name,
             ref=ref,
             particle=particle,
             annotation=annotation,
-            source_ref=source_ref,
+            source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
         )
 
     def _parse_attribute_group(
-        self, elem: etree._Element, loaded: _LoadedFile, source_ref: SourceRef
+        self, elem: etree._Element, loaded: _LoadedFile
     ) -> AttributeGroup:
         name = elem.get("name")
         ref = elem.get("ref")
@@ -666,7 +659,7 @@ class XsdParser:
             else ref or f"anon-ag-{self.state.next_anon()}"
         )
         identifier = self._make_id("attributeGroup", qname)
-        attributes, group_refs = self._parse_attribute_children(elem, loaded, source_ref)
+        attributes, group_refs = self._parse_attribute_children(elem, loaded)
         return AttributeGroup(
             id=identifier,
             name=name,
@@ -674,27 +667,27 @@ class XsdParser:
             attributes=attributes,
             attribute_group_refs=group_refs,
             annotation=annotation,
-            source_ref=source_ref,
+            source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
         )
 
     # ---- content model helpers ----------------------------------------
 
     def _parse_content_model(
-        self, parent: etree._Element, loaded: _LoadedFile, source_ref: SourceRef
+        self, parent: etree._Element, loaded: _LoadedFile
     ) -> Particle | None:
         for child in parent:
             if not isinstance(child.tag, str):
                 continue
             _, local = _namespace_and_local(child.tag)
             if local in ("sequence", "choice", "all"):
-                return self._parse_compositor(child, loaded, source_ref)
+                return self._parse_compositor(child, loaded)
             if local == "group":
                 # group as particle inside a complexType/group body
-                return self._parse_group_ref_particle(child, loaded, source_ref)
+                return self._parse_group_ref_particle(child, loaded)
         return None
 
     def _parse_compositor(
-        self, elem: etree._Element, loaded: _LoadedFile, source_ref: SourceRef
+        self, elem: etree._Element, loaded: _LoadedFile
     ) -> Particle:
         _, local = _namespace_and_local(elem.tag)
         kind = local  # sequence | choice | all
@@ -713,14 +706,14 @@ class XsdParser:
                     kind="element",
                     min_occurs=_occurs(child.get("minOccurs"), 1),  # type: ignore[arg-type]
                     max_occurs=_occurs(child.get("maxOccurs"), 1),
-                    element=self._parse_element(child, loaded, source_ref, is_global=False),
+                    element=self._parse_element(child, loaded, is_global=False),
                 )
                 particle.children.append(inner)
             elif child_local in ("sequence", "choice", "all"):
-                particle.children.append(self._parse_compositor(child, loaded, source_ref))
+                particle.children.append(self._parse_compositor(child, loaded))
             elif child_local == "group":
                 particle.children.append(
-                    self._parse_group_ref_particle(child, loaded, source_ref)
+                    self._parse_group_ref_particle(child, loaded)
                 )
             elif child_local == "any":
                 particle.children.append(
@@ -736,7 +729,7 @@ class XsdParser:
         return particle
 
     def _parse_group_ref_particle(
-        self, elem: etree._Element, loaded: _LoadedFile, source_ref: SourceRef
+        self, elem: etree._Element, loaded: _LoadedFile
     ) -> Particle:
         ref = elem.get("ref")
         return Particle(
@@ -747,13 +740,13 @@ class XsdParser:
             group_inline=(
                 None
                 if ref is not None
-                else self._parse_group(elem, loaded, source_ref)
+                else self._parse_group(elem, loaded)
             ),
             annotation=self._collect_annotation(elem),
         )
 
     def _parse_attribute_children(
-        self, parent: etree._Element, loaded: _LoadedFile, source_ref: SourceRef
+        self, parent: etree._Element, loaded: _LoadedFile
     ) -> tuple[list[AttributeDecl], list[str]]:
         attributes: list[AttributeDecl] = []
         group_refs: list[str] = []
@@ -763,7 +756,7 @@ class XsdParser:
             _, local = _namespace_and_local(child.tag)
             if local == "attribute":
                 attributes.append(
-                    self._parse_attribute(child, loaded, source_ref, is_global=False)
+                    self._parse_attribute(child, loaded, is_global=False)
                 )
             elif local == "attributeGroup":
                 ref = child.get("ref")

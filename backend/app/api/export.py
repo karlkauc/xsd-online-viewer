@@ -97,16 +97,23 @@ def _render_html(model: SchemaModel) -> str:
         ".source{color:#888;font-size:.8rem}"
         "</style></head><body>"
     )
-    parts.append(f"<h1>XSD Schema Documentation</h1>")
+    parts.append("<h1>XSD Schema Documentation</h1>")
     if model.target_namespace:
-        parts.append(f"<p><strong>Target namespace:</strong> <code>{html.escape(model.target_namespace)}</code></p>")
+        tns = html.escape(model.target_namespace)
+        parts.append(f"<p><strong>Target namespace:</strong> <code>{tns}</code></p>")
 
     if model.files:
         parts.append("<h2>Files</h2><ul>")
         for source in model.files:
+            filename = html.escape(source.filename)
+            tns_suffix = (
+                f" (targetNamespace={html.escape(source.target_namespace)})"
+                if source.target_namespace
+                else ""
+            )
             parts.append(
-                f"<li><code>{html.escape(source.filename)}</code> — {source.relationship}"
-                f"{' (targetNamespace=' + html.escape(source.target_namespace) + ')' if source.target_namespace else ''}</li>"
+                f"<li><code>{filename}</code> — {source.relationship}"
+                f"{tns_suffix}</li>"
             )
         parts.append("</ul>")
 
@@ -128,7 +135,10 @@ def _render_html(model: SchemaModel) -> str:
     if model.diagnostics:
         parts.append("<h2>Diagnostics</h2><ul>")
         for diagnostic in model.diagnostics:
-            parts.append(f"<li><strong>{diagnostic.severity}</strong>: {html.escape(diagnostic.message)}</li>")
+            message = html.escape(diagnostic.message)
+            parts.append(
+                f"<li><strong>{diagnostic.severity}</strong>: {message}</li>"
+            )
         parts.append("</ul>")
 
     parts.append("</body></html>")

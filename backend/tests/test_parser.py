@@ -54,7 +54,9 @@ class TestSimpleSchema:
         ]
         assert child_names == ["FirstName", "LastName", "Age", "Email"]
         email = next(
-            child for child in person_type.particle.children if child.element and child.element.name == "Email"
+            child
+            for child in person_type.particle.children
+            if child.element and child.element.name == "Email"
         )
         assert email.max_occurs == "unbounded"
         assert email.min_occurs == 0
@@ -74,6 +76,41 @@ class TestSimpleSchema:
             assert element.source_ref is not None
             assert element.source_ref.line is not None
             assert element.source_ref.line > 0
+
+    def test_nested_elements_have_own_source_ref_lines(
+        self, simple_xsd_bytes: bytes
+    ) -> None:
+        # simple.xsd layout (see fixtures/simple.xsd):
+        #   9: <xs:complexType name="PersonType">
+        #  11: <xs:element name="FirstName" ...
+        #  12: <xs:element name="LastName" ...
+        #  13: <xs:element name="Age" ...
+        #  14: <xs:element name="Email" ...
+        # Each nested element must carry its OWN source line, not the
+        # enclosing complexType's line.
+        model = parse_single(simple_xsd_bytes, "simple.xsd")
+        person_type = _find_complex(model, "PersonType")
+        by_name = {
+            child.element.name: child.element
+            for child in person_type.particle.children
+            if child.element is not None
+        }
+        assert by_name["FirstName"].source_ref.line == 11
+        assert by_name["LastName"].source_ref.line == 12
+        assert by_name["Age"].source_ref.line == 13
+        assert by_name["Email"].source_ref.line == 14
+
+    def test_nested_attributes_have_own_source_ref_lines(
+        self, simple_xsd_bytes: bytes
+    ) -> None:
+        # simple.xsd:
+        #  16: <xs:attribute name="id" ...
+        #  17: <xs:attribute name="country" ...
+        model = parse_single(simple_xsd_bytes, "simple.xsd")
+        person_type = _find_complex(model, "PersonType")
+        by_name = {attr.name: attr for attr in person_type.attributes}
+        assert by_name["id"].source_ref.line == 16
+        assert by_name["country"].source_ref.line == 17
 
 
 class TestAnnotations:
