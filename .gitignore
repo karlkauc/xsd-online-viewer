@@ -20,6 +20,10 @@ frontend/dist/
 .vite/
 *.tsbuildinfo
 
+# Compiled TS output shadowing the .ts/.tsx sources (tsc -b sometimes emits these)
+frontend/src/**/*.js
+frontend/tests/**/*.js
+
 # Playwright
 playwright-report/
 test-results/
@@ -39,7 +43,13 @@ coverage/
 
 # OS
 .DS_Store
+._*
 Thumbs.db
+.DAV/
+
+# Local XSD samples (not part of the repo)
+/FundsXML4.xsd
+/xmldsig-core-schema.xsd
 
 # Local config
 .env
