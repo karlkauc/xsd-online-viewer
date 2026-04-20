@@ -17,10 +17,8 @@ import type { Edge, Node } from "@xyflow/react";
 import type {
   ComplexType,
   ElementDecl,
-  Facet,
   Particle,
   SchemaModel,
-  SimpleType,
 } from "../../types/schema";
 
 export const NODE_WIDTH = 220;
@@ -37,7 +35,6 @@ const DOC_LINE_H = 16;
 const SECTION_PAD = 4;
 const EXPAND_HINT_H = 14;
 const MAX_INLINE_ATTRS = 4;
-const MAX_INLINE_FACETS = 4;
 const MAX_DOC_LINES = 2;
 
 const X_GAP = 60;
@@ -58,7 +55,6 @@ interface BuildContext {
   edges: Edge[];
   idCounter: number;
   typeIndex: Map<string, ComplexType>;
-  simpleIndex: Map<string, SimpleType>;
 }
 
 function nextId(context: BuildContext): string {
@@ -78,18 +74,6 @@ function buildTypeIndex(model: SchemaModel): Map<string, ComplexType> {
   return index;
 }
 
-function buildSimpleIndex(model: SchemaModel): Map<string, SimpleType> {
-  const index = new Map<string, SimpleType>();
-  for (const simple of model.simple_types) {
-    if (!simple.name) continue;
-    index.set(simple.name, simple);
-    if (model.target_namespace) {
-      index.set(`{${model.target_namespace}}${simple.name}`, simple);
-    }
-  }
-  return index;
-}
-
 function resolveComplex(
   typeRef: string | null | undefined,
   context: BuildContext,
@@ -99,31 +83,6 @@ function resolveComplex(
   if (direct) return direct;
   const local = typeRef.includes(":") ? typeRef.split(":").pop()! : typeRef;
   return context.typeIndex.get(local);
-}
-
-function resolveSimple(
-  typeRef: string | null | undefined,
-  context: BuildContext,
-): SimpleType | undefined {
-  if (!typeRef) return undefined;
-  const direct = context.simpleIndex.get(typeRef);
-  if (direct) return direct;
-  const local = typeRef.includes(":") ? typeRef.split(":").pop()! : typeRef;
-  return context.simpleIndex.get(local);
-}
-
-// Walks an element's type reference and returns the facets that constrain
-// the element's value. Preference order: inline simpleType → named
-// simpleType → complexType.simple_content_facets.
-function collectFacets(element: ElementDecl, context: BuildContext): Facet[] {
-  if (element.type_inline_simple?.facets?.length) {
-    return element.type_inline_simple.facets;
-  }
-  const simple = resolveSimple(element.type_name, context);
-  if (simple?.facets?.length) return simple.facets;
-  const complex = resolveComplex(element.type_name, context);
-  if (complex?.simple_content_facets?.length) return complex.simple_content_facets;
-  return [];
 }
 
 function collectDocumentation(element: ElementDecl): string | null {
@@ -146,13 +105,6 @@ interface ElementDisplay {
   height: number;
 }
 
-function isEnumerationCollapsable(facets: Facet[]): boolean {
-  if (facets.length === 0) return false;
-  if (!facets.every((f) => f.kind === "enumeration")) return false;
-  const totalChars = facets.reduce((s, f) => s + f.value.length, 0) + facets.length * 3;
-  return totalChars <= 30;
-}
-
 function truncateDocLines(doc: string | null): string[] {
   if (!doc) return [];
   const lines = doc.split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -165,24 +117,17 @@ function computeElementDisplay(
   context: BuildContext,
 ): ElementDisplay {
   const attrs = element.type_inline_complex?.attributes ?? [];
-  const facets = collectFacets(element, context);
   const docFull = collectDocumentation(element);
   const docLines = truncateDocLines(docFull);
   const expandable =
     element.type_inline_complex != null || resolveComplex(element.type_name, context) != null;
-  const enumCollapsed = isEnumerationCollapsable(facets);
 
   // Row counts that actually render in ElementNode.tsx.
   const attrRows =
     Math.min(attrs.length, MAX_INLINE_ATTRS) + (attrs.length > MAX_INLINE_ATTRS ? 1 : 0);
-  const facetRows = enumCollapsed
-    ? 1
-    : Math.min(facets.length, MAX_INLINE_FACETS) +
-      (facets.length > MAX_INLINE_FACETS ? 1 : 0);
 
   let height = HEADER_H + TYPE_H;
   if (attrRows) height += SECTION_PAD + attrRows * ROW_H;
-  if (facetRows) height += SECTION_PAD + facetRows * ROW_H;
   if (docLines.length) height += SECTION_PAD + docLines.length * DOC_LINE_H;
   if (expandable) height += EXPAND_HINT_H;
   // Ensure the expanded-case header/title always has room.
@@ -198,8 +143,6 @@ function computeElementDisplay(
     expanded: context.expandedIds.has(element.id),
     selected: context.selectedId === element.id,
     attributes: attrs,
-    facets,
-    enumerationCollapsed: enumCollapsed,
     documentationLines: docLines,
     documentationFull: docFull,
   };
@@ -432,7 +375,6 @@ export function buildDiagramGraph(
     edges: [],
     idCounter: 0,
     typeIndex: buildTypeIndex(model),
-    simpleIndex: buildSimpleIndex(model),
   };
 
   let nextTopY = 0;

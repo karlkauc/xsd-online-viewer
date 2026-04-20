@@ -1,10 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { xml } from "@codemirror/lang-xml";
-import { EditorView } from "@codemirror/view";
+import { StateEffect, StateField } from "@codemirror/state";
+import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useSelection } from "../../stores/selectionStore";
 
 const isDark = () => document.documentElement.classList.contains("dark");
+
+// StateEffect/StateField driving a single full-line highlight for the
+// currently-targeted source location. Dispatching `setHighlightedLine.of(n)`
+// highlights line n; `of(null)` clears it.
+const setHighlightedLine = StateEffect.define<number | null>();
+
+const highlightedLineField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (e.is(setHighlightedLine)) {
+        if (e.value == null) return Decoration.none;
+        const clamped = Math.max(1, Math.min(e.value, tr.state.doc.lines));
+        const line = tr.state.doc.line(clamped);
+        return Decoration.set([
+          Decoration.line({ class: "cm-src-highlight" }).range(line.from),
+        ]);
+      }
+    }
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+const extensions = [xml(), EditorView.lineWrapping, highlightedLineField];
 
 export function TextView() {
   const model = useSelection((s) => s.model);
@@ -13,6 +40,7 @@ export function TextView() {
   const indexById = useSelection((s) => s.indexById);
 
   const viewRef = useRef<EditorView | null>(null);
+  const [viewReady, setViewReady] = useState(false);
   const [activeFileId, setActiveFileId] = useState<string | null>(
     () => model?.files[0]?.id ?? null,
   );
@@ -39,23 +67,35 @@ export function TextView() {
     return entry.source_ref.line ?? null;
   }, [selectedId, indexById, activeFile]);
 
-  const scrollToLine = useCallback((view: EditorView, line: number) => {
-    const clamped = Math.max(1, Math.min(line, view.state.doc.lines));
-    const docLine = view.state.doc.line(clamped);
-    view.dispatch({
-      selection: { anchor: docLine.from },
-      effects: EditorView.scrollIntoView(docLine.from, { y: "start" }),
-    });
+  const attachView = useCallback((view: EditorView | null) => {
+    viewRef.current = view;
+    setViewReady(view != null);
   }, []);
 
-  // Re-scroll whenever the target line changes — covers the case where the
-  // user switches tab, changes selection via the search palette, or clicks a
-  // Find Usages link while the Text tab is already visible.
+  // Scroll to and highlight the target line. Deferred one animation frame so
+  // that on fresh mount (user clicked "View in source" from another tab)
+  // CodeMirror has finished its first measure cycle before we dispatch
+  // scrollIntoView — otherwise it silently no-ops at the top.
   useEffect(() => {
+    if (!viewReady) return;
     const view = viewRef.current;
-    if (!view || targetLine == null) return;
-    scrollToLine(view, targetLine);
-  }, [targetLine, scrollToLine]);
+    if (!view) return;
+    const id = requestAnimationFrame(() => {
+      if (targetLine == null) {
+        view.dispatch({ effects: setHighlightedLine.of(null) });
+        return;
+      }
+      const clamped = Math.max(1, Math.min(targetLine, view.state.doc.lines));
+      const docLine = view.state.doc.line(clamped);
+      view.dispatch({
+        effects: [
+          setHighlightedLine.of(clamped),
+          EditorView.scrollIntoView(docLine.from, { y: "start", yMargin: 40 }),
+        ],
+      });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [targetLine, activeFile?.id, viewReady]);
 
   if (!model || !activeFile) return null;
 
@@ -90,14 +130,11 @@ export function TextView() {
       <div className="flex-1 min-h-0">
         <CodeMirror
           value={activeFile.content ?? ""}
-          extensions={[xml(), EditorView.lineWrapping]}
+          extensions={extensions}
           editable={false}
           theme={isDark() ? "dark" : "light"}
           height="100%"
-          onCreateEditor={(view) => {
-            viewRef.current = view;
-            if (targetLine != null) scrollToLine(view, targetLine);
-          }}
+          onCreateEditor={attachView}
         />
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Uploader } from "./components/Uploader";
 import { TreeView } from "./components/TreeView/TreeView";
 import { DetailPanel } from "./components/DetailPanel";
@@ -18,6 +18,53 @@ const TAB_LABELS: Record<ViewTab, string> = {
   text: "Text",
 };
 
+function EmptyOverview() {
+  const model = useSelection((s) => s.model);
+  const index = useSelection((s) => s.index);
+
+  const countByKind = {
+    element: index.filter((e) => e.kind === "element").length,
+    complexType: index.filter((e) => e.kind === "complexType").length,
+    simpleType: index.filter((e) => e.kind === "simpleType").length,
+    attribute: index.filter((e) => e.kind === "attribute").length,
+    group: index.filter((e) => e.kind === "group").length,
+    attributeGroup: index.filter((e) => e.kind === "attributeGroup").length,
+  };
+
+  return (
+    <div className="h-full overflow-auto p-8">
+      <div className="max-w-xl mx-auto">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">
+          Schema Overview
+        </h2>
+        {model?.target_namespace && (
+          <p className="font-mono text-xs text-slate-500 dark:text-slate-400 mb-6 break-all">
+            {model.target_namespace}
+          </p>
+        )}
+        <dl className="grid grid-cols-2 gap-3 text-sm">
+          {Object.entries(countByKind).map(([kind, n]) => (
+            <div
+              key={kind}
+              className="flex items-baseline justify-between border-b border-slate-200 dark:border-slate-800 pb-1"
+            >
+              <dt className="text-slate-600 dark:text-slate-300 font-mono">{kind}</dt>
+              <dd className="font-mono tabular-nums text-slate-900 dark:text-slate-100">{n}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="mt-8 text-xs text-slate-500 dark:text-slate-400">
+          Select a node in the structure panel, switch to the Diagram or Text tab, or press{" "}
+          <kbd className="font-mono px-1 py-px bg-slate-100 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
+            ⌘K
+          </kbd>{" "}
+          to search.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const model = useSelection((s) => s.model);
   const schemaId = useSelection((s) => s.schemaId);
@@ -25,10 +72,16 @@ export default function App() {
   const setActiveTab = useSelection((s) => s.setActiveTab);
   const selectedId = useSelection((s) => s.selectedId);
   const setSelected = useSelection((s) => s.setSelected);
-  const showSidebar = activeTab === "tree";
 
-  // Keyboard shortcut: Ctrl/Cmd-K opens the search palette. Handled via a
-  // custom event so multiple components can subscribe.
+  const [structureCollapsed, setStructureCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("xsdv:structureCollapsed") === "1";
+  });
+
+  useEffect(() => {
+    window.localStorage.setItem("xsdv:structureCollapsed", structureCollapsed ? "1" : "0");
+  }, [structureCollapsed]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -40,14 +93,12 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Deep-link: read selection from URL hash on load and when the schema changes.
   useEffect(() => {
     if (!model) return;
     const hashId = readHashSelection();
     if (hashId) setSelected(hashId);
   }, [model, setSelected]);
 
-  // Deep-link: write selection into URL hash.
   useEffect(() => {
     writeHashSelection(selectedId);
   }, [selectedId]);
@@ -93,48 +144,71 @@ export default function App() {
         </main>
       ) : (
         <main className="flex-1 flex flex-col min-h-0">
-          <div className="flex items-center gap-1 px-4 pt-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
-            {(Object.keys(TAB_LABELS) as ViewTab[]).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                className={
-                  "px-3 py-1.5 text-sm font-medium rounded-t-md border-b-2 " +
-                  (activeTab === tab
-                    ? "border-accent text-accent"
-                    : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200")
-                }
-                onClick={() => onSwitchTab(tab)}
-              >
-                {TAB_LABELS[tab]}
-              </button>
-            ))}
-            <div className="flex-1" />
-            <Breadcrumb />
+          <div className="flex items-center gap-3 px-4 pt-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
+            <button
+              type="button"
+              className="shrink-0 mb-1.5 inline-flex items-center justify-center w-7 h-7 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800"
+              onClick={() => setStructureCollapsed((v) => !v)}
+              title={structureCollapsed ? "Show structure" : "Hide structure"}
+              aria-label={structureCollapsed ? "Show structure panel" : "Hide structure panel"}
+              aria-pressed={!structureCollapsed}
+            >
+              <span aria-hidden="true" className="text-base leading-none">
+                {structureCollapsed ? "»" : "«"}
+              </span>
+            </button>
+            <div className="flex items-center gap-1 shrink-0">
+              {(Object.keys(TAB_LABELS) as ViewTab[]).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  className={
+                    "px-3 py-1.5 text-sm font-medium rounded-t-md border-b-2 " +
+                    (activeTab === tab
+                      ? "border-accent text-accent"
+                      : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200")
+                  }
+                  onClick={() => onSwitchTab(tab)}
+                >
+                  {TAB_LABELS[tab]}
+                </button>
+              ))}
+            </div>
+            <div className="min-w-0 flex-1">
+              <Breadcrumb />
+            </div>
           </div>
 
           <Diagnostics />
 
           <section
             className={
-              "flex-1 min-h-0 grid gap-0 " +
-              (showSidebar
-                ? "grid-cols-1 md:grid-cols-[minmax(280px,28%)_1fr]"
-                : "grid-cols-1")
+              "flex-1 min-h-0 grid gap-0 grid-cols-1 " +
+              (structureCollapsed
+                ? "md:grid-cols-[1fr_minmax(300px,26%)]"
+                : "md:grid-cols-[minmax(260px,22%)_1fr_minmax(300px,26%)]")
             }
           >
-            {showSidebar && (
+            {/* LEFT — collapsible structure sidebar */}
+            {!structureCollapsed && (
               <aside className="min-h-0 overflow-hidden border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
                 <TreeView />
               </aside>
             )}
+
+            {/* CENTER — active view; tree tab shows an overview placeholder */}
             <section className="min-h-0 overflow-hidden flex flex-col">
               <div className="flex-1 min-h-0">
-                {activeTab === "tree" && <DetailPanel />}
+                {activeTab === "tree" && <EmptyOverview />}
                 {activeTab === "diagram" && <DiagramView />}
                 {activeTab === "text" && <TextView />}
               </div>
             </section>
+
+            {/* RIGHT — always-visible details panel */}
+            <aside className="min-h-0 overflow-hidden border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
+              <DetailPanel />
+            </aside>
           </section>
         </main>
       )}

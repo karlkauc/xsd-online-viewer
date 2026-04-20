@@ -5,12 +5,9 @@ import {
   COMPOSITOR_HEIGHT,
 } from "../src/components/DiagramView/buildGraph";
 import { smallModel } from "./fixtures/smallModel";
-import type { Facet } from "../src/types/schema";
 
 const PERSON_ID = "element:{http://example.com/simple}Person";
 const ADDRESS_ID = "element:{http://example.com/simple}PersonType/Address";
-const AGE_ID = "element:{http://example.com/simple}PersonType/Age";
-const COLOR_ID = "element:{http://example.com/simple}PersonType/Color";
 
 function findBySchemaId(nodes: Node[], schemaId: string): Node | undefined {
   return nodes.find(
@@ -120,30 +117,6 @@ describe("buildDiagramGraph layout", () => {
 });
 
 describe("buildDiagramGraph node metadata", () => {
-  it("attaches facets from a referenced named simpleType", () => {
-    const { nodes } = buildDiagramGraph(smallModel, new Set([PERSON_ID]), null);
-    const age = findBySchemaId(nodes, AGE_ID);
-    expect(age).toBeDefined();
-    const facets = (age!.data as { facets?: Facet[] }).facets ?? [];
-    const kinds = facets.map((f) => f.kind).sort();
-    expect(kinds).toEqual(["maxInclusive", "minInclusive"]);
-    const byKind = Object.fromEntries(facets.map((f) => [f.kind, f.value]));
-    expect(byKind.minInclusive).toBe("0");
-    expect(byKind.maxInclusive).toBe("130");
-  });
-
-  it("collapses enumeration-only facets into a single rendered line", () => {
-    const { nodes } = buildDiagramGraph(smallModel, new Set([PERSON_ID]), null);
-    const color = findBySchemaId(nodes, COLOR_ID);
-    expect(color).toBeDefined();
-    const data = color!.data as {
-      facets?: Facet[];
-      enumerationCollapsed?: boolean;
-    };
-    expect(data.facets?.map((f) => f.value)).toEqual(["red", "green", "blue"]);
-    expect(data.enumerationCollapsed).toBe(true);
-  });
-
   it("attaches the first documentation fragment to the element data", () => {
     const { nodes } = buildDiagramGraph(smallModel, new Set(), null);
     const person = findBySchemaId(nodes, PERSON_ID);
@@ -156,13 +129,13 @@ describe("buildDiagramGraph node metadata", () => {
     expect(data.documentationLines).toEqual(["Represents a person."]);
   });
 
-  it("grows node height when facets or documentation are present", () => {
+  it("grows node height when documentation is present", () => {
     const { nodes } = buildDiagramGraph(smallModel, new Set([PERSON_ID]), null);
     const firstName = nodes.find(
       (n) => n.type === "element" && (n.data as { label: string }).label === "FirstName",
     )!;
-    const age = findBySchemaId(nodes, AGE_ID)!;
-    // Age carries two facet rows; FirstName carries none. Age must be taller.
-    expect(nodeHeight(age)).toBeGreaterThan(nodeHeight(firstName));
+    const person = findBySchemaId(nodes, PERSON_ID)!;
+    // Person carries a documentation line; FirstName has none. Person must be taller.
+    expect(nodeHeight(person)).toBeGreaterThan(nodeHeight(firstName));
   });
 });

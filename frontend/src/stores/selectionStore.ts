@@ -15,6 +15,7 @@ interface SelectionState {
   index: NodeIndexEntry[];
   indexById: Map<string, NodeIndexEntry>;
   usagesByTarget: Map<string, NodeIndexEntry[]>;
+  parentById: Map<string, string>;
 
   activeTab: ViewTab;
   selectedId: string | null;
@@ -48,6 +49,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
   index: [],
   indexById: new Map(),
   usagesByTarget: new Map(),
+  parentById: new Map(),
 
   activeTab: "diagram",
   selectedId: null,
@@ -56,13 +58,14 @@ export const useSelection = create<SelectionState>((set, get) => ({
   searchQuery: "",
 
   setSchema: (schemaId, model) => {
-    const { index, indexById, usagesByTarget } = buildIndex(model);
+    const { index, indexById, usagesByTarget, parentById } = buildIndex(model);
     set({
       schemaId,
       model,
       index,
       indexById,
       usagesByTarget,
+      parentById,
       selectedId: null,
       expandedIds: new Set(),
       searchQuery: "",
@@ -76,6 +79,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
       index: [],
       indexById: new Map(),
       usagesByTarget: new Map(),
+      parentById: new Map(),
       selectedId: null,
       expandedIds: new Set(),
     }),

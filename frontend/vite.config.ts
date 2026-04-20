@@ -4,6 +4,11 @@ import react from "@vitejs/plugin-react";
 
 const config: UserConfig & { test?: Record<string, unknown> } = {
   plugins: [react()],
+  resolve: {
+    // TS/TSX before JS so a stray compiled .js next to a .tsx source can't
+    // silently shadow the real source during dev or tests.
+    extensions: [".mjs", ".ts", ".tsx", ".js", ".jsx", ".json"],
+  },
   server: {
     port: 5173,
     proxy: {

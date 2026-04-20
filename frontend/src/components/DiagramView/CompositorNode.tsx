@@ -1,11 +1,13 @@
 import { Handle, Position } from "@xyflow/react";
 
+type CompositorKind = "sequence" | "choice" | "all" | "any" | "group-ref";
+
 interface CompositorData {
-  kind: "sequence" | "choice" | "all" | "any" | "group-ref";
+  kind: CompositorKind;
   label: string;
 }
 
-const BG: Record<CompositorData["kind"], string> = {
+const BG: Record<CompositorKind, string> = {
   sequence: "bg-slate-200 dark:bg-slate-700",
   choice: "bg-amber-200 dark:bg-amber-800",
   all: "bg-emerald-200 dark:bg-emerald-800",
@@ -13,14 +15,104 @@ const BG: Record<CompositorData["kind"], string> = {
   "group-ref": "bg-pink-200 dark:bg-pink-800",
 };
 
+const TITLE: Record<CompositorKind, string> = {
+  sequence: "sequence — children appear in the given order",
+  choice: "choice — exactly one of the children is chosen",
+  all: "all — every child appears, order does not matter",
+  any: "any — wildcard element content",
+  "group-ref": "group reference",
+};
+
+function CompositorIcon({ kind }: { kind: CompositorKind }) {
+  // Icons are drawn in currentColor so they inherit the text color and work
+  // in both light and dark themes.
+  const common = {
+    width: 36,
+    height: 18,
+    fill: "none" as const,
+    stroke: "currentColor",
+    strokeWidth: 1.4,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+
+  switch (kind) {
+    case "sequence":
+      // Three boxes chained left-to-right with arrow heads — order matters.
+      return (
+        <svg {...common} viewBox="0 0 36 18" aria-hidden>
+          <rect x="0.7" y="4" width="8" height="10" rx="1.2" />
+          <path d="M8.7 9 H12.3" />
+          <path d="M10.8 7.3 L12.6 9 L10.8 10.7" />
+          <rect x="12.7" y="4" width="8" height="10" rx="1.2" />
+          <path d="M20.7 9 H24.3" />
+          <path d="M22.8 7.3 L24.6 9 L22.8 10.7" />
+          <rect x="24.7" y="4" width="8" height="10" rx="1.2" />
+        </svg>
+      );
+    case "choice":
+      // One node branches to three — pick one of the alternatives.
+      return (
+        <svg {...common} viewBox="0 0 36 18" aria-hidden>
+          <circle cx="4" cy="9" r="2.2" />
+          <path d="M6.2 9 L28.5 2.8" />
+          <path d="M6.2 9 L28.5 9" />
+          <path d="M6.2 9 L28.5 15.2" />
+          <circle cx="30.6" cy="2.8" r="2.2" />
+          <circle cx="30.6" cy="9" r="2.2" />
+          <circle cx="30.6" cy="15.2" r="2.2" />
+        </svg>
+      );
+    case "all":
+      // Unordered-list style: bullets with bars — all items, any order.
+      return (
+        <svg {...common} viewBox="0 0 36 18" aria-hidden>
+          <circle cx="3" cy="3" r="1.6" fill="currentColor" stroke="none" />
+          <path d="M7.5 3 H33" />
+          <circle cx="3" cy="9" r="1.6" fill="currentColor" stroke="none" />
+          <path d="M7.5 9 H33" />
+          <circle cx="3" cy="15" r="1.6" fill="currentColor" stroke="none" />
+          <path d="M7.5 15 H33" />
+        </svg>
+      );
+    case "any":
+      // Six-point asterisk — wildcard.
+      return (
+        <svg {...common} viewBox="0 0 36 18" aria-hidden>
+          <g transform="translate(18 9)">
+            <path d="M0 -7 V7" strokeWidth="1.8" />
+            <path d="M-6 -3.5 L6 3.5" strokeWidth="1.8" />
+            <path d="M-6 3.5 L6 -3.5" strokeWidth="1.8" />
+          </g>
+        </svg>
+      );
+    case "group-ref":
+      // Two interlocking rings joined by a bar — chain link, i.e. a reference
+      // to a named group.
+      return (
+        <svg {...common} viewBox="0 0 36 18" aria-hidden>
+          <rect x="3" y="3.5" width="12" height="11" rx="5.5" ry="5.5" />
+          <rect x="21" y="3.5" width="12" height="11" rx="5.5" ry="5.5" />
+          <path d="M13 9 H23" />
+        </svg>
+      );
+  }
+}
+
 export function CompositorNode({ data }: { data: CompositorData }) {
+  const { kind } = data;
+  const showLabel = kind === "group-ref" ? data.label : kind;
   return (
     <div
-      className={`rounded-md px-2 py-1 font-mono text-xs text-slate-900 dark:text-slate-100 ${BG[data.kind]}`}
-      style={{ width: 70, textAlign: "center" }}
+      className={`flex h-full w-full flex-col items-center justify-center gap-0.5 rounded-md px-1 py-1 text-slate-900 dark:text-slate-100 ${BG[kind]}`}
+      style={{ width: 70, height: 40 }}
+      title={TITLE[kind]}
     >
       <Handle type="target" position={Position.Left} />
-      {data.label}
+      <CompositorIcon kind={kind} />
+      <span className="truncate font-mono text-[9px] leading-none" style={{ maxWidth: 64 }}>
+        {showLabel}
+      </span>
       <Handle type="source" position={Position.Right} />
     </div>
   );

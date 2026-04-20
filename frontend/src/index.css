@@ -48,3 +48,14 @@
 .react-flow__node {
   font-family: var(--font-mono, ui-monospace, monospace);
 }
+
+/* CodeMirror: full-line highlight for the "View in source" target line.
+   Applied via a StateField in TextView.tsx. */
+.cm-src-highlight {
+  background-color: rgba(59, 130, 246, 0.14);
+  box-shadow: inset 3px 0 0 0 #3b82f6;
+}
+.dark .cm-src-highlight {
+  background-color: rgba(96, 165, 250, 0.18);
+  box-shadow: inset 3px 0 0 0 #60a5fa;
+}

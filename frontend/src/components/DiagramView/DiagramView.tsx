@@ -69,12 +69,23 @@ function DiagramInner() {
 
   const onExport = useCallback(
     async (format: "png" | "svg") => {
-      const node = wrapperRef.current?.querySelector<HTMLElement>(".react-flow");
-      if (!node) return;
-      if (format === "svg") exportFlowAsSvg(node, "schema-diagram.svg");
-      else await exportFlowAsPng(node, "schema-diagram.png");
+      const viewportEl =
+        wrapperRef.current?.querySelector<HTMLElement>(".react-flow__viewport");
+      if (!viewportEl) return;
+      const exportNodes = flow.getNodes();
+      try {
+        if (format === "svg") {
+          await exportFlowAsSvg(viewportEl, exportNodes, { filename: "schema-diagram.svg" });
+        } else {
+          await exportFlowAsPng(viewportEl, exportNodes, { filename: "schema-diagram.png" });
+        }
+      } catch (err) {
+        console.error(`Diagram ${format.toUpperCase()} export failed:`, err);
+        const msg = err instanceof Error ? err.message : String(err);
+        alert(`${format.toUpperCase()} export failed: ${msg}`);
+      }
     },
-    [],
+    [flow],
   );
 
   const onExpandAll = useCallback(() => {

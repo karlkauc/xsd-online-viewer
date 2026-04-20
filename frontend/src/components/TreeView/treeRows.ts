@@ -23,10 +23,12 @@ export interface TreeRow {
   typeHint?: string | null;
 }
 
-function formatOccurs(min: number, max: number | "unbounded"): string | null {
-  if (min === 1 && max === 1) return null;
+function formatOccurs(min: number, max: number | "unbounded"): string {
+  // Always render so every tree row carries an occurrence pill — exact (1),
+  // optional (0..1), repeatable (1..∞), bounded range (2..5).
   const maxStr = max === "unbounded" ? "∞" : String(max);
-  return `[${min}..${maxStr}]`;
+  if (min === max) return String(min);
+  return `${min}..${maxStr}`;
 }
 
 export function buildTreeRows(
