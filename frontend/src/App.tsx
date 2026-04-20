@@ -5,6 +5,7 @@ import { DetailPanel } from "./components/DetailPanel";
 import { SearchPalette } from "./components/SearchPalette";
 import { DiagramView } from "./components/DiagramView/DiagramView";
 import { TextView } from "./components/TextView/TextView";
+import { ContentModelView } from "./components/ContentModelView/ContentModelView";
 import { Breadcrumb } from "./components/Breadcrumb";
 import { Diagnostics } from "./components/Diagnostics";
 import { ThemeToggle } from "./components/ThemeToggle";
@@ -196,10 +197,11 @@ export default function App() {
               </aside>
             )}
 
-            {/* CENTER — active view; tree tab shows an overview placeholder */}
+            {/* CENTER — active view; Tree tab shows ContentModelView for the
+                selected node, or the Schema Overview when nothing is selected. */}
             <section className="min-h-0 overflow-hidden flex flex-col">
               <div className="flex-1 min-h-0">
-                {activeTab === "tree" && <EmptyOverview />}
+                {activeTab === "tree" && (selectedId ? <ContentModelView /> : <EmptyOverview />)}
                 {activeTab === "diagram" && <DiagramView />}
                 {activeTab === "text" && <TextView />}
               </div>
