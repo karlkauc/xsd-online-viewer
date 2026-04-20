@@ -1,8 +1,22 @@
 import { useCallback, useRef, useState } from "react";
-import { ApiError, loadSchemaFromUrl, uploadSchemaFile, uploadSchemaText } from "../api/client";
+import {
+  ApiError,
+  loadSchemaFromRelease,
+  loadSchemaFromUrl,
+  uploadSchemaFile,
+  uploadSchemaText,
+} from "../api/client";
 import { useSelection } from "../stores/selectionStore";
+import { FundsXmlReleases } from "./FundsXmlReleases";
 
-type Mode = "file" | "text" | "url";
+type Mode = "file" | "text" | "url" | "releases";
+
+const MODE_LABELS: Record<Mode, string> = {
+  file: "File / ZIP",
+  text: "Paste",
+  url: "URL",
+  releases: "FundsXML Releases",
+};
 
 export function Uploader() {
   const setSchema = useSelection((s) => s.setSchema);
@@ -44,18 +58,41 @@ export function Uploader() {
     }
   }, [text, setSchema]);
 
-  const handleUrl = useCallback(async () => {
-    setError(null);
-    setBusy(true);
-    try {
-      const response = await loadSchemaFromUrl(url.trim());
-      setSchema(response.schema_id, response.model);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [url, setSchema]);
+  const loadFromUrl = useCallback(
+    async (target: string) => {
+      setError(null);
+      setBusy(true);
+      try {
+        const response = await loadSchemaFromUrl(target);
+        setSchema(response.schema_id, response.model);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [setSchema],
+  );
+
+  const handleUrl = useCallback(() => {
+    void loadFromUrl(url.trim());
+  }, [url, loadFromUrl]);
+
+  const loadFromRelease = useCallback(
+    async (tagName: string, filename: string) => {
+      setError(null);
+      setBusy(true);
+      try {
+        const response = await loadSchemaFromRelease(tagName, filename);
+        setSchema(response.schema_id, response.model);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [setSchema],
+  );
 
   const onDrop = useCallback(
     (event: React.DragEvent) => {
@@ -75,8 +112,8 @@ export function Uploader() {
         paste schema source, or point to a URL.
       </p>
 
-      <div className="flex gap-1 mb-4" role="tablist">
-        {(["file", "text", "url"] as Mode[]).map((value) => (
+      <div className="flex flex-wrap gap-1 mb-4" role="tablist">
+        {(["file", "text", "url", "releases"] as Mode[]).map((value) => (
           <button
             key={value}
             type="button"
@@ -90,7 +127,7 @@ export function Uploader() {
             }
             onClick={() => setMode(value)}
           >
-            {value === "file" ? "File / ZIP" : value === "text" ? "Paste" : "URL"}
+            {MODE_LABELS[value]}
           </button>
         ))}
       </div>
@@ -177,11 +214,20 @@ export function Uploader() {
             type="button"
             className="btn btn-primary mt-3"
             disabled={busy || !url.trim()}
-            onClick={() => void handleUrl()}
+            onClick={handleUrl}
           >
             Load
           </button>
         </div>
+      )}
+
+      {mode === "releases" && (
+        <FundsXmlReleases
+          onSelect={(tagName, filename) =>
+            void loadFromRelease(tagName, filename)
+          }
+          busy={busy}
+        />
       )}
 
       {busy && <p className="mt-4 text-sm text-slate-500">Parsing…</p>}

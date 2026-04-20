@@ -57,7 +57,7 @@ async def _read_upload(upload: UploadFile) -> bytes:
     return b"".join(chunks)
 
 
-def _finalize(model: SchemaModel) -> SchemaResponse:
+def finalize_schema_response(model: SchemaModel) -> SchemaResponse:
     payload = model.model_dump_json().encode("utf-8")
     schema_id = hashlib.sha256(payload).hexdigest()[:32]
     model.schema_id = schema_id
@@ -106,7 +106,7 @@ async def upload_schema(
             )
     except (SecurityError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _finalize(model)
+    return finalize_schema_response(model)
 
 
 @router.post("/schema/url", response_model=SchemaResponse)
@@ -125,7 +125,7 @@ async def load_schema_from_url(payload: UrlPayload) -> SchemaResponse:
         )
     except (SecurityError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _finalize(model)
+    return finalize_schema_response(model)
 
 
 @router.post("/schema/text", response_model=SchemaResponse)
@@ -145,7 +145,7 @@ async def load_schema_from_text(payload: TextPayload) -> SchemaResponse:
         )
     except (SecurityError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _finalize(model)
+    return finalize_schema_response(model)
 
 
 @router.get("/schema/{schema_id}", response_model=SchemaResponse)

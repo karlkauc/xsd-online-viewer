@@ -876,6 +876,27 @@ def parse_zip(zip_bytes: bytes, main_filename: str | None = None) -> SchemaModel
     return parser.parse()
 
 
+def parse_files_map(files: dict[str, bytes], main_filename: str) -> SchemaModel:
+    """Parse a set of pre-fetched XSD files keyed by filename.
+
+    Used when a caller has already downloaded the main schema and every
+    sibling file it imports/includes (e.g. all XSD assets of a GitHub
+    release), so the usual ``urljoin`` resolution is skipped in favour of
+    filename-based ZIP-style resolution.
+    """
+    if main_filename not in files:
+        raise ValueError(f"{main_filename!r} not present")
+    resolver = ZipResolver(files=files)
+    parser = XsdParser(
+        XsdParseInput(
+            main_filename=main_filename,
+            main_content=files[main_filename],
+            resolver=resolver,
+        )
+    )
+    return parser.parse()
+
+
 def parse_url(url: str) -> SchemaModel:
     """Fetch the main XSD from a URL and resolve references via the same URL chain."""
     fetched = fetch_schema_url(url)

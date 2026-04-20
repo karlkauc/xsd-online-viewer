@@ -8,11 +8,12 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.api.export import router as export_router
+from app.api.releases import router as releases_router
 from app.api.schema import router as schema_router
 from app.config import settings
 from app.logging_setup import configure_logging, new_request_id, request_id_var
@@ -125,6 +126,7 @@ async def health() -> dict[str, str]:
 
 app.include_router(schema_router, prefix="/api")
 app.include_router(export_router, prefix="/api")
+app.include_router(releases_router, prefix="/api")
 
 # --- Static frontend ------------------------------------------------------
 # Serves the built React SPA. In dev, the Vite dev-server runs separately and
@@ -134,10 +136,21 @@ _static_path = Path(settings.static_dir)
 if _static_path.is_dir() and (_static_path / "index.html").is_file():
     app.mount("/assets", StaticFiles(directory=_static_path / "assets"), name="assets")
 
+    _static_root = _static_path.resolve()
+
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str) -> Response:
         if full_path.startswith("api/"):
             return JSONResponse(status_code=404, content={"error": "not_found"})
+        # Serve root-level static files (favicon.svg, robots.txt, …) directly
+        # instead of returning the SPA shell. Guarded against path traversal.
+        if full_path and full_path != "index.html":
+            candidate = (_static_path / full_path).resolve()
+            if (
+                _static_root in candidate.parents
+                and candidate.is_file()
+            ):
+                return FileResponse(candidate)
         index_file = _static_path / "index.html"
         csp = (
             "default-src 'self'; "

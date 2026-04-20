@@ -57,6 +57,58 @@ export async function loadSchemaFromUrl(url: string): Promise<SchemaResponse> {
   return handle(response);
 }
 
+export interface FundsXmlAsset {
+  filename: string;
+  download_url: string;
+  size: number;
+  content_type: string | null;
+}
+
+export interface FundsXmlRelease {
+  tag_name: string;
+  name: string | null;
+  published_at: string;
+  prerelease: boolean;
+  html_url: string;
+  assets: FundsXmlAsset[];
+}
+
+export interface FundsXmlReleasesResponse {
+  releases: FundsXmlRelease[];
+  cached_at: string;
+  ttl_seconds: number;
+}
+
+export async function loadSchemaFromRelease(
+  tagName: string,
+  mainFilename: string,
+): Promise<SchemaResponse> {
+  const response = await fetch(
+    `${API_BASE}/fundsxml/releases/${encodeURIComponent(tagName)}/load`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ main_filename: mainFilename }),
+    },
+  );
+  return handle(response);
+}
+
+export async function listFundsXmlReleases(): Promise<FundsXmlReleasesResponse> {
+  const response = await fetch(`${API_BASE}/fundsxml/releases`);
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // ignore parse errors
+    }
+    throw new ApiError(detail, response.status);
+  }
+  return (await response.json()) as FundsXmlReleasesResponse;
+}
+
 export function exportHtmlUrl(schemaId: string): string {
   return `${API_BASE}/schema/${schemaId}/export/html`;
 }
