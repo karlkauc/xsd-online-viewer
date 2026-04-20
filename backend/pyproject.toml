@@ -6,8 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "online-xsd-viewer"
 version = "0.1.0"
 description = "Read-only online XSD/XML schema viewer, self-hosted via Docker."
-readme = "../README.md"
-license = { file = "../LICENSE" }
 requires-python = ">=3.12"
 authors = [{ name = "Karl Kauc" }]
 
