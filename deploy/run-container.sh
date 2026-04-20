@@ -20,6 +20,7 @@ docker run -d \
   -p "127.0.0.1:${HOST_PORT}:8080" \
   -e LOG_LEVEL=INFO \
   -e MAX_UPLOAD_MB=50 \
+  -e ALLOWED_SCHEMA_HOSTS='^raw\.githubusercontent\.com$,^github\.com$,^release-assets\.githubusercontent\.com$,^objects\.githubusercontent\.com$' \
   "$IMAGE"
 
 echo "Started $NAME on 127.0.0.1:${HOST_PORT} from image $IMAGE"

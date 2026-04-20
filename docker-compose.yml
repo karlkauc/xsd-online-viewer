@@ -4,10 +4,9 @@ services:
     image: online-xsd-viewer:latest
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8090:8080"
     environment:
-      # Uncomment and adjust to allow URL-based XSD fetching.
-      # ALLOWED_SCHEMA_HOSTS: '^https://schemas\.example\.com/'
+      ALLOWED_SCHEMA_HOSTS: '^raw\.githubusercontent\.com$,^github\.com$,^release-assets\.githubusercontent\.com$,^objects\.githubusercontent\.com$'
       LOG_LEVEL: INFO
       MAX_UPLOAD_MB: "50"
     healthcheck:

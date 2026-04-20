@@ -20,6 +20,54 @@ from app.logging_setup import configure_logging, new_request_id, request_id_var
 configure_logging(settings.log_level)
 logger = logging.getLogger("app")
 
+
+class BufferRequestBodyMiddleware:
+    """Drain the entire request body before the app can respond.
+
+    Why: when the app returns an error mid-upload (e.g. multipart parsing
+    error or a ValueError from the XSD parser after reading the form),
+    uvicorn closes the upstream TCP connection without consuming the rest
+    of the body. A reverse proxy (Apache mod_proxy_http) that is still
+    streaming the body upstream then logs AH01097 ("pass request body
+    failed") and delivers 502 to the browser instead of the real 4xx.
+    Buffering the body in the ASGI layer makes the body always fully
+    received before any handler runs, so the proxy completes the transfer.
+    """
+
+    def __init__(self, app, buffered_methods: tuple[str, ...] = ("POST", "PUT", "PATCH")) -> None:
+        self.app = app
+        self.buffered_methods = buffered_methods
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or scope.get("method") not in self.buffered_methods:
+            await self.app(scope, receive, send)
+            return
+
+        chunks: list[bytes] = []
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] == "http.request":
+                body = message.get("body")
+                if body:
+                    chunks.append(body)
+                if not message.get("more_body", False):
+                    break
+
+        buffered = b"".join(chunks)
+        sent = False
+
+        async def replay():
+            nonlocal sent
+            if not sent:
+                sent = True
+                return {"type": "http.request", "body": buffered, "more_body": False}
+            return {"type": "http.disconnect"}
+
+        await self.app(scope, replay, send)
+
+
 app = FastAPI(
     title="Online XSD/XML Viewer",
     version=__version__,
@@ -27,6 +75,8 @@ app = FastAPI(
     redoc_url=None,
     openapi_url="/api/openapi.json",
 )
+
+app.add_middleware(BufferRequestBodyMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
