@@ -7,6 +7,7 @@ import { DiagramView } from "./components/DiagramView/DiagramView";
 import { TextView } from "./components/TextView/TextView";
 import { ContentModelView } from "./components/ContentModelView/ContentModelView";
 import { Breadcrumb } from "./components/Breadcrumb";
+import { XPathBar } from "./components/XPathBar";
 import { Diagnostics } from "./components/Diagnostics";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { useSelection, type ViewTab } from "./stores/selectionStore";
@@ -200,6 +201,7 @@ export default function App() {
             {/* CENTER — active view; Tree tab shows ContentModelView for the
                 selected node, or the Schema Overview when nothing is selected. */}
             <section className="min-h-0 overflow-hidden flex flex-col">
+              {activeTab === "tree" && <XPathBar />}
               <div className="flex-1 min-h-0">
                 {activeTab === "tree" && (selectedId ? <ContentModelView /> : <EmptyOverview />)}
                 {activeTab === "diagram" && <DiagramView />}
