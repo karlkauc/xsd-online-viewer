@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import {
   Background,
   Controls,
@@ -16,6 +23,7 @@ import { ElementNode } from "./ElementNode";
 import { CompositorNode } from "./CompositorNode";
 import { exportFlowAsPng, exportFlowAsSvg } from "./exportImage";
 import { collectExpandableElementIds } from "../../lib/expandAll";
+import { computeAnchoredViewport } from "./anchorViewport";
 
 const NODE_TYPES = {
   element: ElementNode as unknown as React.ComponentType<NodeProps>,
@@ -78,6 +86,13 @@ function DiagramInner() {
   const isDark = useIsDarkTheme();
   const minimapColors = isDark ? MINIMAP_DARK : MINIMAP_LIGHT;
 
+  // Remembers where the clicked node sat in world-space before a
+  // toggle-driven re-layout, so we can translate the viewport afterwards
+  // and keep the node visually fixed on screen.
+  const pendingAnchorRef = useRef<
+    { schemaId: string; worldX: number; worldY: number } | null
+  >(null);
+
   // Only re-fit when the schema changes. Re-fitting on every expand/collapse
   // jitters the viewport and loses the user's pan/zoom state.
   useEffect(() => {
@@ -89,12 +104,35 @@ function DiagramInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model?.schema_id]);
 
+  useLayoutEffect(() => {
+    const anchor = pendingAnchorRef.current;
+    if (!anchor) return;
+    pendingAnchorRef.current = null;
+    const newNode = nodes.find(
+      (n) => (n.data as { schemaId?: string } | undefined)?.schemaId === anchor.schemaId,
+    );
+    if (!newNode) return;
+    const next = computeAnchoredViewport(
+      { worldX: anchor.worldX, worldY: anchor.worldY },
+      newNode.position,
+      flow.getViewport(),
+    );
+    flow.setViewport(next);
+  }, [nodes, flow]);
+
   const onNodeClick = useCallback(
     (_e: unknown, node: Node) => {
       const data = node.data as { schemaId?: string; expandable?: boolean } | undefined;
       if (!data?.schemaId) return;
       setSelected(data.schemaId);
-      if (data.expandable) toggleExpanded(data.schemaId);
+      if (data.expandable) {
+        pendingAnchorRef.current = {
+          schemaId: data.schemaId,
+          worldX: node.position.x,
+          worldY: node.position.y,
+        };
+        toggleExpanded(data.schemaId);
+      }
     },
     [setSelected, toggleExpanded],
   );
