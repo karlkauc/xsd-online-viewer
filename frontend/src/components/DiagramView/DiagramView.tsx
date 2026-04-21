@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import {
   Background,
   Controls,
@@ -21,6 +21,36 @@ const NODE_TYPES = {
   element: ElementNode as unknown as React.ComponentType<NodeProps>,
   compositor: CompositorNode as unknown as React.ComponentType<NodeProps>,
 };
+
+// Minimap colors chosen for WCAG 2.1 AA on non-text UI (>= 3:1). Light pair
+// reaches ~7.5:1, dark pair ~10:1 — both comfortably pass.
+const MINIMAP_LIGHT = {
+  nodeColor: "#475569",
+  nodeStrokeColor: "#1e293b",
+  maskColor: "rgba(15, 23, 42, 0.12)",
+  bgColor: "#ffffff",
+} as const;
+const MINIMAP_DARK = {
+  nodeColor: "#cbd5e1",
+  nodeStrokeColor: "#f1f5f9",
+  maskColor: "rgba(226, 232, 240, 0.15)",
+  bgColor: "#0f172a",
+} as const;
+
+function subscribeToHtmlClass(callback: () => void): () => void {
+  const observer = new MutationObserver(callback);
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
+  return () => observer.disconnect();
+}
+function getIsDark(): boolean {
+  return document.documentElement.classList.contains("dark");
+}
+function useIsDarkTheme(): boolean {
+  return useSyncExternalStore(subscribeToHtmlClass, getIsDark, () => false);
+}
 
 export function DiagramView() {
   return (
@@ -45,6 +75,8 @@ function DiagramInner() {
 
   const flow = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const isDark = useIsDarkTheme();
+  const minimapColors = isDark ? MINIMAP_DARK : MINIMAP_LIGHT;
 
   // Only re-fit when the schema changes. Re-fitting on every expand/collapse
   // jitters the viewport and loses the user's pan/zoom state.
@@ -134,7 +166,7 @@ function DiagramInner() {
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={16} />
-        <MiniMap pannable zoomable />
+        <MiniMap pannable zoomable nodeStrokeWidth={2} {...minimapColors} />
         <Controls />
       </ReactFlow>
     </div>
