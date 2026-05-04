@@ -16,12 +16,13 @@ import logging
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app.api.schema import SchemaResponse, finalize_schema_response
 from app.parser.security import SecurityError, fetch_schema_url
 from app.parser.xsd_parser import parse_files_map
+from app.rate_limit import WRITE_LIMIT, limiter
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,10 @@ async def list_fundsxml_releases() -> FundsXmlReleasesResponse:
     "/fundsxml/releases/{tag}/load",
     response_model=SchemaResponse,
 )
-async def load_release_schema(tag: str, payload: LoadReleasePayload) -> SchemaResponse:
+@limiter.limit(WRITE_LIMIT)
+async def load_release_schema(
+    request: Request, tag: str, payload: LoadReleasePayload
+) -> SchemaResponse:
     """Parse a release's main XSD with every sibling XSD asset pre-fetched.
 
     GitHub serves release assets from signed UUID-based URLs, so relative

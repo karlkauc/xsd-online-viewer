@@ -10,6 +10,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app import __version__
 from app.api.export import router as export_router
@@ -17,6 +19,7 @@ from app.api.releases import router as releases_router
 from app.api.schema import router as schema_router
 from app.config import settings
 from app.logging_setup import configure_logging, new_request_id, request_id_var
+from app.rate_limit import limiter
 
 configure_logging(settings.log_level)
 logger = logging.getLogger("app")
@@ -77,14 +80,31 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_exceeded(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        content={"error": "rate_limit_exceeded", "detail": f"limit: {exc.detail}"},
+        headers={"Retry-After": "60"},
+    )
+
+
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(BufferRequestBodyMiddleware)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
-)
+# Same-origin deployment: the SPA is served from the same host as the API,
+# so no CORS is needed by default. Set CORS_ALLOW_ORIGINS (comma-separated)
+# only if a foreign frontend should call the API.
+if settings.cors_allow_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors_allow_origins),
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
 
 @app.middleware("http")

@@ -132,7 +132,7 @@ export default function App() {
             🔍 Search
           </button>
           {schemaId && (
-            <a className="btn" href={exportHtmlUrl(schemaId)} target="_blank" rel="noreferrer">
+            <a className="btn" href={exportHtmlUrl(schemaId)} target="_blank" rel="noopener noreferrer">
               Export HTML
             </a>
           )}

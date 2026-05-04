@@ -4,7 +4,7 @@ services:
     image: online-xsd-viewer:latest
     restart: unless-stopped
     ports:
-      - "8090:8080"
+      - "127.0.0.1:8090:8080"
     environment:
       ALLOWED_SCHEMA_HOSTS: '^raw\.githubusercontent\.com$,^github\.com$,^release-assets\.githubusercontent\.com$,^objects\.githubusercontent\.com$'
       LOG_LEVEL: INFO

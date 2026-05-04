@@ -14,6 +14,7 @@ from app.config import settings
 from app.parser.model import SchemaModel
 from app.parser.security import SecurityError, fetch_schema_url
 from app.parser.xsd_parser import parse_with_url_fallback
+from app.rate_limit import WRITE_LIMIT, limiter
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ def finalize_schema_response(model: SchemaModel) -> SchemaResponse:
 
 
 @router.post("/schema/upload", response_model=SchemaResponse)
+@limiter.limit(WRITE_LIMIT)
 async def upload_schema(
     request: Request,
     file: UploadFile,
@@ -110,7 +112,8 @@ async def upload_schema(
 
 
 @router.post("/schema/url", response_model=SchemaResponse)
-async def load_schema_from_url(payload: UrlPayload) -> SchemaResponse:
+@limiter.limit(WRITE_LIMIT)
+async def load_schema_from_url(request: Request, payload: UrlPayload) -> SchemaResponse:
     try:
         fetched = fetch_schema_url(payload.url)
     except SecurityError as exc:
@@ -129,7 +132,8 @@ async def load_schema_from_url(payload: UrlPayload) -> SchemaResponse:
 
 
 @router.post("/schema/text", response_model=SchemaResponse)
-async def load_schema_from_text(payload: TextPayload) -> SchemaResponse:
+@limiter.limit(WRITE_LIMIT)
+async def load_schema_from_text(request: Request, payload: TextPayload) -> SchemaResponse:
     data = payload.content.encode("utf-8")
     if len(data) > settings.max_upload_bytes:
         raise HTTPException(

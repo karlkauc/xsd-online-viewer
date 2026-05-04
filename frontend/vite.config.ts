@@ -20,7 +20,7 @@ const config: UserConfig & { test?: Record<string, unknown> } = {
   },
   build: {
     outDir: "dist",
-    sourcemap: true,
+    sourcemap: false,
     chunkSizeWarningLimit: 1000,
   },
   test: {

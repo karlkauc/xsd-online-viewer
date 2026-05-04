@@ -19,6 +19,7 @@ class Settings:
     fetch_timeout_seconds: float
     fetch_max_response_mb: int
     fetch_max_redirects: int
+    cors_allow_origins: tuple[str, ...]
 
     @property
     def max_upload_bytes(self) -> int:
@@ -45,6 +46,10 @@ def _parse_host_patterns(raw: str) -> tuple[re.Pattern[str], ...]:
     return tuple(patterns)
 
 
+def _parse_origins(raw: str) -> tuple[str, ...]:
+    return tuple(p.strip() for p in raw.split(",") if p.strip())
+
+
 def load_settings() -> Settings:
     return Settings(
         port=int(os.getenv("PORT", "8080")),
@@ -57,6 +62,7 @@ def load_settings() -> Settings:
         fetch_timeout_seconds=float(os.getenv("FETCH_TIMEOUT_SECONDS", "10")),
         fetch_max_response_mb=int(os.getenv("FETCH_MAX_RESPONSE_MB", "10")),
         fetch_max_redirects=int(os.getenv("FETCH_MAX_REDIRECTS", "3")),
+        cors_allow_origins=_parse_origins(os.getenv("CORS_ALLOW_ORIGINS", "")),
     )
 
 
