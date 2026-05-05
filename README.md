@@ -38,6 +38,12 @@ docker run --rm -p 8080:8080 \
 docker compose up
 ```
 
+### Google Cloud Run
+
+A step-by-step guide for deploying this container to Cloud Run (build,
+sizing, env vars, smoke test, rollback) lives in
+[docs/DEPLOY_GCLOUD.md](docs/DEPLOY_GCLOUD.md).
+
 ## Configuration
 
 | Env var | Default | Purpose |

@@ -18,3 +18,21 @@ e2e/playwright-report
 *.log
 .env*
 !.env.example
+
+# Tests & E2E (laufen im CI, nicht im Runtime-Image)
+backend/tests
+e2e
+
+# Docs & Deployment-Konfig (nicht im Runtime nötig)
+docs
+deploy
+
+# IDE / lokale Cruft
+.vscode
+.idea
+
+# Markdown ausschließen, aber README/LICENSE behalten
+*.md
+!README.md
+!LICENSE
+!NOTICE
