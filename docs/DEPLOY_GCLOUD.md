@@ -50,9 +50,12 @@ Cloud Build baut anhand des bestehenden `Dockerfile`, lädt das Image in
 Artifact Registry, deployed den Service und gibt am Ende eine
 `https://xsdviewer-<hash>-ew.a.run.app` URL aus.
 
-> **Hinweis zu `ALLOWED_SCHEMA_HOSTS`**: Diese Variable enthält
-> Komma-getrennte Regexes — `--set-env-vars` interpretiert Kommas aber
-> als Variablentrenner. Wenn URL-Fetching gebraucht wird, siehe
+> **Hinweis zu `ALLOWED_SCHEMA_HOSTS`**: Standardmäßig ist URL-Fetching
+> für jede öffentliche http(s)-URL erlaubt; private/Loopback-IPs werden
+> weiterhin von der SSRF-Schutzschicht geblockt. Soll der Endpoint auf
+> eine Whitelist beschränkt werden (Lockdown-Modus), enthält die
+> Variable Komma-getrennte Regexes — `--set-env-vars` interpretiert
+> Kommas aber als Variablentrenner. Workaround siehe
 > [Env-Vars mit Kommas](#env-vars-mit-kommas-allowed_schema_hosts).
 
 ## Wichtige Cloud-Run-Limits
@@ -99,7 +102,7 @@ Quelle der Defaults: `backend/app/config.py`. In Cloud Run per
 |----------|---------|----------------------|
 | `PORT` | `8080` | nicht setzen — Cloud Run injiziert ihn |
 | `MAX_UPLOAD_MB` | `50` | **`32`** (Cloud-Run-Limit) |
-| `ALLOWED_SCHEMA_HOSTS` | leer | nur setzen, wenn URL-Fetching genutzt wird |
+| `ALLOWED_SCHEMA_HOSTS` | leer | leer = jede öffentliche URL erlaubt; setzen, wenn der Endpoint auf eine Host-Whitelist beschränkt werden soll (Lockdown) |
 | `SCHEMA_CACHE_TTL_MIN` | `60` | `60` ist OK |
 | `SCHEMA_CACHE_MAX_ENTRIES` | `32` | `32` ist OK; bei Memory-Druck reduzieren |
 | `LOG_LEVEL` | `INFO` | `INFO` |

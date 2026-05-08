@@ -32,12 +32,34 @@ class TestBillionLaughs:
 
 
 class TestSsrfProtection:
-    def test_url_without_allowlist_rejected(self) -> None:
+    def test_arbitrary_host_allowed_when_allowlist_empty(self) -> None:
+        # Default behaviour: no ALLOWED_SCHEMA_HOSTS set means *any* public
+        # host is permitted; only the SSRF/private-IP/scheme checks gate it.
+        # We use a host that resolves to a private IP so the request never
+        # actually leaves the test machine — the assertion proves the
+        # allowlist gate no longer blocks unknown hosts.
         with patch.object(config_module.settings, "allowed_schema_hosts", ()):
             from app.parser import security as sec_module
 
-            sec_module.settings = config_module.settings  # propagate
-            with pytest.raises(SecurityError, match="not on ALLOWED_SCHEMA_HOSTS"):
+            sec_module.settings = config_module.settings
+            # localhost resolves to 127.0.0.1 → SSRF guard fires, not the
+            # allowlist guard. The previous error wording would be
+            # "not on ALLOWED_SCHEMA_HOSTS"; the new error is private/loopback.
+            with pytest.raises(SecurityError, match="private/loopback"):
+                fetch_schema_url("http://localhost/secret")
+
+    def test_lockdown_allowlist_blocks_unlisted_host(self) -> None:
+        import re as re_module
+
+        with patch.object(
+            config_module.settings,
+            "allowed_schema_hosts",
+            (re_module.compile(r"^trusted\.example\.com$"),),
+        ):
+            from app.parser import security as sec_module
+
+            sec_module.settings = config_module.settings
+            with pytest.raises(SecurityError, match="lockdown whitelist"):
                 fetch_schema_url("http://evil.example.com/attack.xsd")
 
     def test_loopback_address_rejected_even_when_allowlisted(self) -> None:
@@ -55,13 +77,7 @@ class TestSsrfProtection:
                 fetch_schema_url("http://localhost/secret")
 
     def test_non_http_scheme_rejected(self) -> None:
-        import re as re_module
-
-        with patch.object(
-            config_module.settings,
-            "allowed_schema_hosts",
-            (re_module.compile(r".*"),),
-        ):
+        with patch.object(config_module.settings, "allowed_schema_hosts", ()):
             from app.parser import security as sec_module
 
             sec_module.settings = config_module.settings

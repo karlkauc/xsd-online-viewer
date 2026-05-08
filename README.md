@@ -24,11 +24,16 @@ docker run --rm -p 8080:8080 ghcr.io/karlkauc/online-xsd-viewer:latest
 
 Open http://localhost:8080 and drop an XSD file into the browser.
 
-### With URL fetching enabled
+### Locking URL fetching down to specific hosts
+
+By default the `/api/schema/url` endpoint accepts any public http(s) URL
+(private/loopback IPs and non-http schemes are always blocked). To
+restrict it to a whitelist for hardened deployments, set
+`ALLOWED_SCHEMA_HOSTS` to one or more host regexes:
 
 ```bash
 docker run --rm -p 8080:8080 \
-  -e ALLOWED_SCHEMA_HOSTS='^https://schemas\.example\.com/' \
+  -e ALLOWED_SCHEMA_HOSTS='^schemas\.example\.com$' \
   ghcr.io/karlkauc/online-xsd-viewer:latest
 ```
 
@@ -50,7 +55,7 @@ sizing, env vars, smoke test, rollback) lives in
 |---|---|---|
 | `PORT` | `8080` | HTTP listen port |
 | `MAX_UPLOAD_MB` | `50` | Maximum upload size in MB |
-| `ALLOWED_SCHEMA_HOSTS` | *(empty)* | Regex (or comma-separated regex list) of host names permitted for URL fetching |
+| `ALLOWED_SCHEMA_HOSTS` | *(empty)* | Empty = any public host allowed. Set to a regex (or comma-separated list of regexes) to lock URL fetching down to a whitelist. |
 | `SCHEMA_CACHE_TTL_MIN` | `60` | In-memory parse-cache TTL in minutes |
 | `SCHEMA_CACHE_MAX_ENTRIES` | `32` | Max. number of cached parsed schemas |
 | `LOG_LEVEL` | `INFO` | Log level (DEBUG, INFO, WARNING, ERROR) |
@@ -62,7 +67,7 @@ Every parse happens with hardened lxml settings:
 - External entity resolution disabled (XXE protection)
 - DTD loading disabled, `no_network=True` at parse time
 - Billion-Laughs / XML-bomb rejection
-- URL fetching restricted to hosts matching `ALLOWED_SCHEMA_HOSTS`, with private-IP-block protection, per-fetch timeout and response-size cap
+- URL fetching limited to `http(s)` only, with DNS-based private-IP-block protection (loopback, link-local, ULA, cloud metadata, etc.), per-fetch timeout, redirect cap and response-size cap. An optional `ALLOWED_SCHEMA_HOSTS` whitelist can lock the endpoint down further for hardened deployments.
 
 No uploads are persisted to disk; parsed schemas live in an in-memory cache with TTL.
 

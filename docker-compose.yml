@@ -6,7 +6,11 @@ services:
     ports:
       - "127.0.0.1:8090:8080"
     environment:
-      ALLOWED_SCHEMA_HOSTS: '^raw\.githubusercontent\.com$,^github\.com$,^release-assets\.githubusercontent\.com$,^objects\.githubusercontent\.com$'
+      # ALLOWED_SCHEMA_HOSTS unset → any public http(s) host permitted
+      # (private-IP/SSRF guards still active). To lock the deployment down
+      # to a specific allowlist, set the variable to a comma-separated
+      # list of host regexes, e.g.:
+      #   ALLOWED_SCHEMA_HOSTS: '^raw\.githubusercontent\.com$,^github\.com$'
       LOG_LEVEL: INFO
       MAX_UPLOAD_MB: "50"
     healthcheck:

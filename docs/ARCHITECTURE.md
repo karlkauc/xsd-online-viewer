@@ -123,9 +123,10 @@ The parser loads the root XSD with lxml, then discovers and resolves
 through a chain of `SchemaResolver`s:
 
 - `ZipResolver` — reads sibling files from an uploaded zip.
-- `UrlResolver` — fetches remote files, subject to `ALLOWED_SCHEMA_HOSTS` and
-  the SSRF checks in `parser/security.py` (no localhost, no link-local, no
-  private ranges unless allow-listed).
+- `UrlResolver` — fetches remote files via the SSRF-hardened path in
+  `parser/security.py` (only `http(s)`, no localhost, no link-local, no
+  private ranges, redirect cap, size cap, timeout). Hosts are allowed by
+  default; setting `ALLOWED_SCHEMA_HOSTS` switches to a strict whitelist.
 - `ChainedResolver` — tries resolvers in order and records diagnostics on miss.
 
 The tree walk produces a flat `SchemaModel` — one list per declaration kind —

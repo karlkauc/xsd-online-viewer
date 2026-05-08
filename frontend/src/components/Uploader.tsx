@@ -208,7 +208,9 @@ export function Uploader() {
             onChange={(e) => setUrl(e.target.value)}
           />
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-            URL fetching must be allowed server-side via <code>ALLOWED_SCHEMA_HOSTS</code>.
+            Any public <code>http(s)</code> URL works. Private/loopback
+            addresses are blocked, and admins can lock the endpoint down to
+            specific hosts via <code>ALLOWED_SCHEMA_HOSTS</code>.
           </p>
           <button
             type="button"

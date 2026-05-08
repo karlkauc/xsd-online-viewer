@@ -3,8 +3,10 @@
 Every ``lxml`` call goes through :func:`make_parser` so that external
 entities, DTD loading and network access at parse-time are globally off.
 URL fetching for ``schemaLocation`` references goes through
-:func:`fetch_schema_url`, which enforces a host allowlist, blocks private
-IP ranges, caps response size and limits redirects.
+:func:`fetch_schema_url`, which restricts schemes to http(s), blocks
+private IP ranges, caps response size and limits redirects. Hosts are
+allowed by default; setting ``ALLOWED_SCHEMA_HOSTS`` switches to a strict
+whitelist (lockdown mode) for hardened deployments.
 """
 
 from __future__ import annotations
@@ -94,8 +96,10 @@ class FetchedResource:
 
 
 def _host_is_allowed(host: str) -> bool:
+    # Empty allowlist means "any host permitted" (default-open). Setting
+    # ALLOWED_SCHEMA_HOSTS turns this into a strict lockdown whitelist.
     if not settings.allowed_schema_hosts:
-        return False
+        return True
     return any(pattern.search(host) for pattern in settings.allowed_schema_hosts)
 
 
@@ -131,7 +135,7 @@ def _verify_url(url: str) -> None:
         raise SecurityError(f"URL has no host: {url!r}")
     if not _host_is_allowed(host):
         raise SecurityError(
-            f"host {host!r} is not on ALLOWED_SCHEMA_HOSTS; set the env var to permit it"
+            f"host {host!r} is not on ALLOWED_SCHEMA_HOSTS lockdown whitelist"
         )
     for addr in _resolve_all_addrs(host):
         if _ip_is_private(addr):
