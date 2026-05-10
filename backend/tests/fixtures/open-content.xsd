@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:tns="http://example.com/oc"
+           targetNamespace="http://example.com/oc"
+           elementFormDefault="qualified">
+
+  <!-- Schema-wide default — applies to every complexType unless overridden. -->
+  <xs:defaultOpenContent appliesToEmpty="true">
+    <xs:any namespace="##other" processContents="lax"/>
+  </xs:defaultOpenContent>
+
+  <!-- Inherits the defaultOpenContent (no override). -->
+  <xs:complexType name="A">
+    <xs:sequence>
+      <xs:element name="X" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- Overrides the default with mode="suffix". -->
+  <xs:complexType name="B">
+    <xs:openContent mode="suffix">
+      <xs:any namespace="##any" processContents="skip"/>
+    </xs:openContent>
+    <xs:sequence>
+      <xs:element name="Y" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- Opts out via mode="none". -->
+  <xs:complexType name="C">
+    <xs:openContent mode="none"/>
+    <xs:sequence>
+      <xs:element name="Z" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+</xs:schema>

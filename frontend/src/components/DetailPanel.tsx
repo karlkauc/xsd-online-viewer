@@ -1,17 +1,24 @@
 import { useMemo } from "react";
 import { useSelection } from "../stores/selectionStore";
-import { resolveReference } from "../lib/indexSchema";
+import { overrideKey, resolveReference } from "../lib/indexSchema";
 import type {
   AttributeDecl,
+  AttributeGroup,
   ComplexType,
   ElementDecl,
   NodeIndexEntry,
+  OpenContent,
+  OverrideReplacement,
+  SchemaModel,
   SchemaNode,
   SchemaNodeKind,
   SimpleType,
+  VersionConstraints,
 } from "../types/schema";
 import { KindBadge } from "./TreeView/KindBadge";
 import { FacetGroups } from "./FacetGroups";
+import { AssertionsList } from "./AssertionsList";
+import { AlternativesList } from "./AlternativesList";
 
 // Kind-scoped accent colors — mirror KindBadge so the header's left bar and
 // in-row dots read as "same thing as the E/A/CT/ST/G/AG badge".
@@ -35,8 +42,28 @@ export function DetailPanel() {
   const usagesByTarget = useSelection((s) => s.usagesByTarget);
   const setSelected = useSelection((s) => s.setSelected);
   const setActiveTab = useSelection((s) => s.setActiveTab);
+  const model = useSelection((s) => s.model);
+  const overrideByReplacementId = useSelection(
+    (s) => s.overrideByReplacementId,
+  );
+  const overridesByOriginalKey = useSelection(
+    (s) => s.overridesByOriginalKey,
+  );
 
   const entry = selectedId ? indexById.get(selectedId) : undefined;
+
+  const overrideContext = useMemo(() => {
+    if (!entry) return null;
+    const asReplacement = overrideByReplacementId.get(entry.id);
+    const originalsKey = entry.qname
+      ? overrideKey(entry.kind, entry.qname)
+      : null;
+    const replacementsOnThis = originalsKey
+      ? overridesByOriginalKey.get(originalsKey) ?? []
+      : [];
+    if (!asReplacement && replacementsOnThis.length === 0) return null;
+    return { asReplacement, replacementsOnThis };
+  }, [entry, overrideByReplacementId, overridesByOriginalKey]);
 
   const usages = useMemo(() => {
     if (!entry) return [] as NodeIndexEntry[];
@@ -77,24 +104,27 @@ export function DetailPanel() {
 
   if (!entry) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 text-sm p-8 text-center gap-3">
-        <svg
-          width="32"
-          height="32"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="opacity-40"
-          aria-hidden="true"
-        >
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <path d="M14 2v6h6" />
-          <path d="M9 13h6M9 17h4" />
-        </svg>
-        <p>Select a node on the left to see its details.</p>
+      <div className="h-full overflow-auto">
+        <div className="flex flex-col items-center text-slate-500 dark:text-slate-400 text-sm p-8 text-center gap-3">
+          <svg
+            width="32"
+            height="32"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="opacity-40"
+            aria-hidden="true"
+          >
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <path d="M14 2v6h6" />
+            <path d="M9 13h6M9 17h4" />
+          </svg>
+          <p>Select a node on the left to see its details.</p>
+        </div>
+        {model && <SchemaOverview model={model} />}
       </div>
     );
   }
@@ -102,10 +132,15 @@ export function DetailPanel() {
   const node = entry.node;
   return (
     <div className="h-full overflow-auto">
-      <Header entry={entry} setActiveTab={setActiveTab} />
+      <Header
+        entry={entry}
+        setActiveTab={setActiveTab}
+        overrideContext={overrideContext}
+        setSelected={setSelected}
+      />
 
       <div className="p-4 space-y-6 text-sm">
-        {renderSpecifics(node, index, setSelected)}
+        {renderSpecifics(node, index, setSelected, model)}
         {renderAnnotation(node)}
         {usages.length > 0 && (
           <section>
@@ -128,12 +163,21 @@ export function DetailPanel() {
 // Header
 // ---------------------------------------------------------------------------
 
+interface OverrideContext {
+  asReplacement?: { replacement: OverrideReplacement } | undefined;
+  replacementsOnThis: OverrideReplacement[];
+}
+
 function Header({
   entry,
   setActiveTab,
+  overrideContext,
+  setSelected,
 }: {
   entry: NodeIndexEntry;
   setActiveTab: (tab: "tree" | "diagram" | "text") => void;
+  overrideContext: OverrideContext | null;
+  setSelected: (id: string) => void;
 }) {
   return (
     <div className="relative border-b border-slate-200 dark:border-slate-800 bg-gradient-to-b from-slate-50/60 to-white dark:from-slate-900/40 dark:to-slate-950">
@@ -142,11 +186,28 @@ function Header({
         aria-hidden="true"
       />
       <div className="px-4 py-3.5">
-        <div className="flex items-center gap-2 mb-1.5 min-w-0">
+        <div className="flex items-center gap-2 mb-1.5 min-w-0 flex-wrap">
           <KindBadge kind={entry.kind} />
           <h2 className="text-base font-semibold tracking-tight truncate text-slate-900 dark:text-slate-100">
             {entry.label}
           </h2>
+          {"version_constraints" in entry.node &&
+            entry.node.version_constraints && (
+              <VersionBadge vc={entry.node.version_constraints} />
+            )}
+          {overrideContext?.asReplacement && (
+            <OverrideOriginButton
+              replacement={overrideContext.asReplacement.replacement}
+              setSelected={setSelected}
+            />
+          )}
+          {overrideContext &&
+            overrideContext.replacementsOnThis.length > 0 && (
+              <OverriddenByButtons
+                replacements={overrideContext.replacementsOnThis}
+                setSelected={setSelected}
+              />
+            )}
         </div>
         {entry.qname && (
           <code className="block text-[11px] font-mono text-slate-500 dark:text-slate-400 break-all leading-snug">
@@ -192,10 +253,15 @@ function Header({
 
 type SetSelected = (id: string) => void;
 
-function renderSpecifics(node: SchemaNode, index: NodeIndexEntry[], setSelected: SetSelected) {
+function renderSpecifics(
+  node: SchemaNode,
+  index: NodeIndexEntry[],
+  setSelected: SetSelected,
+  model: SchemaModel | null,
+) {
   if ("type_inline_complex" in node) return renderElement(node, index, setSelected);
   if ("use" in node) return renderAttribute(node, index, setSelected);
-  if ("content_kind" in node) return renderComplexType(node, index, setSelected);
+  if ("content_kind" in node) return renderComplexType(node, index, setSelected, model);
   if ("facets" in node) return renderSimpleType(node, index, setSelected);
   return null;
 }
@@ -230,6 +296,18 @@ function renderElement(element: ElementDecl, index: NodeIndexEntry[], setSelecte
             <InlineTag>inline simple</InlineTag>
           )}
         </DataRow>
+        {element.alternatives && element.alternatives.length > 0 && (
+          <AlternativesList
+            alternatives={element.alternatives}
+            renderTypeRef={(typeName) => (
+              <TypeRef
+                typeName={typeName}
+                index={index}
+                setSelected={setSelected}
+              />
+            )}
+          />
+        )}
         <DataRow label="Cardinality">
           <Cardinality min={element.min_occurs} max={element.max_occurs} />
         </DataRow>
@@ -287,6 +365,9 @@ function renderElement(element: ElementDecl, index: NodeIndexEntry[], setSelecte
   );
 }
 
+// Renders the kind-scoped specifics for an attribute; passing the model
+// (when known) allows resolving Phase-1 schema-level state. Currently
+// unused inside this helper but kept for symmetry with renderComplexType.
 function renderAttribute(
   attr: AttributeDecl,
   index: NodeIndexEntry[],
@@ -330,6 +411,11 @@ function renderAttribute(
             <code className="font-mono text-[12px]">{attr.form}</code>
           </DataRow>
         )}
+        {attr.inheritable && (
+          <DataRow label="Flags">
+            <FlagChip tone="emerald">inheritable</FlagChip>
+          </DataRow>
+        )}
       </div>
       {attr.type_inline && (
         <FacetGroups facets={attr.type_inline.facets} restriction={attr.type_inline} />
@@ -349,7 +435,9 @@ function renderComplexType(
   complex: ComplexType,
   index: NodeIndexEntry[],
   setSelected: SetSelected,
+  model: SchemaModel | null,
 ) {
+  const implicitGroup = resolveDefaultAttributesGroup(complex, model, index);
   return (
     <section>
       <SectionHead title="Complex type" />
@@ -373,9 +461,17 @@ function renderComplexType(
             </div>
           </DataRow>
         )}
+        {complex.open_content && (
+          <DataRow label="Open content">
+            <OpenContentSummary oc={complex.open_content} />
+          </DataRow>
+        )}
       </div>
       {complex.simple_content_facets.length > 0 && (
         <FacetGroups facets={complex.simple_content_facets} restriction={null} />
+      )}
+      {complex.assertions && complex.assertions.length > 0 && (
+        <AssertionsList assertions={complex.assertions} />
       )}
       {complex.attributes.length > 0 && (
         <div className="mt-4">
@@ -384,12 +480,13 @@ function renderComplexType(
             {complex.attributes.map((a) => (
               <li
                 key={a.id}
-                className="font-mono text-[12px] px-2 py-1 rounded hover:bg-slate-50 dark:hover:bg-slate-900/60 transition-colors"
+                className="font-mono text-[12px] px-2 py-1 rounded hover:bg-slate-50 dark:hover:bg-slate-900/60 transition-colors flex items-center gap-1.5 flex-wrap"
               >
                 <span className="text-amber-600 dark:text-amber-400">@{a.name}</span>
-                <span className="text-slate-400 ml-1.5">
+                <span className="text-slate-400">
                   {a.type_name ?? "inline"} · {a.use}
                 </span>
+                {a.inheritable && <FlagChip tone="emerald">inheritable</FlagChip>}
               </li>
             ))}
           </ul>
@@ -403,8 +500,73 @@ function renderComplexType(
           <div className="mt-1 font-mono">{complex.attribute_group_refs.join(", ")}</div>
         </div>
       )}
+      {implicitGroup && (
+        <ImplicitAttributesBlock
+          group={implicitGroup.group}
+          groupName={implicitGroup.name}
+        />
+      )}
     </section>
   );
+}
+
+function ImplicitAttributesBlock({
+  group,
+  groupName,
+}: {
+  group: AttributeGroup | null;
+  groupName: string;
+}) {
+  return (
+    <div className="mt-4 rounded border border-dashed border-emerald-300 dark:border-emerald-700 bg-emerald-50/40 dark:bg-emerald-900/10 p-3">
+      <SubHead>
+        <span>
+          Implicit attributes
+          <span className="ml-1 normal-case tracking-normal text-slate-400 dark:text-slate-500">
+            · from defaultAttributes <code className="font-mono">{groupName}</code>
+          </span>
+        </span>
+      </SubHead>
+      {group ? (
+        group.attributes.length > 0 ? (
+          <ul className="space-y-0.5 mt-1.5">
+            {group.attributes.map((a) => (
+              <li
+                key={a.id}
+                className="font-mono text-[12px] px-2 py-1 rounded flex items-center gap-1.5 flex-wrap"
+              >
+                <span className="text-amber-600 dark:text-amber-400">@{a.name}</span>
+                <span className="text-slate-400">
+                  {a.type_name ?? "inline"} · {a.use}
+                </span>
+                {a.inheritable && <FlagChip tone="emerald">inheritable</FlagChip>}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 text-xs text-slate-500 italic">(empty group)</p>
+        )
+      ) : (
+        <p className="mt-1 text-xs text-slate-500 italic">
+          referenced group not found in this schema
+        </p>
+      )}
+    </div>
+  );
+}
+
+function resolveDefaultAttributesGroup(
+  complex: ComplexType,
+  model: SchemaModel | null,
+  index: NodeIndexEntry[],
+): { group: AttributeGroup | null; name: string } | null {
+  if (!model?.default_attributes) return null;
+  // ``defaultAttributesApply`` defaults to true when omitted.
+  if (complex.default_attributes_apply === false) return null;
+  const groupName = model.default_attributes;
+  const hit = resolveReference(groupName, index, ["attributeGroup"]);
+  const group = hit && "attributes" in hit.node ? (hit.node as AttributeGroup) : null;
+  return { group, name: groupName };
 }
 
 function renderSimpleType(
@@ -440,6 +602,9 @@ function renderSimpleType(
         )}
       </div>
       <FacetGroups facets={simple.facets} restriction={null} />
+      {simple.assertions && simple.assertions.length > 0 && (
+        <AssertionsList assertions={simple.assertions} />
+      )}
     </section>
   );
 }
@@ -671,6 +836,209 @@ function UsageRow({ entry, onClick }: { entry: NodeIndexEntry; onClick: () => vo
         →
       </span>
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// XSD 1.1 — xs:override badges
+// ---------------------------------------------------------------------------
+
+function OverrideOriginButton({
+  replacement,
+  setSelected,
+}: {
+  replacement: OverrideReplacement;
+  setSelected: (id: string) => void;
+}) {
+  // Best-effort jump back to the *original* by id. We don't carry a direct
+  // pointer in the replacement, so reconstruct the canonical id (kind:qname).
+  const originalId = `${replacement.kind}:${replacement.qname}`;
+  return (
+    <button
+      type="button"
+      onClick={() => setSelected(originalId)}
+      title={`This is a replacement for ${replacement.kind} ${replacement.qname} (xs:override)`}
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-mono font-medium border bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-200 dark:border-rose-800/60 hover:bg-rose-100 dark:hover:bg-rose-900/50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+    >
+      <span className="text-[9px] uppercase tracking-wide font-semibold opacity-70">
+        overrides
+      </span>
+      <span className="truncate max-w-[160px]">{replacement.qname}</span>
+    </button>
+  );
+}
+
+function OverriddenByButtons({
+  replacements,
+  setSelected,
+}: {
+  replacements: OverrideReplacement[];
+  setSelected: (id: string) => void;
+}) {
+  return (
+    <>
+      {replacements.map((r) => (
+        <button
+          key={r.replacement_id}
+          type="button"
+          onClick={() => setSelected(r.replacement_id)}
+          title={`Overridden by ${r.kind} declared in an xs:override block`}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-mono font-medium border bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+        >
+          <span className="text-[9px] uppercase tracking-wide font-semibold opacity-70">
+            overridden by
+          </span>
+          <span className="truncate max-w-[160px]">replacement</span>
+        </button>
+      ))}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// XSD 1.1 — version constraints chip and schema overview
+// ---------------------------------------------------------------------------
+
+function VersionBadge({ vc }: { vc: VersionConstraints }) {
+  const summary = summarizeVersionConstraints(vc);
+  if (!summary) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium border bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800/60"
+      title={describeVersionConstraints(vc)}
+    >
+      <span className="text-[9px] uppercase tracking-wide font-semibold opacity-70">
+        vc
+      </span>
+      {summary}
+    </span>
+  );
+}
+
+function summarizeVersionConstraints(vc: VersionConstraints): string | null {
+  if (vc.min_version && vc.max_version) {
+    return `${vc.min_version}–${vc.max_version}`;
+  }
+  if (vc.min_version) return `≥ ${vc.min_version}`;
+  if (vc.max_version) return `< ${vc.max_version}`;
+  if (vc.type_available) return `needs ${stripPrefix(vc.type_available)}`;
+  if (vc.facet_available) return `needs ${stripPrefix(vc.facet_available)}`;
+  if (vc.type_unavailable) return `not ${stripPrefix(vc.type_unavailable)}`;
+  if (vc.facet_unavailable) return `not ${stripPrefix(vc.facet_unavailable)}`;
+  return null;
+}
+
+function describeVersionConstraints(vc: VersionConstraints): string {
+  const parts: string[] = [];
+  if (vc.min_version) parts.push(`minVersion=${vc.min_version}`);
+  if (vc.max_version) parts.push(`maxVersion=${vc.max_version}`);
+  if (vc.type_available) parts.push(`typeAvailable=${vc.type_available}`);
+  if (vc.type_unavailable) parts.push(`typeUnavailable=${vc.type_unavailable}`);
+  if (vc.facet_available) parts.push(`facetAvailable=${vc.facet_available}`);
+  if (vc.facet_unavailable)
+    parts.push(`facetUnavailable=${vc.facet_unavailable}`);
+  return parts.join(" · ");
+}
+
+function stripPrefix(qname: string): string {
+  // Show first listed name without prefix for compactness in chips.
+  const first = qname.split(/\s+/)[0];
+  const colon = first.indexOf(":");
+  return colon === -1 ? first : first.slice(colon + 1);
+}
+
+function SchemaOverview({ model }: { model: SchemaModel }) {
+  const version = model.xsd_version ?? "unknown";
+  const xpathDefault = model.xpath_default_namespace ?? null;
+  const defaultAttrs = model.default_attributes ?? null;
+  return (
+    <div className="px-4 pb-6 -mt-1">
+      <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/40 p-4">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2.5">
+          About this schema
+        </h3>
+        <dl className="space-y-2 text-sm">
+          <DataRow label="XSD version">
+            <XsdVersionPill version={version} />
+          </DataRow>
+          {model.target_namespace && (
+            <DataRow label="Target ns">
+              <code className="font-mono text-[12px] break-all text-slate-700 dark:text-slate-200">
+                {model.target_namespace}
+              </code>
+            </DataRow>
+          )}
+          {xpathDefault && (
+            <DataRow label="xpathDefaultNamespace">
+              <code className="font-mono text-[12px] break-all text-slate-700 dark:text-slate-200">
+                {xpathDefault}
+              </code>
+            </DataRow>
+          )}
+          {defaultAttrs && (
+            <DataRow label="defaultAttributes">
+              <code className="font-mono text-[12px] break-all text-slate-700 dark:text-slate-200">
+                {defaultAttrs}
+              </code>
+            </DataRow>
+          )}
+          {model.default_open_content && (
+            <DataRow label="defaultOpenContent">
+              <OpenContentSummary oc={model.default_open_content} />
+            </DataRow>
+          )}
+        </dl>
+      </div>
+    </div>
+  );
+}
+
+function OpenContentSummary({ oc }: { oc: OpenContent }) {
+  const wildcard = oc.wildcard;
+  const ns = wildcard?.namespace ?? wildcard?.not_namespace ?? null;
+  const nsLabel = wildcard?.not_namespace ? `not ${ns}` : ns ?? "##any";
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-mono font-medium border bg-sky-50 text-sky-800 border-sky-200 dark:bg-sky-900/30 dark:text-sky-200 dark:border-sky-800/60"
+        title={`xs:openContent mode="${oc.mode}"`}
+      >
+        mode: {oc.mode}
+      </span>
+      {oc.applies_to_empty && (
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-medium border bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
+          appliesToEmpty
+        </span>
+      )}
+      {wildcard && (
+        <span className="font-mono text-[11.5px] text-slate-600 dark:text-slate-300">
+          ns: <code>{nsLabel}</code>
+          {wildcard.process_contents && (
+            <span className="text-slate-400 ml-1">· {wildcard.process_contents}</span>
+          )}
+        </span>
+      )}
+    </div>
+  );
+}
+
+const VERSION_PILL_TONE: Record<string, string> = {
+  "1.1": "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800/60",
+  "1.0": "bg-sky-50 text-sky-800 border-sky-200 dark:bg-sky-900/30 dark:text-sky-200 dark:border-sky-800/60",
+  unknown:
+    "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700",
+};
+
+export function XsdVersionPill({ version }: { version: string }) {
+  const tone = VERSION_PILL_TONE[version] ?? VERSION_PILL_TONE.unknown;
+  const label = version === "unknown" ? "XSD ?" : `XSD ${version}`;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-mono font-medium border ${tone}`}
+      title={`Detected XSD version: ${version}`}
+    >
+      {label}
+    </span>
   );
 }
 

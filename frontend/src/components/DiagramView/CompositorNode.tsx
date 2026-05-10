@@ -5,6 +5,9 @@ type CompositorKind = "sequence" | "choice" | "all" | "any" | "group-ref";
 interface CompositorData {
   kind: CompositorKind;
   label: string;
+  // XSD 1.1: when present, the owning complexType declares xs:openContent.
+  // Render a dashed border + corner "+" glyph as a visual cue.
+  openContentMode?: "interleave" | "suffix" | "none";
 }
 
 const BG: Record<CompositorKind, string> = {
@@ -100,19 +103,39 @@ function CompositorIcon({ kind }: { kind: CompositorKind }) {
 }
 
 export function CompositorNode({ data }: { data: CompositorData }) {
-  const { kind } = data;
-  const showLabel = kind === "group-ref" ? data.label : kind;
+  const { kind, openContentMode } = data;
+  // group-ref uses the supplied label; xs:all may be tagged "all+" to flag
+  // XSD 1.1 relaxations (maxOccurs > 1 or wildcard children); other
+  // compositors fall back to their kind name.
+  const showLabel =
+    kind === "group-ref" || (kind === "all" && data.label === "all+")
+      ? data.label
+      : kind;
+  const openContentTitle =
+    openContentMode === "none"
+      ? `${TITLE[kind]} · open content disabled (mode="none")`
+      : openContentMode
+        ? `${TITLE[kind]} · open content (${openContentMode})`
+        : TITLE[kind];
   return (
     <div
-      className={`flex h-full w-full flex-col items-center justify-center gap-0.5 rounded-md px-1 py-1 text-slate-900 dark:text-slate-100 ${BG[kind]}`}
+      className={`relative flex h-full w-full flex-col items-center justify-center gap-0.5 rounded-md px-1 py-1 text-slate-900 dark:text-slate-100 ${BG[kind]} ${openContentMode && openContentMode !== "none" ? "border-2 border-dashed border-sky-500/70 dark:border-sky-300/70" : ""}`}
       style={{ width: 70, height: 40 }}
-      title={TITLE[kind]}
+      title={openContentTitle}
     >
       <Handle type="target" position={Position.Left} />
       <CompositorIcon kind={kind} />
       <span className="truncate font-mono text-[9px] leading-none" style={{ maxWidth: 64 }}>
         {showLabel}
       </span>
+      {openContentMode && openContentMode !== "none" && (
+        <span
+          className="absolute -top-1.5 -right-1.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-sky-500 text-white text-[9px] font-bold leading-none shadow-sm"
+          aria-label={`open content: ${openContentMode}`}
+        >
+          +
+        </span>
+      )}
       <Handle type="source" position={Position.Right} />
     </div>
   );

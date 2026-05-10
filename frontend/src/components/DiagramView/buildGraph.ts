@@ -116,11 +116,16 @@ function computeElementDisplay(
   hostParticle: Particle | null,
   context: BuildContext,
 ): ElementDisplay {
-  const attrs = element.type_inline_complex?.attributes ?? [];
+  const inlineComplex = element.type_inline_complex;
+  const namedComplex = !inlineComplex ? resolveComplex(element.type_name, context) : undefined;
+  const resolvedComplex = inlineComplex ?? namedComplex ?? null;
+
+  const attrs = inlineComplex?.attributes ?? [];
   const docFull = collectDocumentation(element);
   const docLines = truncateDocLines(docFull);
-  const expandable =
-    element.type_inline_complex != null || resolveComplex(element.type_name, context) != null;
+  const expandable = resolvedComplex != null;
+  const assertCount = resolvedComplex?.assertions?.length ?? 0;
+  const alternativesCount = element.alternatives?.length ?? 0;
 
   // Row counts that actually render in ElementNode.tsx.
   const attrRows =
@@ -145,6 +150,8 @@ function computeElementDisplay(
     attributes: attrs,
     documentationLines: docLines,
     documentationFull: docFull,
+    assertCount,
+    alternativesCount,
   };
   return { data, height };
 }
@@ -173,11 +180,13 @@ function addCompositorNode(
   x: number,
   y: number,
   context: BuildContext,
+  // Optional XSD 1.1 cues that decorate the compositor.
+  extras: { openContentMode?: "interleave" | "suffix" | "none" } = {},
 ): void {
   context.nodes.push({
     id,
     position: { x, y },
-    data: { kind, label },
+    data: { kind, label, ...extras },
     type: "compositor",
     width: COMPOSITOR_WIDTH,
     height: COMPOSITOR_HEIGHT,
@@ -200,6 +209,14 @@ function getExpandedParticle(
   if (!context.expandedIds.has(element.id)) return null;
   const complex = element.type_inline_complex ?? resolveComplex(element.type_name, context);
   return complex?.particle ?? null;
+}
+
+function getOpenContentMode(
+  element: ElementDecl,
+  context: BuildContext,
+): "interleave" | "suffix" | "none" | null {
+  const complex = element.type_inline_complex ?? resolveComplex(element.type_name, context);
+  return complex?.open_content?.mode ?? null;
 }
 
 // Places an element, recursing into its content model if expanded.
@@ -241,6 +258,19 @@ function placeElement(
     topY,
     context,
   );
+
+  // The root compositor of an expanded element is the visual host for any
+  // open-content semantics declared on that element's complex type. Tag it
+  // so CompositorNode can render the dashed border + corner glyph.
+  const openContentMode = getOpenContentMode(element, context);
+  if (openContentMode) {
+    const rootNode = context.nodes.find((n) => n.id === particleResult.rootFlowId);
+    if (rootNode && rootNode.type === "compositor") {
+      // Mutate the data we just pushed; safe since no consumer has read it.
+      (rootNode.data as Record<string, unknown>).openContentMode = openContentMode;
+    }
+  }
+
   const center = particleResult.span.centerY;
 
   // Parent element sits on the same midline as the compositor.
@@ -340,10 +370,17 @@ function placeParticle(
   }
 
   const compositorY = childrenSpan.centerY - COMPOSITOR_HEIGHT / 2;
+  // XSD 1.1 lifts the maxOccurs<=1 / no-wildcard restrictions on xs:all.
+  // Tag the label with "+" when either relaxation is exercised.
+  const isAllPlus =
+    particle.kind === "all" &&
+    (particle.max_occurs === "unbounded" ||
+      (typeof particle.max_occurs === "number" && particle.max_occurs > 1) ||
+      particle.children.some((c) => c.kind === "any"));
   addCompositorNode(
     compositorId,
     particle.kind as "sequence" | "choice" | "all",
-    particle.kind,
+    isAllPlus ? "all+" : particle.kind,
     compositorX,
     compositorY,
     context,

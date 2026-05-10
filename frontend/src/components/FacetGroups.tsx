@@ -42,10 +42,14 @@ export interface FacetGroupsProps {
 }
 
 export function FacetGroups({ facets, restriction, inheritedFrom }: FacetGroupsProps) {
-  if (!facets.length && !restriction) return null;
+  // ``assertion`` is no longer a facet — assertions are rendered by
+  // ``AssertionsList``. Filter defensively in case an older model snapshot
+  // (or a hand-rolled test fixture) still carries one.
+  const renderable = facets.filter((f) => f.kind !== "assertion");
+  if (!renderable.length && !restriction) return null;
 
   const byGroup = new Map<GroupId, Facet[]>();
-  for (const f of facets) {
+  for (const f of renderable) {
     const g = FACET_GROUP[f.kind] ?? "other";
     const arr = byGroup.get(g) ?? [];
     arr.push(f);

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:vc="http://www.w3.org/2007/XMLSchema-versioning"
+           xmlns:tns="http://example.com/alt"
+           targetNamespace="http://example.com/alt"
+           elementFormDefault="qualified">
+
+  <xs:complexType name="Animal">
+    <xs:sequence>
+      <xs:element name="Name" type="xs:string"/>
+    </xs:sequence>
+    <xs:attribute name="kind" type="xs:string"/>
+  </xs:complexType>
+
+  <xs:complexType name="Dog">
+    <xs:complexContent>
+      <xs:extension base="tns:Animal">
+        <xs:sequence>
+          <xs:element name="Breed" type="xs:string"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:element name="Pet" type="tns:Animal">
+    <xs:alternative test="@kind = 'dog'" type="tns:Dog"/>
+    <xs:alternative test="@kind = 'cat'"
+                    xpathDefaultNamespace="http://example.com/alt">
+      <xs:complexType>
+        <xs:complexContent>
+          <xs:extension base="tns:Animal">
+            <xs:sequence>
+              <xs:element name="Indoor" type="xs:boolean"/>
+            </xs:sequence>
+          </xs:extension>
+        </xs:complexContent>
+      </xs:complexType>
+    </xs:alternative>
+    <xs:alternative type="tns:Animal" vc:minVersion="1.1"/>
+  </xs:element>
+
+</xs:schema>

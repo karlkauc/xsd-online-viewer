@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:tns="http://example.com/inh"
+           targetNamespace="http://example.com/inh"
+           elementFormDefault="qualified"
+           defaultAttributes="tns:CommonAttrs">
+
+  <xs:attributeGroup name="CommonAttrs">
+    <xs:attribute name="lang" type="xs:string"/>
+    <xs:attribute name="audit" type="xs:string"/>
+  </xs:attributeGroup>
+
+  <!-- Inheritable attribute on a complex type. -->
+  <xs:complexType name="Document">
+    <xs:sequence>
+      <xs:element name="Title" type="xs:string"/>
+    </xs:sequence>
+    <xs:attribute name="security" type="xs:string" inheritable="true"/>
+  </xs:complexType>
+
+  <!-- xs:all with maxOccurs=3 and an xs:any wildcard inside (XSD 1.1). -->
+  <xs:complexType name="Bag">
+    <xs:all maxOccurs="3">
+      <xs:element name="Item" type="xs:string"/>
+      <xs:any namespace="##other" processContents="lax"/>
+    </xs:all>
+  </xs:complexType>
+
+  <!-- Opts out of the schema-wide defaultAttributes. -->
+  <xs:complexType name="Plain" defaultAttributesApply="false">
+    <xs:sequence>
+      <xs:element name="Body" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+</xs:schema>

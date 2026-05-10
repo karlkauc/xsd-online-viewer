@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import type {
   NodeIndexEntry,
+  OverrideDirective,
+  OverrideReplacement,
   SchemaModel,
   SchemaNode,
   SchemaNodeKind,
@@ -16,6 +18,11 @@ interface SelectionState {
   indexById: Map<string, NodeIndexEntry>;
   usagesByTarget: Map<string, NodeIndexEntry[]>;
   parentById: Map<string, string>;
+  overrideByReplacementId: Map<
+    string,
+    { directive: OverrideDirective; replacement: OverrideReplacement }
+  >;
+  overridesByOriginalKey: Map<string, OverrideReplacement[]>;
 
   activeTab: ViewTab;
   selectedId: string | null;
@@ -50,6 +57,8 @@ export const useSelection = create<SelectionState>((set, get) => ({
   indexById: new Map(),
   usagesByTarget: new Map(),
   parentById: new Map(),
+  overrideByReplacementId: new Map(),
+  overridesByOriginalKey: new Map(),
 
   activeTab: "diagram",
   selectedId: null,
@@ -58,7 +67,14 @@ export const useSelection = create<SelectionState>((set, get) => ({
   searchQuery: "",
 
   setSchema: (schemaId, model) => {
-    const { index, indexById, usagesByTarget, parentById } = buildIndex(model);
+    const {
+      index,
+      indexById,
+      usagesByTarget,
+      parentById,
+      overrideByReplacementId,
+      overridesByOriginalKey,
+    } = buildIndex(model);
     set({
       schemaId,
       model,
@@ -66,6 +82,8 @@ export const useSelection = create<SelectionState>((set, get) => ({
       indexById,
       usagesByTarget,
       parentById,
+      overrideByReplacementId,
+      overridesByOriginalKey,
       selectedId: null,
       expandedIds: new Set(),
       searchQuery: "",
@@ -80,6 +98,8 @@ export const useSelection = create<SelectionState>((set, get) => ({
       indexById: new Map(),
       usagesByTarget: new Map(),
       parentById: new Map(),
+      overrideByReplacementId: new Map(),
+      overridesByOriginalKey: new Map(),
       selectedId: null,
       expandedIds: new Set(),
     }),

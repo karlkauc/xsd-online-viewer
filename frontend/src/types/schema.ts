@@ -32,6 +32,28 @@ export interface Diagnostic {
   line: number | null;
 }
 
+// XSD 1.1 conditional-inclusion vocabulary (vc:*). Display-only.
+export interface VersionConstraints {
+  min_version: string | null;
+  max_version: string | null;
+  type_available: string | null;
+  type_unavailable: string | null;
+  facet_available: string | null;
+  facet_unavailable: string | null;
+}
+
+// XSD 1.1 wildcard shape — reused by OpenContent (Phase 4) and richer
+// xs:any rendering.
+export interface Wildcard {
+  namespace: string | null;
+  not_namespace: string | null;
+  not_qname: string | null;
+  process_contents: "strict" | "lax" | "skip" | null;
+  annotation: Annotation | null;
+}
+
+export type XsdVersion = "1.0" | "1.1" | "unknown";
+
 export type FacetKind =
   | "enumeration"
   | "pattern"
@@ -45,6 +67,7 @@ export type FacetKind =
   | "totalDigits"
   | "fractionDigits"
   | "whiteSpace"
+  // Retained for type stability; backend stops emitting it as of Phase 2.
   | "assertion"
   | "explicitTimezone";
 
@@ -53,6 +76,17 @@ export interface Facet {
   value: string;
   fixed: boolean;
   annotation: Annotation | null;
+  version_constraints?: VersionConstraints | null;
+}
+
+// XSD 1.1 ``xs:assert`` (on complex types) and ``xs:assertion`` (on simple
+// types). Stored as the raw XPath 2.0 text; never evaluated.
+export interface Assertion {
+  test: string;
+  xpath_default_namespace: string | null;
+  annotation: Annotation | null;
+  source_ref: SourceRef | null;
+  version_constraints?: VersionConstraints | null;
 }
 
 export type SimpleTypeDerivation = "restriction" | "list" | "union" | "atomic";
@@ -70,6 +104,8 @@ export interface SimpleType {
   facets: Facet[];
   annotation: Annotation | null;
   source_ref: SourceRef | null;
+  version_constraints?: VersionConstraints | null;
+  assertions?: Assertion[];
 }
 
 export type AttributeUse = "required" | "optional" | "prohibited";
@@ -89,6 +125,8 @@ export interface AttributeDecl {
   is_global: boolean;
   annotation: Annotation | null;
   source_ref: SourceRef | null;
+  version_constraints?: VersionConstraints | null;
+  inheritable?: boolean;
 }
 
 export interface AttributeGroup {
@@ -99,6 +137,7 @@ export interface AttributeGroup {
   attribute_group_refs: QName[];
   annotation: Annotation | null;
   source_ref: SourceRef | null;
+  version_constraints?: VersionConstraints | null;
 }
 
 export type ParticleKind =
@@ -120,6 +159,7 @@ export interface Particle {
   wildcard_namespace: string | null;
   wildcard_process_contents: "strict" | "lax" | "skip" | null;
   annotation: Annotation | null;
+  version_constraints?: VersionConstraints | null;
 }
 
 export interface ElementDecl {
@@ -142,6 +182,8 @@ export interface ElementDecl {
   is_global: boolean;
   annotation: Annotation | null;
   source_ref: SourceRef | null;
+  version_constraints?: VersionConstraints | null;
+  alternatives?: Alternative[];
 }
 
 export type ComplexDerivationKind = "none" | "restriction" | "extension";
@@ -163,6 +205,10 @@ export interface ComplexType {
   simple_content_facets: Facet[];
   annotation: Annotation | null;
   source_ref: SourceRef | null;
+  version_constraints?: VersionConstraints | null;
+  assertions?: Assertion[];
+  open_content?: OpenContent | null;
+  default_attributes_apply?: boolean;
 }
 
 export interface Group {
@@ -172,6 +218,30 @@ export interface Group {
   particle: Particle | null;
   annotation: Annotation | null;
   source_ref: SourceRef | null;
+  version_constraints?: VersionConstraints | null;
+}
+
+// XSD 1.1 ``xs:alternative`` — conditional type assignment. ``test`` is
+// the raw XPath 2.0 predicate; ``test === null`` marks the default branch.
+export interface Alternative {
+  test: string | null;
+  type_name: QName | null;
+  type_inline_simple: SimpleType | null;
+  type_inline_complex: ComplexType | null;
+  xpath_default_namespace: string | null;
+  annotation: Annotation | null;
+  source_ref: SourceRef | null;
+  version_constraints?: VersionConstraints | null;
+}
+
+// XSD 1.1 ``xs:openContent`` / ``xs:defaultOpenContent``. Display-only.
+export interface OpenContent {
+  mode: "interleave" | "suffix" | "none";
+  applies_to_empty: boolean;
+  wildcard: Wildcard | null;
+  annotation: Annotation | null;
+  source_ref: SourceRef | null;
+  version_constraints?: VersionConstraints | null;
 }
 
 export interface SourceFile {
@@ -180,6 +250,31 @@ export interface SourceFile {
   target_namespace: string | null;
   relationship: "main" | "include" | "import" | "redefine" | "override";
   content: string | null;
+}
+
+export type OverrideKind =
+  | "element"
+  | "attribute"
+  | "simpleType"
+  | "complexType"
+  | "group"
+  | "attributeGroup"
+  | "notation";
+
+// XSD 1.1 ``xs:override`` — display-only. Originals stay where they were
+// declared; replacements coexist with them in the same SchemaModel lists,
+// distinguished by id and cross-referenced via ``OverrideDirective``.
+export interface OverrideReplacement {
+  kind: OverrideKind;
+  qname: QName;
+  replacement_id: string;
+  source_ref: SourceRef | null;
+}
+
+export interface OverrideDirective {
+  target_file_id: string;
+  replacements: OverrideReplacement[];
+  source_ref: SourceRef | null;
 }
 
 export interface SchemaModel {
@@ -196,6 +291,13 @@ export interface SchemaModel {
   attribute_groups: AttributeGroup[];
   files: SourceFile[];
   diagnostics: Diagnostic[];
+  // XSD 1.1 schema-level information. All optional in TS so existing test
+  // fixtures continue to compile; the backend always emits these fields.
+  xsd_version?: XsdVersion;
+  xpath_default_namespace?: string | null;
+  default_attributes?: QName | null;
+  default_open_content?: OpenContent | null;
+  overrides?: OverrideDirective[];
 }
 
 export interface SchemaResponse {

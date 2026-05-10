@@ -4,6 +4,7 @@ import { xml } from "@codemirror/lang-xml";
 import { StateEffect, StateField } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useSelection } from "../../stores/selectionStore";
+import { XsdVersionPill } from "../DetailPanel";
 
 const isDark = () => document.documentElement.classList.contains("dark");
 
@@ -118,6 +119,9 @@ export function TextView() {
             {f.filename.split("/").pop()}
           </button>
         ))}
+        <span className="ml-2">
+          <XsdVersionPill version={model.xsd_version ?? "unknown"} />
+        </span>
         {schemaId && activeFile.content && (
           <a
             className="btn ml-auto text-xs"

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:tns="http://example.com/ovr"
+           targetNamespace="http://example.com/ovr"
+           elementFormDefault="qualified">
+
+  <xs:complexType name="ColorType">
+    <xs:sequence>
+      <xs:element name="R" type="xs:int"/>
+      <xs:element name="G" type="xs:int"/>
+      <xs:element name="B" type="xs:int"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:element name="OriginalOnly" type="xs:string"/>
+
+</xs:schema>

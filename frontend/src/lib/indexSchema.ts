@@ -8,6 +8,8 @@ import type {
   ElementDecl,
   Group,
   NodeIndexEntry,
+  OverrideDirective,
+  OverrideReplacement,
   Particle,
   SchemaModel,
   SchemaNodeKind,
@@ -23,6 +25,14 @@ export interface IndexBundle {
   // Child id -> parent id, used by the Breadcrumb to reconstruct the full
   // ancestor path of the current selection.
   parentById: Map<string, string>;
+  // XSD 1.1 ``xs:override`` cross-references. Replacement-id → directive
+  // and the replacement entry itself; original (kind+qname) → list of
+  // replacements that apply to it.
+  overrideByReplacementId: Map<
+    string,
+    { directive: OverrideDirective; replacement: OverrideReplacement }
+  >;
+  overridesByOriginalKey: Map<string, OverrideReplacement[]>;
 }
 
 export function buildIndex(model: SchemaModel): IndexBundle {
@@ -159,7 +169,39 @@ export function buildIndex(model: SchemaModel): IndexBundle {
   const indexById = new Map<string, NodeIndexEntry>();
   for (const entry of entries) indexById.set(entry.id, entry);
 
-  return { index: entries, indexById, usagesByTarget, parentById };
+  const overrideByReplacementId = new Map<
+    string,
+    { directive: OverrideDirective; replacement: OverrideReplacement }
+  >();
+  const overridesByOriginalKey = new Map<string, OverrideReplacement[]>();
+  for (const directive of model.overrides ?? []) {
+    for (const replacement of directive.replacements) {
+      overrideByReplacementId.set(replacement.replacement_id, {
+        directive,
+        replacement,
+      });
+      const key = overrideKey(replacement.kind, replacement.qname);
+      const list = overridesByOriginalKey.get(key) ?? [];
+      list.push(replacement);
+      overridesByOriginalKey.set(key, list);
+    }
+  }
+
+  return {
+    index: entries,
+    indexById,
+    usagesByTarget,
+    parentById,
+    overrideByReplacementId,
+    overridesByOriginalKey,
+  };
+}
+
+// Stable key for cross-referencing an original declaration with its override
+// replacements. Replacements carry the qname produced by the parser
+// (Clark-form for namespaced names, bare local otherwise).
+export function overrideKey(kind: string, qname: string): string {
+  return `${kind}:${qname}`;
 }
 
 // Resolve a QName reference from a declaration to an entry in the index.

@@ -12,6 +12,8 @@ interface ElementNodeData {
   attributes?: { id: string; name: string | null; type_name: string | null }[];
   documentationLines?: string[];
   documentationFull?: string | null;
+  assertCount?: number;
+  alternativesCount?: number;
 }
 
 export function ElementNode({ data }: { data: ElementNodeData }) {
@@ -29,9 +31,27 @@ export function ElementNode({ data }: { data: ElementNodeData }) {
       style={{ width: 220 }}
     >
       <Handle type="target" position={Position.Left} />
-      <div className="flex items-center justify-between px-2 py-1 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800">
+      <div className="flex items-center justify-between gap-1 px-2 py-1 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800">
         <span className="font-mono font-semibold truncate">{data.label}</span>
-        {data.occurs && <span className="text-[10px] text-slate-500">{data.occurs}</span>}
+        <span className="flex items-center gap-1 shrink-0">
+          {data.alternativesCount && data.alternativesCount > 0 ? (
+            <span
+              className="inline-flex items-center gap-0.5 px-1 rounded text-[9.5px] font-mono font-medium border bg-violet-50 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-200 dark:border-violet-800/60"
+              title={`${data.alternativesCount} XSD 1.1 type alternative${data.alternativesCount === 1 ? "" : "s"}`}
+            >
+              ≷ {data.alternativesCount}
+            </span>
+          ) : null}
+          {data.assertCount && data.assertCount > 0 ? (
+            <span
+              className="inline-flex items-center gap-0.5 px-1 rounded text-[9.5px] font-mono font-medium border bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800/60"
+              title={`${data.assertCount} XSD 1.1 assertion${data.assertCount === 1 ? "" : "s"}`}
+            >
+              ⚖ {data.assertCount}
+            </span>
+          ) : null}
+          {data.occurs && <span className="text-[10px] text-slate-500">{data.occurs}</span>}
+        </span>
       </div>
       <div className="px-2 py-1 font-mono text-[11px] text-slate-500 dark:text-slate-400 truncate">
         {data.type ?? "anonymous"}

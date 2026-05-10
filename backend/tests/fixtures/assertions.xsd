@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:vc="http://www.w3.org/2007/XMLSchema-versioning"
+           xmlns:tns="http://example.com/assert"
+           targetNamespace="http://example.com/assert"
+           elementFormDefault="qualified">
+
+  <xs:complexType name="DateRange">
+    <xs:sequence>
+      <xs:element name="From" type="xs:date"/>
+      <xs:element name="To"   type="xs:date"/>
+    </xs:sequence>
+    <xs:assert test="xs:date(From) le xs:date(To)"/>
+    <xs:assert test="xs:date(To)   le current-date()"
+               xpathDefaultNamespace="http://example.com/assert">
+      <xs:annotation>
+        <xs:documentation xml:lang="en">Range must not extend into the future.</xs:documentation>
+      </xs:annotation>
+    </xs:assert>
+    <xs:assert test="true()" vc:minVersion="1.1"/>
+  </xs:complexType>
+
+  <xs:simpleType name="EvenInt">
+    <xs:restriction base="xs:integer">
+      <xs:minInclusive value="0"/>
+      <xs:assertion test="$value mod 2 eq 0"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>

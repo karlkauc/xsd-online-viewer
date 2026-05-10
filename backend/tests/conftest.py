@@ -37,3 +37,38 @@ def xxe_attack_bytes() -> bytes:
 @pytest.fixture
 def billion_laughs_bytes() -> bytes:
     return (FIXTURES_DIR / "billion_laughs.xsd").read_bytes()
+
+
+@pytest.fixture
+def vc_versioning_xsd_bytes() -> bytes:
+    return (FIXTURES_DIR / "vc-versioning.xsd").read_bytes()
+
+
+@pytest.fixture
+def assertions_xsd_bytes() -> bytes:
+    return (FIXTURES_DIR / "assertions.xsd").read_bytes()
+
+
+@pytest.fixture
+def alternatives_xsd_bytes() -> bytes:
+    return (FIXTURES_DIR / "alternatives.xsd").read_bytes()
+
+
+@pytest.fixture
+def open_content_xsd_bytes() -> bytes:
+    return (FIXTURES_DIR / "open-content.xsd").read_bytes()
+
+
+@pytest.fixture
+def inheritable_and_all_xsd_bytes() -> bytes:
+    return (FIXTURES_DIR / "inheritable-and-all.xsd").read_bytes()
+
+
+@pytest.fixture
+def override_xsd_bytes() -> bytes:
+    return (FIXTURES_DIR / "override.xsd").read_bytes()
+
+
+@pytest.fixture
+def override_base_xsd_bytes() -> bytes:
+    return (FIXTURES_DIR / "override-base.xsd").read_bytes()
