@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Scientific measurement schema — combined XSD 1.1 showcase.
+
+  Features exercised:
+    * xs:assert              — non-negative uncertainty, capped by |Value|
+    * xs:alternative         — content model picked from @unit family
+    * @inheritable           — @lang flows down to nested measurements
+    * vc:typeAvailable       — ObservedAt requires xs:dateTimeStamp (1.1)
+    * xpathDefaultNamespace  — assertions reference local names directly
+-->
+<xs:schema
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:vc="http://www.w3.org/2007/XMLSchema-versioning"
+    xmlns:m="http://example.com/measurement/v1"
+    targetNamespace="http://example.com/measurement/v1"
+    elementFormDefault="qualified"
+    xpathDefaultNamespace="http://example.com/measurement/v1"
+    vc:minVersion="1.1">
+
+  <xs:element name="Measurement" type="m:MeasurementType"/>
+
+  <xs:complexType name="MeasurementType">
+    <xs:sequence>
+      <xs:element name="Value"       type="xs:decimal"/>
+      <xs:element name="Uncertainty" type="xs:decimal"          minOccurs="0"/>
+      <xs:element name="Precision"   type="xs:positiveInteger"  minOccurs="0"/>
+      <xs:element name="ObservedAt"  type="xs:dateTimeStamp"
+                  minOccurs="0"
+                  vc:typeAvailable="xs:dateTimeStamp"/>
+    </xs:sequence>
+
+    <xs:attribute name="unit" type="xs:string" use="required"/>
+    <!-- @lang propagates down to nested Measurement elements. -->
+    <xs:attribute name="lang" type="xs:language" inheritable="true"/>
+
+    <!-- Uncertainty (when present) must be non-negative and ≤ |Value|. -->
+    <xs:assert test="not(Uncertainty) or
+                     (Uncertainty ge 0 and Uncertainty le abs(Value))"/>
+    <!-- Precision (when present) bounds the digit count of Value. -->
+    <xs:assert test="not(Precision) or
+                     string-length(string(Value)) le Precision + 2"/>
+  </xs:complexType>
+
+  <!-- Pick a specialised type at element validation time based on @unit. -->
+  <xs:element name="ScaledMeasurement" type="m:MeasurementType">
+    <xs:alternative test="@unit = ('m','cm','mm','km')" type="m:LengthMeasurement"/>
+    <xs:alternative test="@unit = ('g','kg','t')"       type="m:WeightMeasurement"/>
+    <xs:alternative                                     type="m:MeasurementType"/>
+  </xs:element>
+
+  <xs:complexType name="LengthMeasurement">
+    <xs:complexContent>
+      <xs:extension base="m:MeasurementType">
+        <xs:attribute name="referenceFrame" type="xs:string"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="WeightMeasurement">
+    <xs:complexContent>
+      <xs:extension base="m:MeasurementType">
+        <xs:attribute name="standardGravity" type="xs:boolean" default="true"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+</xs:schema>

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Chess game record — XSD 1.1 showcase.
+
+  Features exercised:
+    * xs:all maxOccurs > 1   — header blocks may appear multiple times (1.1)
+    * xs:any inside xs:all   — non-namespaced annotations alongside fixed
+                                blocks (forbidden in XSD 1.0, allowed in 1.1)
+    * xs:alternative          — Result shape switches by @outcome
+    * xs:assert               — Player rating must lie in a sane Elo range
+    * @inheritable            — @ratingSystem flows down to embedded players
+-->
+<xs:schema
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:c="http://example.com/chess/v1"
+    targetNamespace="http://example.com/chess/v1"
+    elementFormDefault="qualified">
+
+  <xs:element name="Game" type="c:GameType"/>
+
+  <xs:complexType name="GameType">
+    <!-- The three header blocks may appear in any order. XSD 1.1 lifts
+         the maxOccurs ≤ 1 restriction (so Tags can repeat) and permits
+         a wildcard slot directly inside xs:all. -->
+    <xs:all maxOccurs="3">
+      <xs:element name="Players" type="c:Players"/>
+      <xs:element name="Site"    type="xs:string" minOccurs="0"/>
+      <xs:element name="Tags"    minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="Name"  type="xs:string"/>
+            <xs:element name="Value" type="xs:string"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:any namespace="##other" minOccurs="0" processContents="lax"/>
+    </xs:all>
+
+    <xs:attribute name="outcome" use="required">
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="white-wins"/>
+          <xs:enumeration value="black-wins"/>
+          <xs:enumeration value="draw"/>
+          <xs:enumeration value="ongoing"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+
+    <xs:attribute name="moves" type="xs:nonNegativeInteger" use="required"/>
+    <!-- @ratingSystem inherits down to Players/White, Players/Black, etc. -->
+    <xs:attribute name="ratingSystem" type="xs:string" inheritable="true"/>
+  </xs:complexType>
+
+  <xs:complexType name="Players">
+    <xs:sequence>
+      <xs:element name="White" type="c:Player"/>
+      <xs:element name="Black" type="c:Player"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="Player">
+    <xs:attribute name="name"   type="xs:string"          use="required"/>
+    <xs:attribute name="rating" type="xs:positiveInteger" use="required"/>
+    <!-- Reject ratings outside a reasonable Elo range. -->
+    <xs:assert test="@rating ge 100 and @rating le 3500"/>
+  </xs:complexType>
+
+  <!-- Outcome-driven Result shape: the conditional type assignment picks
+       a different complex type per game outcome. -->
+  <xs:element name="Result">
+    <xs:alternative test="@outcome = 'draw'"    type="c:DrawResult"/>
+    <xs:alternative test="@outcome = 'ongoing'" type="c:OngoingResult"/>
+    <xs:alternative                             type="c:WinResult"/>
+  </xs:element>
+
+  <xs:complexType name="WinResult">
+    <xs:sequence>
+      <xs:element name="WinningMove" type="xs:string"/>
+      <xs:element name="Material"    type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="outcome" type="xs:string"/>
+  </xs:complexType>
+
+  <xs:complexType name="DrawResult">
+    <xs:sequence>
+      <xs:element name="Reason" type="xs:string"/>
+    </xs:sequence>
+    <xs:attribute name="outcome" type="xs:string"/>
+  </xs:complexType>
+
+  <xs:complexType name="OngoingResult">
+    <xs:sequence>
+      <xs:element name="LastMoveTime" type="xs:dateTime"/>
+    </xs:sequence>
+    <xs:attribute name="outcome" type="xs:string"/>
+  </xs:complexType>
+
+</xs:schema>

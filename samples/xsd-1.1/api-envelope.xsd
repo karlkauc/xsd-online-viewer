@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  REST API response envelope — XSD 1.1 showcase.
+
+  Features exercised:
+    * xs:defaultOpenContent  — schema-wide forward-compat extension slot
+    * xs:openContent          — per-type override (suffix on success Data,
+                                opt-out via mode="none" on Error)
+    * xs:alternative          — response shape switches on the @status code class
+    * xs:assert               — Pagination invariant (Page * PageSize ≤ Total)
+    * vc:typeAvailable        — ServedAt depends on xs:dateTimeStamp (1.1)
+-->
+<xs:schema
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:vc="http://www.w3.org/2007/XMLSchema-versioning"
+    xmlns:a="http://example.com/api/v1"
+    targetNamespace="http://example.com/api/v1"
+    elementFormDefault="qualified"
+    vc:minVersion="1.1">
+
+  <!-- Every complexType in this schema accepts unknown elements from
+       other namespaces, unless it opts out with <xs:openContent mode="none"/>. -->
+  <xs:defaultOpenContent mode="interleave">
+    <xs:any namespace="##other" processContents="lax"/>
+  </xs:defaultOpenContent>
+
+  <xs:element name="Response">
+    <xs:alternative test="@status lt 300" type="a:SuccessResponse"/>
+    <xs:alternative test="@status ge 400" type="a:ErrorResponse"/>
+    <xs:alternative                       type="a:Response"/>  <!-- redirects, defaults -->
+  </xs:element>
+
+  <xs:complexType name="Response">
+    <xs:sequence>
+      <xs:element name="RequestId" type="xs:string"/>
+      <xs:element name="ServedAt"  type="xs:dateTimeStamp"
+                  vc:typeAvailable="xs:dateTimeStamp"/>
+    </xs:sequence>
+    <xs:attribute name="status" type="xs:positiveInteger" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="SuccessResponse">
+    <xs:complexContent>
+      <xs:extension base="a:Response">
+        <xs:sequence>
+          <xs:element name="Data">
+            <xs:complexType>
+              <!-- Suffix-mode: extension elements appear *after* the
+                   declared content rather than interleaved. -->
+              <xs:openContent mode="suffix">
+                <xs:any namespace="##any" processContents="skip"/>
+              </xs:openContent>
+              <xs:sequence>
+                <xs:element name="Items" type="xs:int"/>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element name="Pagination" minOccurs="0">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element name="Page"     type="xs:nonNegativeInteger"/>
+                <xs:element name="PageSize" type="xs:positiveInteger"/>
+                <xs:element name="Total"    type="xs:nonNegativeInteger"/>
+              </xs:sequence>
+              <!-- A pagination cursor must not point past the total set. -->
+              <xs:assert test="Page * PageSize le Total"/>
+            </xs:complexType>
+          </xs:element>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="ErrorResponse">
+    <xs:complexContent>
+      <xs:extension base="a:Response">
+        <xs:sequence>
+          <xs:element name="Error">
+            <xs:complexType>
+              <!-- Error payloads are intentionally locked down: no extension
+                   fields beyond Code and Message. -->
+              <xs:openContent mode="none"/>
+              <xs:sequence>
+                <xs:element name="Code"    type="xs:string"/>
+                <xs:element name="Message" type="xs:string"/>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+</xs:schema>

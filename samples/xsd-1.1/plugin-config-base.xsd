@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Plugin configuration — base schema, intentionally permissive.
+
+  Pair this file with plugin-config-strict.xsd (uses xs:override to
+  swap the SecurityPolicy type for a deny-by-default variant and adds
+  a Quotas element).
+
+  Features exercised in THIS file:
+    * defaultAttributes    — every complexType implicitly gets the Audit
+                              attribute group unless it opts out
+    * @inheritable         — @env flows from PluginConfig down to
+                              nested SecurityPolicy entries
+-->
+<xs:schema
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:p="http://example.com/plugin-config/v1"
+    targetNamespace="http://example.com/plugin-config/v1"
+    elementFormDefault="qualified"
+    defaultAttributes="p:Audit">
+
+  <xs:attributeGroup name="Audit">
+    <xs:attribute name="createdBy" type="xs:string"/>
+    <xs:attribute name="createdAt" type="xs:dateTime"/>
+  </xs:attributeGroup>
+
+  <xs:element name="PluginConfig" type="p:PluginConfigType"/>
+
+  <xs:complexType name="PluginConfigType">
+    <xs:sequence>
+      <xs:element name="Name"     type="xs:string"/>
+      <xs:element name="Security" type="p:SecurityPolicy" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="env" type="xs:string" inheritable="true"/>
+  </xs:complexType>
+
+  <!-- Permissive defaults — both flags ON. The strict variant overrides
+       this definition with a deny-by-default policy and an assertion. -->
+  <xs:complexType name="SecurityPolicy">
+    <xs:sequence>
+      <xs:element name="AllowNetwork" type="xs:boolean" default="true"/>
+      <xs:element name="AllowFs"      type="xs:boolean" default="true"/>
+    </xs:sequence>
+  </xs:complexType>
+
+</xs:schema>

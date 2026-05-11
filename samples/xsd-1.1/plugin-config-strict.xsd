@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Plugin configuration — strict variant.
+
+  Pair this with plugin-config-base.xsd: zip the two together and
+  upload (set the main file to plugin-config-strict.xsd).
+
+  Features exercised:
+    * xs:override          — replaces the base SecurityPolicy type with a
+                              deny-by-default version AND adds a brand-new
+                              Quotas top-level element
+    * xs:assert            — enforces that if a flag is left on, the
+                              Justification field must be populated
+-->
+<xs:schema
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:p="http://example.com/plugin-config/v1"
+    targetNamespace="http://example.com/plugin-config/v1"
+    elementFormDefault="qualified">
+
+  <xs:override schemaLocation="plugin-config-base.xsd">
+
+    <!-- Strict SecurityPolicy: flags default to false, and any deviation
+         must be accompanied by a free-text Justification. -->
+    <xs:complexType name="SecurityPolicy">
+      <xs:sequence>
+        <xs:element name="AllowNetwork"  type="xs:boolean" default="false"/>
+        <xs:element name="AllowFs"       type="xs:boolean" default="false"/>
+        <xs:element name="Justification" type="xs:string"  minOccurs="0"/>
+      </xs:sequence>
+      <xs:assert test="(AllowNetwork = false() and AllowFs = false())
+                       or (Justification and string-length(Justification) gt 0)"/>
+    </xs:complexType>
+
+    <!-- New element only present in the strict variant. -->
+    <xs:element name="Quotas">
+      <xs:complexType>
+        <xs:sequence>
+          <xs:element name="MaxCpuSeconds" type="xs:positiveInteger"/>
+          <xs:element name="MaxMemoryMb"   type="xs:positiveInteger"/>
+        </xs:sequence>
+      </xs:complexType>
+    </xs:element>
+
+  </xs:override>
+
+</xs:schema>

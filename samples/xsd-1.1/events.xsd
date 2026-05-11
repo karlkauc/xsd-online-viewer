@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Event stream schema — XSD 1.1 built-in datatypes showcase.
+
+  Features exercised:
+    * xs:dateTimeStamp      — timezoned timestamp (1.1 built-in)
+    * xs:yearMonthDuration  — calendar-aware duration (1.1 built-in)
+    * xs:dayTimeDuration    — clock-aware duration (1.1 built-in)
+    * xs:precisionDecimal   — IEEE-aware decimal with explicit precision
+    * explicitTimezone facet — restrict OccurredAt to require a TZ
+    * xs:assertion (simple)  — non-empty payload digest
+
+  Each 1.1 built-in is highlighted with a `1.1` pill in the viewer.
+-->
+<xs:schema
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:e="http://example.com/events/v1"
+    targetNamespace="http://example.com/events/v1"
+    elementFormDefault="qualified">
+
+  <xs:element name="Event" type="e:EventType"/>
+
+  <xs:complexType name="EventType">
+    <xs:sequence>
+      <xs:element name="Id"          type="xs:string"/>
+      <!-- Required TZ-aware timestamp. -->
+      <xs:element name="OccurredAt"  type="e:TimezonedInstant"/>
+      <!-- A retention window expressed as a calendar-aware duration. -->
+      <xs:element name="Retention"   type="xs:yearMonthDuration" minOccurs="0"/>
+      <!-- An optional processing-time SLA expressed in clock units. -->
+      <xs:element name="SlaWithin"   type="xs:dayTimeDuration"   minOccurs="0"/>
+      <!-- Measurement-style payload with IEEE precision semantics. -->
+      <xs:element name="Score"       type="xs:precisionDecimal"  minOccurs="0"/>
+      <xs:element name="PayloadHash" type="e:NonEmptyToken"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:simpleType name="TimezonedInstant">
+    <xs:restriction base="xs:dateTimeStamp">
+      <!-- The 1.1 explicitTimezone facet pinning required TZ presence. -->
+      <xs:explicitTimezone value="required"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="NonEmptyToken">
+    <xs:restriction base="xs:token">
+      <xs:minLength value="1"/>
+      <!-- Simple-type level assertion (XSD 1.1 xs:assertion). -->
+      <xs:assertion test="$value != normalize-space('')"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>
