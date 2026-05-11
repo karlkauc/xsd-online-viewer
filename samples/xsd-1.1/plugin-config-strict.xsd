@@ -16,7 +16,8 @@
     xmlns:xs="http://www.w3.org/2001/XMLSchema"
     xmlns:p="http://example.com/plugin-config/v1"
     targetNamespace="http://example.com/plugin-config/v1"
-    elementFormDefault="qualified">
+    elementFormDefault="qualified"
+    defaultAttributes="p:Audit">
 
   <xs:override schemaLocation="plugin-config-base.xsd">
 
