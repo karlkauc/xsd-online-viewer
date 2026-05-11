@@ -74,6 +74,7 @@ export default function App() {
   const setActiveTab = useSelection((s) => s.setActiveTab);
   const selectedId = useSelection((s) => s.selectedId);
   const setSelected = useSelection((s) => s.setSelected);
+  const clearSchema = useSelection((s) => s.clearSchema);
 
   const [structureCollapsed, setStructureCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -122,6 +123,17 @@ export default function App() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {model && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => clearSchema()}
+              title="Drop the current schema and load a different file"
+              aria-label="Load a different schema file"
+            >
+              📂 Load new…
+            </button>
+          )}
           <button
             type="button"
             className="btn"
