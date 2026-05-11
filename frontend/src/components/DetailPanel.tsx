@@ -58,9 +58,16 @@ export function DetailPanel() {
     const originalsKey = entry.qname
       ? overrideKey(entry.kind, entry.qname)
       : null;
-    const replacementsOnThis = originalsKey
+    const rawReplacements = originalsKey
       ? overridesByOriginalKey.get(originalsKey) ?? []
       : [];
+    // A replacement shares kind+qname with the original, so the lookup
+    // above also returns the selected node itself when it IS a replacement.
+    // Strip self-references so we don't render "overridden by" pointing at
+    // the very thing the user is already looking at.
+    const replacementsOnThis = rawReplacements.filter(
+      (r) => r.replacement_id !== entry.id,
+    );
     if (!asReplacement && replacementsOnThis.length === 0) return null;
     return { asReplacement, replacementsOnThis };
   }, [entry, overrideByReplacementId, overridesByOriginalKey]);
@@ -853,11 +860,13 @@ function OverrideOriginButton({
   // Best-effort jump back to the *original* by id. We don't carry a direct
   // pointer in the replacement, so reconstruct the canonical id (kind:qname).
   const originalId = `${replacement.kind}:${replacement.qname}`;
+  const label = `This is a replacement for ${replacement.kind} ${replacement.qname} (xs:override)`;
   return (
     <button
       type="button"
       onClick={() => setSelected(originalId)}
-      title={`This is a replacement for ${replacement.kind} ${replacement.qname} (xs:override)`}
+      title={label}
+      aria-label={label}
       className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-mono font-medium border bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-200 dark:border-rose-800/60 hover:bg-rose-100 dark:hover:bg-rose-900/50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
     >
       <span className="text-[9px] uppercase tracking-wide font-semibold opacity-70">
@@ -877,20 +886,24 @@ function OverriddenByButtons({
 }) {
   return (
     <>
-      {replacements.map((r) => (
-        <button
-          key={r.replacement_id}
-          type="button"
-          onClick={() => setSelected(r.replacement_id)}
-          title={`Overridden by ${r.kind} declared in an xs:override block`}
-          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-mono font-medium border bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
-        >
-          <span className="text-[9px] uppercase tracking-wide font-semibold opacity-70">
-            overridden by
-          </span>
-          <span className="truncate max-w-[160px]">replacement</span>
-        </button>
-      ))}
+      {replacements.map((r) => {
+        const label = `Overridden by ${r.kind} declared in an xs:override block`;
+        return (
+          <button
+            key={r.replacement_id}
+            type="button"
+            onClick={() => setSelected(r.replacement_id)}
+            title={label}
+            aria-label={label}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-mono font-medium border bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+          >
+            <span className="text-[9px] uppercase tracking-wide font-semibold opacity-70">
+              overridden by
+            </span>
+            <span className="truncate max-w-[160px]">replacement</span>
+          </button>
+        );
+      })}
     </>
   );
 }

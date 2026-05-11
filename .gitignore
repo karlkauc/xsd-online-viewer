@@ -28,6 +28,7 @@ frontend/tests/**/*.js
 playwright-report/
 test-results/
 .playwright/
+.playwright-mcp/
 
 # Coverage
 .coverage
