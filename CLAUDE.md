@@ -58,6 +58,20 @@ docker tag online-xsd-viewer:latest online-xsd-viewer:test
 bash deploy/run-container.sh                       # recreates the :8180 container
 ```
 
+- **Google Cloud Run** — service `xsdviewer` in project
+  `xsd-viewer-495407`, region `europe-west1`
+  (`https://xsdviewer-7wvlx2kjfq-ew.a.run.app`). Independent of the two
+  containers above. Redeploy from the repo root — Cloud Build rebuilds
+  from the `Dockerfile`, creates a new revision, and shifts 100 % traffic;
+  existing service config (env vars, memory, scaling) is retained:
+
+  ```bash
+  gcloud run deploy xsdviewer --source . --region europe-west1
+  ```
+
+  Full setup, sizing, env-var and rollback details:
+  `docs/DEPLOY_GCLOUD.md`.
+
 After deploying, hard-reload the browser (Ctrl+F5) — the SPA JS bundle is
 cached and a soft reload can keep showing the old UI.
 
