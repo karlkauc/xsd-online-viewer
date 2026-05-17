@@ -38,6 +38,29 @@ cd frontend && npm ci && npm run dev
 - E2E: `cd e2e && npm ci && npx playwright test` — requires both backend and
   the built frontend to be running.
 
+## Deployment (read before redeploying)
+
+There are **two independent containers** — don't confuse them:
+
+- **Local sandbox** — `docker compose up -d --build` builds
+  `online-xsd-viewer:latest` and runs a container on `127.0.0.1:8090`.
+  For local testing only; **not** what the public site serves.
+- **Public site** (`https://viewer.status20.net/`) — Apache reverse-proxies
+  to `127.0.0.1:8180`, served by the container named `online-xsd-viewer`
+  from image tag `online-xsd-viewer:test`, started via
+  `deploy/run-container.sh` (see `deploy/viewer-status20-le-ssl.conf`).
+
+To deploy a code change to the **public site**:
+
+```bash
+docker compose build                              # or: docker build -t online-xsd-viewer:latest .
+docker tag online-xsd-viewer:latest online-xsd-viewer:test
+bash deploy/run-container.sh                       # recreates the :8180 container
+```
+
+After deploying, hard-reload the browser (Ctrl+F5) — the SPA JS bundle is
+cached and a soft reload can keep showing the old UI.
+
 ## Conventions worth knowing
 
 - **ID scheme**: all declarations are `"{kind}:{qname-or-path}"` — see the
