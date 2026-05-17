@@ -5,6 +5,7 @@ import { DetailPanel } from "./components/DetailPanel";
 import { SearchPalette } from "./components/SearchPalette";
 import { DiagramView } from "./components/DiagramView/DiagramView";
 import { TextView } from "./components/TextView/TextView";
+import { ValidationPanel } from "./components/ValidationPanel/ValidationPanel";
 import { ContentModelView } from "./components/ContentModelView/ContentModelView";
 import { Breadcrumb } from "./components/Breadcrumb";
 import { XPathBar } from "./components/XPathBar";
@@ -18,6 +19,7 @@ const TAB_LABELS: Record<ViewTab, string> = {
   tree: "Tree",
   diagram: "Diagram",
   text: "Text",
+  validation: "Validation",
 };
 
 function EmptyOverview() {
@@ -218,6 +220,7 @@ export default function App() {
                 {activeTab === "tree" && (selectedId ? <ContentModelView /> : <EmptyOverview />)}
                 {activeTab === "diagram" && <DiagramView />}
                 {activeTab === "text" && <TextView />}
+                {activeTab === "validation" && <ValidationPanel />}
               </div>
             </section>
 

@@ -1,4 +1,4 @@
-import type { SchemaResponse } from "../types/schema";
+import type { SchemaResponse, ValidationResponse } from "../types/schema";
 
 const API_BASE = "/api";
 
@@ -107,6 +107,58 @@ export async function listFundsXmlReleases(): Promise<FundsXmlReleasesResponse> 
     throw new ApiError(detail, response.status);
   }
   return (await response.json()) as FundsXmlReleasesResponse;
+}
+
+async function handleJson<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // ignore parse errors; fall back to status
+    }
+    throw new ApiError(detail, response.status);
+  }
+  return (await response.json()) as T;
+}
+
+export async function validateXmlFile(
+  schemaId: string,
+  file: File,
+): Promise<ValidationResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(
+    `${API_BASE}/schema/${schemaId}/validate/upload`,
+    { method: "POST", body: form },
+  );
+  return handleJson<ValidationResponse>(response);
+}
+
+export async function validateXmlText(
+  schemaId: string,
+  content: string,
+  filename = "document.xml",
+): Promise<ValidationResponse> {
+  const response = await fetch(`${API_BASE}/schema/${schemaId}/validate/text`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ content, filename }),
+  });
+  return handleJson<ValidationResponse>(response);
+}
+
+export async function validateXmlUrl(
+  schemaId: string,
+  url: string,
+): Promise<ValidationResponse> {
+  const response = await fetch(`${API_BASE}/schema/${schemaId}/validate/url`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  return handleJson<ValidationResponse>(response);
 }
 
 export function exportHtmlUrl(schemaId: string): string {

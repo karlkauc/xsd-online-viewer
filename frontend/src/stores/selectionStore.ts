@@ -6,10 +6,11 @@ import type {
   SchemaModel,
   SchemaNode,
   SchemaNodeKind,
+  ValidationResponse,
 } from "../types/schema";
 import { buildIndex } from "../lib/indexSchema";
 
-export type ViewTab = "tree" | "diagram" | "text";
+export type ViewTab = "tree" | "diagram" | "text" | "validation";
 
 interface SelectionState {
   schemaId: string | null;
@@ -29,6 +30,7 @@ interface SelectionState {
   expandedIds: Set<string>;
   filterKinds: Set<SchemaNodeKind>;
   searchQuery: string;
+  validationResult: ValidationResponse | null;
 
   setSchema: (schemaId: string, model: SchemaModel) => void;
   clearSchema: () => void;
@@ -39,6 +41,7 @@ interface SelectionState {
   setExpandedIds: (ids: Set<string>) => void;
   setFilterKinds: (kinds: Set<SchemaNodeKind>) => void;
   setSearchQuery: (query: string) => void;
+  setValidationResult: (result: ValidationResponse | null) => void;
 }
 
 const ALL_KINDS: SchemaNodeKind[] = [
@@ -65,6 +68,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
   expandedIds: new Set(),
   filterKinds: new Set(ALL_KINDS),
   searchQuery: "",
+  validationResult: null,
 
   setSchema: (schemaId, model) => {
     const {
@@ -87,6 +91,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
       selectedId: null,
       expandedIds: new Set(),
       searchQuery: "",
+      validationResult: null,
     });
   },
 
@@ -102,6 +107,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
       overridesByOriginalKey: new Map(),
       selectedId: null,
       expandedIds: new Set(),
+      validationResult: null,
     }),
 
   setActiveTab: (tab) => set({ activeTab: tab }),
@@ -130,6 +136,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
 
   setFilterKinds: (kinds) => set({ filterKinds: kinds }),
   setSearchQuery: (query) => set({ searchQuery: query }),
+  setValidationResult: (result) => set({ validationResult: result }),
 }));
 
 export function lookupNode(

@@ -13,6 +13,11 @@ from app.cache import schema_cache
 from app.config import settings
 from app.parser.model import SchemaModel
 from app.parser.security import SecurityError, fetch_schema_url
+from app.parser.validation import (
+    ValidationResponse,
+    ValidationSetupError,
+    validate_xml,
+)
 from app.parser.xsd_parser import parse_with_url_fallback
 from app.rate_limit import WRITE_LIMIT, limiter
 
@@ -33,6 +38,15 @@ class TextPayload(BaseModel):
 class SchemaResponse(BaseModel):
     schema_id: str
     model: SchemaModel
+
+
+class ValidateTextPayload(BaseModel):
+    content: str = Field(..., description="Raw XML content to validate")
+    filename: str = Field(default="document.xml")
+
+
+class ValidateUrlPayload(BaseModel):
+    url: str = Field(..., description="Absolute http(s) URL of the XML document")
 
 
 # ---------------------------------------------------------------------------
@@ -158,3 +172,55 @@ async def get_cached_schema(schema_id: str) -> SchemaResponse:
     if model is None:
         raise HTTPException(status_code=404, detail="schema not found or expired")
     return SchemaResponse(schema_id=schema_id, model=model)
+
+
+# ---------------------------------------------------------------------------
+# XML validation against a cached schema
+# ---------------------------------------------------------------------------
+
+
+def _validate_xml_against_schema(schema_id: str, xml_bytes: bytes) -> ValidationResponse:
+    model = schema_cache.get(schema_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="schema not found or expired")
+    try:
+        return validate_xml(model, xml_bytes)
+    except ValidationSetupError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SecurityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/schema/{schema_id}/validate/upload", response_model=ValidationResponse)
+@limiter.limit(WRITE_LIMIT)
+async def validate_xml_upload(
+    request: Request, schema_id: str, file: UploadFile
+) -> ValidationResponse:
+    content = await _read_upload(file)
+    return _validate_xml_against_schema(schema_id, content)
+
+
+@router.post("/schema/{schema_id}/validate/text", response_model=ValidationResponse)
+@limiter.limit(WRITE_LIMIT)
+async def validate_xml_text(
+    request: Request, schema_id: str, payload: ValidateTextPayload
+) -> ValidationResponse:
+    data = payload.content.encode("utf-8")
+    if len(data) > settings.max_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"content exceeds {settings.max_upload_mb} MB limit",
+        )
+    return _validate_xml_against_schema(schema_id, data)
+
+
+@router.post("/schema/{schema_id}/validate/url", response_model=ValidationResponse)
+@limiter.limit(WRITE_LIMIT)
+async def validate_xml_url(
+    request: Request, schema_id: str, payload: ValidateUrlPayload
+) -> ValidationResponse:
+    try:
+        fetched = fetch_schema_url(payload.url)
+    except SecurityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _validate_xml_against_schema(schema_id, fetched.content)

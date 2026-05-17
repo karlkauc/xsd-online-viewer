@@ -305,6 +305,39 @@ export interface SchemaResponse {
   model: SchemaModel;
 }
 
+// --- XML validation against the loaded schema ---------------------------
+// Mirrors backend/app/parser/validation.py. Contract: `reformatted_xml` is
+// the authoritative text; every `ValidationErrorItem.line` is 1-based and
+// indexes into `reformatted_xml.split("\n")`. The frontend derives the ±1
+// context window by slicing that array. When `reformatted_xml` is null the
+// input was not well-formed and there is no reformatted text.
+
+export interface XsdRef {
+  id: string;
+  file_id: string;
+  line: number | null;
+  qname: string;
+}
+
+export interface ValidationErrorItem {
+  line: number | null;
+  column: number | null;
+  message: string;
+  severity: "fatal" | "error" | "warning";
+  type_name: string | null;
+  domain: string | null;
+  path: string | null;
+  kind: "not-well-formed" | "schema-validation";
+  xsd_ref: XsdRef | null;
+}
+
+export interface ValidationResponse {
+  schema_id: string;
+  is_valid: boolean;
+  reformatted_xml: string | null;
+  errors: ValidationErrorItem[];
+}
+
 // Union of things selectable in the viewer.
 export type SchemaNodeKind =
   | "element"
