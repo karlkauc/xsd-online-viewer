@@ -77,6 +77,9 @@ export default function App() {
   const selectedId = useSelection((s) => s.selectedId);
   const setSelected = useSelection((s) => s.setSelected);
   const clearSchema = useSelection((s) => s.clearSchema);
+  const diagnosticsVisible = useSelection((s) => s.diagnosticsVisible);
+  const setDiagnosticsVisible = useSelection((s) => s.setDiagnosticsVisible);
+  const diagnosticsCount = model?.diagnostics?.length ?? 0;
 
   const [structureCollapsed, setStructureCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -134,6 +137,17 @@ export default function App() {
               aria-label="Load a different schema file"
             >
               📂 Load new…
+            </button>
+          )}
+          {diagnosticsCount > 0 && !diagnosticsVisible && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setDiagnosticsVisible(true)}
+              title="Show diagnostics"
+              aria-label="Show diagnostics"
+            >
+              ⚠️ {diagnosticsCount} diagnostic{diagnosticsCount === 1 ? "" : "s"}
             </button>
           )}
           <button

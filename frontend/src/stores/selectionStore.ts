@@ -31,6 +31,8 @@ interface SelectionState {
   filterKinds: Set<SchemaNodeKind>;
   searchQuery: string;
   validationResult: ValidationResponse | null;
+  diagnosticsVisible: boolean;
+  minimapVisible: boolean;
 
   setSchema: (schemaId: string, model: SchemaModel) => void;
   clearSchema: () => void;
@@ -42,6 +44,8 @@ interface SelectionState {
   setFilterKinds: (kinds: Set<SchemaNodeKind>) => void;
   setSearchQuery: (query: string) => void;
   setValidationResult: (result: ValidationResponse | null) => void;
+  setDiagnosticsVisible: (visible: boolean) => void;
+  setMinimapVisible: (visible: boolean) => void;
 }
 
 const ALL_KINDS: SchemaNodeKind[] = [
@@ -69,6 +73,8 @@ export const useSelection = create<SelectionState>((set, get) => ({
   filterKinds: new Set(ALL_KINDS),
   searchQuery: "",
   validationResult: null,
+  diagnosticsVisible: true,
+  minimapVisible: true,
 
   setSchema: (schemaId, model) => {
     const {
@@ -92,6 +98,8 @@ export const useSelection = create<SelectionState>((set, get) => ({
       expandedIds: new Set(),
       searchQuery: "",
       validationResult: null,
+      diagnosticsVisible: true,
+      minimapVisible: true,
     });
   },
 
@@ -137,6 +145,8 @@ export const useSelection = create<SelectionState>((set, get) => ({
   setFilterKinds: (kinds) => set({ filterKinds: kinds }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setValidationResult: (result) => set({ validationResult: result }),
+  setDiagnosticsVisible: (visible) => set({ diagnosticsVisible: visible }),
+  setMinimapVisible: (visible) => set({ minimapVisible: visible }),
 }));
 
 export function lookupNode(

@@ -75,6 +75,8 @@ function DiagramInner() {
   const setSelected = useSelection((s) => s.setSelected);
   const toggleExpanded = useSelection((s) => s.toggleExpanded);
   const setExpandedIds = useSelection((s) => s.setExpandedIds);
+  const minimapVisible = useSelection((s) => s.minimapVisible);
+  const setMinimapVisible = useSelection((s) => s.setMinimapVisible);
 
   const { nodes, edges } = useMemo<{ nodes: Node[]; edges: Edge[] }>(() => {
     if (!model) return { nodes: [], edges: [] };
@@ -188,6 +190,15 @@ function DiagramInner() {
         >
           Collapse all
         </button>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => setMinimapVisible(!minimapVisible)}
+          title={minimapVisible ? "Hide minimap" : "Show minimap"}
+          aria-pressed={minimapVisible}
+        >
+          {minimapVisible ? "🗺️ Hide minimap" : "🗺️ Show minimap"}
+        </button>
         <button type="button" className="btn" onClick={() => onExport("svg")}>
           Export SVG
         </button>
@@ -204,7 +215,9 @@ function DiagramInner() {
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={16} />
-        <MiniMap pannable zoomable nodeStrokeWidth={2} {...minimapColors} />
+        {minimapVisible && (
+          <MiniMap pannable zoomable nodeStrokeWidth={2} {...minimapColors} />
+        )}
         <Controls />
       </ReactFlow>
     </div>
