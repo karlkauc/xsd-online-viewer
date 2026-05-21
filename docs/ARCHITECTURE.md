@@ -236,12 +236,12 @@ pins this behavior.
   stage 2 (`python:3.12-slim`) installs libxml2/libxslt runtime libs, installs
   the backend package, copies the built SPA into `/app/static`, drops to UID
   1001, exposes 8080, and health-checks `/api/health`.
-- **docker-compose.yml** — single `xsdviewer` service; env: `LOG_LEVEL`,
-  `MAX_UPLOAD_MB`, `ALLOWED_SCHEMA_HOSTS`.
-- **deploy/** — `run-container.sh` binds the container to `127.0.0.1:8180`
-  (fronted by Apache); `viewer.status20.net.conf` is the Apache vhost with
-  `ProxyPass /` to the container, `LimitRequestBody 100MB`, and
-  security headers.
+- **docker-compose.yml** — single `xsdviewer` service for local sandbox use;
+  env: `LOG_LEVEL`, `MAX_UPLOAD_MB`, `ALLOWED_SCHEMA_HOSTS`.
+- **Google Cloud Run** — production runs at <https://www.xsd-viewer.online/>
+  (service `xsdviewer`, project `xsd-viewer-495407`, region `europe-west1`).
+  See [docs/DEPLOY_GCLOUD.md](DEPLOY_GCLOUD.md) for build, sizing, env vars,
+  domain mapping, smoke test and rollback.
 
 ## CI
 

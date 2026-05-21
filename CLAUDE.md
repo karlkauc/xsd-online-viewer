@@ -17,7 +17,7 @@ For a deep dive on how the pieces fit together, read
 - `frontend/src/` — React + Vite SPA; Zustand store in
   `stores/selectionStore.ts` is the single source of truth for views.
 - `e2e/tests/` — Playwright golden-path test.
-- `Dockerfile`, `docker-compose.yml`, `deploy/` — single-container deployment.
+- `Dockerfile`, `docker-compose.yml` — container build and local sandbox.
 
 ## Running locally
 
@@ -40,28 +40,12 @@ cd frontend && npm ci && npm run dev
 
 ## Deployment (read before redeploying)
 
-There are **two independent containers** — don't confuse them:
-
 - **Local sandbox** — `docker compose up -d --build` builds
   `online-xsd-viewer:latest` and runs a container on `127.0.0.1:8091`.
   For local testing only; **not** what the public site serves.
-- **Public site** (`https://viewer.status20.net/`) — Apache reverse-proxies
-  to `127.0.0.1:8180`, served by the container named `online-xsd-viewer`
-  from image tag `online-xsd-viewer:test`, started via
-  `deploy/run-container.sh` (see `deploy/viewer-status20-le-ssl.conf`).
-
-To deploy a code change to the **public site**:
-
-```bash
-docker compose build                              # or: docker build -t online-xsd-viewer:latest .
-docker tag online-xsd-viewer:latest online-xsd-viewer:test
-bash deploy/run-container.sh                       # recreates the :8180 container
-```
-
-- **Google Cloud Run** — service `xsdviewer` in project
-  `xsd-viewer-495407`, region `europe-west1`
-  (`https://xsdviewer-7wvlx2kjfq-ew.a.run.app`). Independent of the two
-  containers above. Redeploy from the repo root — Cloud Build rebuilds
+- **Public site** — **https://www.xsd-viewer.online/**, served by Google
+  Cloud Run service `xsdviewer` in project `xsd-viewer-495407`, region
+  `europe-west1`. Redeploy from the repo root — Cloud Build rebuilds
   from the `Dockerfile`, creates a new revision, and shifts 100 % traffic;
   existing service config (env vars, memory, scaling) is retained:
 

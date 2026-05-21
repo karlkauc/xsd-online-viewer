@@ -3,6 +3,9 @@
 Diese Anleitung beschreibt, wie der XSD-Viewer-Container auf
 [Google Cloud Run](https://cloud.google.com/run) deployed wird.
 
+**Offizielle URL**: <https://www.xsd-viewer.online/> (Projekt
+`xsd-viewer-495407`, Service `xsdviewer`, Region `europe-west1`).
+
 Cloud Run passt zu diesem Container, weil er **stateless** ist (in-memory
 Cache), bereits auf `$PORT` hört (`backend/app/config.py`) und proxy-aware
 gestartet wird (`Dockerfile`, `--proxy-headers --forwarded-allow-ips=*`).
@@ -47,8 +50,9 @@ gcloud run deploy xsdviewer \
 ```
 
 Cloud Build baut anhand des bestehenden `Dockerfile`, lädt das Image in
-Artifact Registry, deployed den Service und gibt am Ende eine
-`https://xsdviewer-<hash>-ew.a.run.app` URL aus.
+Artifact Registry, deployed den Service und gibt am Ende die Service-URL
+aus. Production läuft hinter der Custom-Domain
+<https://www.xsd-viewer.online/> (siehe [Custom Domain](#custom-domain)).
 
 > **Hinweis zu `ALLOWED_SCHEMA_HOSTS`**: Standardmäßig ist URL-Fetching
 > für jede öffentliche http(s)-URL erlaubt; private/Loopback-IPs werden
@@ -135,8 +139,7 @@ gcloud run services update xsdviewer --region europe-west1 \
 ## Smoke Test
 
 ```bash
-URL=$(gcloud run services describe xsdviewer \
-  --region europe-west1 --format='value(status.url)')
+URL=https://www.xsd-viewer.online
 
 curl -fsS "$URL/api/health"      # → {"status":"ok",...}
 curl -fsS "$URL/" | head         # → index.html der SPA
@@ -179,18 +182,21 @@ gcloud run services update-traffic xsdviewer \
   --to-revisions xsdviewer-00003-abc=100
 ```
 
-## Custom Domain (optional, später)
+## Custom Domain
+
+Production läuft unter <https://www.xsd-viewer.online/>. Das Mapping ist
+bereits angelegt:
 
 ```bash
 gcloud run domain-mappings create \
   --service xsdviewer \
-  --domain viewer.example.com \
+  --domain www.xsd-viewer.online \
   --region europe-west1
 ```
 
-Anschließend die ausgegebenen DNS-Records (CNAME / A / AAAA) im
-DNS-Provider eintragen. Cloud Run stellt automatisch ein managed
-TLS-Zertifikat aus (Let's Encrypt).
+Die ausgegebenen DNS-Records (CNAME / A / AAAA) liegen beim DNS-Provider.
+Cloud Run stellt automatisch ein managed TLS-Zertifikat aus
+(Let's Encrypt) und beendet HTTP via Redirect auf HTTPS.
 
 ## Service löschen (Kosten-Sicherung)
 
