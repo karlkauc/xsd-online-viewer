@@ -1,117 +1,88 @@
-# Online XSD/XML Viewer
+# Online XSD Viewer
 
-A self-hosted, read-only web viewer for XSD schemas with a UI modelled after XMLSpy and Oxygen. Runs as a single Docker container.
+**Read, understand and share XML Schemas in your browser — no install, no
+account, no upload that sticks around.**
 
-## Features (MVP — XSD)
+Open <https://www.xsd-viewer.online> and drop in an `.xsd` file. You get a
+tree, an interactive XMLSpy-style diagram and the syntax-highlighted source
+side by side, all linked to the same selection.
 
-- **Three synchronized views** — Tree, Diagram (XMLSpy-style), and Text (syntax-highlighted XML).
-- **Full XSD information** — elements, attributes, simple/complex types, facets, restrictions, `xs:annotation` / `xs:documentation`, `xs:appinfo`, XML comments, source file and line numbers.
-- **Multi-file schemas** — upload a ZIP containing the main XSD plus its `xs:import` / `xs:include` / `xs:redefine` targets.
-- **URL loading** — fetch XSD (and its references) over HTTP, with an explicit host allowlist.
-- **Navigation** — full-text search (⌘/Ctrl-K), type filter, breadcrumb, *Find Usages*, URL deep-links.
-- **Export** — diagram as PNG/SVG, complete schema as HTML documentation, pretty-printed XML.
-- **Responsive** — Desktop, Tablet, and Mobile-friendly layouts.
-- **Themes** — Light / Dark with `prefers-color-scheme` detection.
-- **Handles large schemas** — up to ~50 MB with virtual scrolling and lazy diagram rendering.
+![Overview — upload, diagram, tree, text, search](docs/media/overview.gif)
 
-XML viewing with optional schema validation is planned for Phase 2.
+## What you can do with it
 
-## Quick start
+- **See the whole schema at a glance.** The diagram lays elements out the way
+  XMLSpy and Oxygen do — sequences, choices, cardinalities, expand/collapse,
+  pan & zoom.
+- **Three synchronised views.** Pick a node in the *Tree*, jump to the
+  *Diagram*, or switch to *Text* and land on the same line in the source —
+  the selection follows you across all three.
+- **Everything the schema actually says.** Elements, attributes, simple and
+  complex types, facets, restrictions, `xs:annotation` / `xs:documentation`,
+  `xs:appinfo`, XML comments, and the original source file and line number
+  for every declaration.
+- **Multi-file schemas.** Drop a single `.xsd`, or a `.zip` containing the
+  main schema plus its `xs:import` / `xs:include` / `xs:redefine` targets —
+  the viewer resolves them and treats the bundle as one model.
+- **Load from a URL.** Paste any public `http(s)` link to an XSD and the
+  viewer fetches it (with private-IP and SSRF protections enabled).
+- **Fast search.** Press <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd> and
+  start typing — full-text across element, type and attribute names,
+  including documentation.
+- **Navigate like an IDE.** Breadcrumbs, *Find Usages*, deep-linkable URLs
+  (every node has its own hash), and a type-filter to narrow the tree.
+- **Export.** Diagram as PNG or SVG, the whole schema as standalone HTML
+  documentation, or pretty-printed XML.
+- **Light, Dark, Desktop, Tablet, Mobile.** The UI follows
+  `prefers-color-scheme` and reflows down to phone widths.
+- **Handles real-world schemas.** Tested up to ~50 MB with virtual scrolling
+  and lazy diagram rendering.
 
-```bash
-docker run --rm -p 8080:8080 ghcr.io/karlkauc/online-xsd-viewer:latest
-```
+## Load FundsXML releases with one click
 
-Open http://localhost:8080 and drop an XSD file into the browser.
+If you work with [FundsXML](https://fundsxml.org/), the viewer pulls the
+official releases straight from the
+[`fundsxml/schema`](https://github.com/fundsxml/schema/releases) GitHub repo.
+Open the *Load schema* screen, pick the **FundsXML Releases** tab, and click
+the version you want — every release back to the early 4.x line is one click
+away, including its `xmldsig-core-schema.xsd` companion.
 
-### Locking URL fetching down to specific hosts
+![FundsXML releases — one-click load](docs/media/fundsxml.gif)
 
-By default the `/api/schema/url` endpoint accepts any public http(s) URL
-(private/loopback IPs and non-http schemes are always blocked). To
-restrict it to a whitelist for hardened deployments, set
-`ALLOWED_SCHEMA_HOSTS` to one or more host regexes:
+## Your data stays with you
 
-```bash
-docker run --rm -p 8080:8080 \
-  -e ALLOWED_SCHEMA_HOSTS='^schemas\.example\.com$' \
-  ghcr.io/karlkauc/online-xsd-viewer:latest
-```
+- **Nothing is stored.** Uploads are parsed in memory and dropped from a
+  short-lived cache. There is no database, no file persistence, no analytics
+  on your schemas.
+- **No account, no login.** Just open the site and drop a file.
+- **You can run it yourself.** The whole app is a single Docker container —
+  see [docs/TECHNICAL.md](docs/TECHNICAL.md) for self-hosting.
 
-### docker-compose
+## No warranty
 
-```bash
-docker compose up
-```
+This tool is offered free of charge and **without any warranty**. The
+visualisation is a best-effort rendering of your schema; it is not a
+certified validator. Do **not** rely on it as the single source of truth for
+regulatory, contractual or production decisions — always verify against the
+authoritative schema and an established validator. Use is at your own risk.
 
-### Google Cloud Run
+## Found a bug? Missing a feature?
 
-A step-by-step guide for deploying this container to Cloud Run (build,
-sizing, env vars, smoke test, rollback) lives in
-[docs/DEPLOY_GCLOUD.md](docs/DEPLOY_GCLOUD.md).
+Please open an issue on GitHub — bug reports, reproduction steps and feature
+requests are all welcome:
 
-## Configuration
+➡️ <https://github.com/karlkauc/online-xsd-viewer/issues>
 
-| Env var | Default | Purpose |
-|---|---|---|
-| `PORT` | `8080` | HTTP listen port |
-| `MAX_UPLOAD_MB` | `50` | Maximum upload size in MB |
-| `ALLOWED_SCHEMA_HOSTS` | *(empty)* | Empty = any public host allowed. Set to a regex (or comma-separated list of regexes) to lock URL fetching down to a whitelist. |
-| `SCHEMA_CACHE_TTL_MIN` | `60` | In-memory parse-cache TTL in minutes |
-| `SCHEMA_CACHE_MAX_ENTRIES` | `32` | Max. number of cached parsed schemas |
-| `LOG_LEVEL` | `INFO` | Log level (DEBUG, INFO, WARNING, ERROR) |
+## Technical details, self-hosting & development
 
-## Security
+Configuration, hardening, env vars, Cloud Run deployment, the architecture
+diagram and the dev-setup steps live in
+**[docs/TECHNICAL.md](docs/TECHNICAL.md)**.
 
-Every parse happens with hardened lxml settings:
+## Author
 
-- External entity resolution disabled (XXE protection)
-- DTD loading disabled, `no_network=True` at parse time
-- Billion-Laughs / XML-bomb rejection
-- URL fetching limited to `http(s)` only, with DNS-based private-IP-block protection (loopback, link-local, ULA, cloud metadata, etc.), per-fetch timeout, redirect cap and response-size cap. An optional `ALLOWED_SCHEMA_HOSTS` whitelist can lock the endpoint down further for hardened deployments.
-
-No uploads are persisted to disk; parsed schemas live in an in-memory cache with TTL.
-
-This tool does **not** provide authentication. Put a reverse proxy (`oauth2-proxy`, nginx Basic Auth, etc.) in front of it when exposing beyond a trusted network.
-
-## Development
-
-```bash
-# Backend
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-pytest
-uvicorn app.main:app --reload
-
-# Frontend
-cd frontend
-npm install
-npm run dev
-
-# E2E
-cd e2e
-npm install
-npx playwright install
-npm test
-```
-
-## Architecture
-
-```
-┌─────────────────────────────────────────┐
-│ Browser (React SPA)                     │
-│   Tree | Diagram | Text   (shared sel.) │
-└────────────────┬────────────────────────┘
-                 │ REST + JSON
-┌────────────────▼────────────────────────┐
-│ FastAPI (Python 3.12)                   │
-│   POST /api/schema   (upload/url/text)  │
-│   GET  /api/schema/:id                  │
-│   POST /api/schema/:id/export/*         │
-│   XSD Parser (lxml, hardened)           │
-│   In-memory LRU+TTL cache               │
-└─────────────────────────────────────────┘
-```
+Built and maintained by **Karl Kauc** —
+[github.com/karlkauc](https://github.com/karlkauc).
 
 ## License
 
