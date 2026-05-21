@@ -43,7 +43,7 @@ cd frontend && npm ci && npm run dev
 There are **two independent containers** — don't confuse them:
 
 - **Local sandbox** — `docker compose up -d --build` builds
-  `online-xsd-viewer:latest` and runs a container on `127.0.0.1:8090`.
+  `online-xsd-viewer:latest` and runs a container on `127.0.0.1:8091`.
   For local testing only; **not** what the public site serves.
 - **Public site** (`https://viewer.status20.net/`) — Apache reverse-proxies
   to `127.0.0.1:8180`, served by the container named `online-xsd-viewer`
