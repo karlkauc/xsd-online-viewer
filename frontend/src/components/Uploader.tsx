@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
   loadSchemaFromRelease,
@@ -7,9 +7,8 @@ import {
   uploadSchemaText,
 } from "../api/client";
 import { useSelection } from "../stores/selectionStore";
+import { readModeFromPath, writeModePath, type Mode } from "../lib/modeRoute";
 import { FundsXmlReleases } from "./FundsXmlReleases";
-
-type Mode = "file" | "text" | "url" | "releases";
 
 const MODE_LABELS: Record<Mode, string> = {
   file: "File / ZIP",
@@ -20,7 +19,7 @@ const MODE_LABELS: Record<Mode, string> = {
 
 export function Uploader() {
   const setSchema = useSelection((s) => s.setSchema);
-  const [mode, setMode] = useState<Mode>("file");
+  const [mode, setMode] = useState<Mode>(() => readModeFromPath());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
@@ -103,6 +102,18 @@ export function Uploader() {
     },
     [handleFile],
   );
+
+  // Reflect the selected tab in the URL path so each option is shareable.
+  useEffect(() => {
+    writeModePath(mode);
+  }, [mode]);
+
+  // Follow browser back/forward between the input options.
+  useEffect(() => {
+    const onPopState = () => setMode(readModeFromPath());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   return (
     <div className="max-w-3xl mx-auto p-6 md:p-10">
