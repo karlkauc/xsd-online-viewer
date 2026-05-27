@@ -31,6 +31,13 @@ side by side, all linked to the same selection.
   including documentation.
 - **Navigate like an IDE.** Breadcrumbs, *Find Usages*, deep-linkable URLs
   (every node has its own hash), and a type-filter to narrow the tree.
+- **Open straight to an input.** Each way of loading a schema has its own
+  address, so you can bookmark or link the one you want:
+  [`/`](https://www.xsd-viewer.online/) (File / ZIP),
+  [`/paste`](https://www.xsd-viewer.online/paste),
+  [`/url`](https://www.xsd-viewer.online/url) and
+  [`/fundsxml`](https://www.xsd-viewer.online/fundsxml). Browser back/forward
+  switches between them.
 - **Export.** Diagram as PNG or SVG, the whole schema as standalone HTML
   documentation, or pretty-printed XML.
 - **Light, Dark, Desktop, Tablet, Mobile.** The UI follows
@@ -43,9 +50,10 @@ side by side, all linked to the same selection.
 If you work with [FundsXML](https://fundsxml.org/), the viewer pulls the
 official releases straight from the
 [`fundsxml/schema`](https://github.com/fundsxml/schema/releases) GitHub repo.
-Open the *Load schema* screen, pick the **FundsXML Releases** tab, and click
-the version you want — every release back to the early 4.x line is one click
-away, including its `xmldsig-core-schema.xsd` companion.
+Open the *Load schema* screen, pick the **FundsXML Releases** tab — or go
+straight to [www.xsd-viewer.online/fundsxml](https://www.xsd-viewer.online/fundsxml)
+— and click the version you want. Every release back to the early 4.x line is
+one click away, including its `xmldsig-core-schema.xsd` companion.
 
 ![FundsXML releases — one-click load](docs/media/fundsxml.gif)
 
