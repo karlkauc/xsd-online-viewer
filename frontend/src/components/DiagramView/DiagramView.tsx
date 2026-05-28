@@ -106,6 +106,26 @@ function DiagramInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model?.schema_id]);
 
+  // On mobile the diagram can mount inside a hidden (display:none) pane, so
+  // React Flow's initial fitView measures a 0x0 box. Re-fit the first time the
+  // container gains real size. Inert on desktop, where it has size from mount.
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    let hadSize = el.clientWidth > 0 && el.clientHeight > 0;
+    const observer = new ResizeObserver(() => {
+      const hasSize = el.clientWidth > 0 && el.clientHeight > 0;
+      if (!hadSize && hasSize && nodes.length > 0) {
+        requestAnimationFrame(() =>
+          flow.fitView({ padding: 0.2, duration: 250, maxZoom: 1.2 }),
+        );
+      }
+      hadSize = hasSize;
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [flow, nodes.length]);
+
   useLayoutEffect(() => {
     const anchor = pendingAnchorRef.current;
     if (!anchor) return;
@@ -171,7 +191,7 @@ function DiagramInner() {
 
   return (
     <div ref={wrapperRef} className="relative h-full w-full">
-      <div className="absolute top-2 right-2 z-10 flex gap-1">
+      <div className="absolute top-2 right-2 z-10 flex flex-wrap justify-end gap-1 max-w-[60%] md:max-w-none">
         <button
           type="button"
           className="btn"

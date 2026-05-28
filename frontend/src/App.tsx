@@ -11,6 +11,7 @@ import { Breadcrumb } from "./components/Breadcrumb";
 import { XPathBar } from "./components/XPathBar";
 import { Diagnostics } from "./components/Diagnostics";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { MobileNav, type MobilePane } from "./components/MobileNav";
 import { useSelection, type ViewTab } from "./stores/selectionStore";
 import { exportHtmlUrl } from "./api/client";
 import { readHashSelection, writeHashSelection } from "./lib/deepLink";
@@ -86,6 +87,10 @@ export default function App() {
     return window.localStorage.getItem("xsdv:structureCollapsed") === "1";
   });
 
+  // Mobile-only: which single pane is visible below the `md` breakpoint.
+  // Unused on desktop, where all three panes show side by side.
+  const [mobilePane, setMobilePane] = useState<MobilePane>("structure");
+
   useEffect(() => {
     window.localStorage.setItem("xsdv:structureCollapsed", structureCollapsed ? "1" : "0");
   }, [structureCollapsed]);
@@ -111,8 +116,16 @@ export default function App() {
     writeHashSelection(selectedId);
   }, [selectedId]);
 
+  // On mobile, selecting a node jumps to the View pane so the user sees it.
+  useEffect(() => {
+    if (selectedId) setMobilePane("view");
+  }, [selectedId]);
+
   const onSwitchTab = useCallback(
-    (tab: ViewTab) => setActiveTab(tab),
+    (tab: ViewTab) => {
+      setActiveTab(tab);
+      setMobilePane("view");
+    },
     [setActiveTab],
   );
 
@@ -174,10 +187,10 @@ export default function App() {
         </main>
       ) : (
         <main className="flex-1 flex flex-col min-h-0">
-          <div className="flex items-center gap-3 px-4 pt-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
+          <div className="flex items-center gap-3 px-4 pt-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 overflow-x-auto md:overflow-visible">
             <button
               type="button"
-              className="shrink-0 mb-1.5 inline-flex items-center justify-center w-7 h-7 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800"
+              className="hidden md:inline-flex shrink-0 mb-1.5 items-center justify-center w-7 h-7 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800"
               onClick={() => setStructureCollapsed((v) => !v)}
               title={structureCollapsed ? "Show structure" : "Hide structure"}
               aria-label={structureCollapsed ? "Show structure panel" : "Hide structure panel"}
@@ -213,22 +226,32 @@ export default function App() {
 
           <section
             className={
-              "flex-1 min-h-0 grid gap-0 grid-cols-1 " +
+              "flex-1 min-h-0 flex flex-col md:grid md:gap-0 " +
               (structureCollapsed
                 ? "md:grid-cols-[1fr_minmax(300px,26%)]"
                 : "md:grid-cols-[minmax(260px,22%)_1fr_minmax(300px,26%)]")
             }
           >
-            {/* LEFT — collapsible structure sidebar */}
-            {!structureCollapsed && (
-              <aside className="min-h-0 overflow-hidden border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
-                <TreeView />
-              </aside>
-            )}
+            {/* LEFT — collapsible structure sidebar (desktop); one of three
+                swappable panes on mobile. */}
+            <aside
+              className={
+                "min-h-0 overflow-hidden border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 " +
+                (structureCollapsed ? "md:hidden " : "md:block ") +
+                (mobilePane === "structure" ? "flex-1" : "hidden")
+              }
+            >
+              <TreeView />
+            </aside>
 
             {/* CENTER — active view; Tree tab shows ContentModelView for the
                 selected node, or the Schema Overview when nothing is selected. */}
-            <section className="min-h-0 overflow-hidden flex flex-col">
+            <section
+              className={
+                "min-h-0 overflow-hidden flex-col md:flex " +
+                (mobilePane === "view" ? "flex flex-1" : "hidden")
+              }
+            >
               {activeTab === "tree" && <XPathBar />}
               <div className="flex-1 min-h-0">
                 {activeTab === "tree" && (selectedId ? <ContentModelView /> : <EmptyOverview />)}
@@ -238,11 +261,18 @@ export default function App() {
               </div>
             </section>
 
-            {/* RIGHT — always-visible details panel */}
-            <aside className="min-h-0 overflow-hidden border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
+            {/* RIGHT — always-visible details panel (desktop); swappable pane on mobile. */}
+            <aside
+              className={
+                "min-h-0 overflow-hidden border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 md:block " +
+                (mobilePane === "details" ? "flex-1" : "hidden")
+              }
+            >
               <DetailPanel />
             </aside>
           </section>
+
+          <MobileNav pane={mobilePane} onChange={setMobilePane} />
         </main>
       )}
 
