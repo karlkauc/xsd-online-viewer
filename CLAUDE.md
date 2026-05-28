@@ -47,10 +47,16 @@ cd frontend && npm ci && npm run dev
   Cloud Run service `xsdviewer` in project `xsd-viewer-495407`, region
   `europe-west1`. Redeploy from the repo root — Cloud Build rebuilds
   from the `Dockerfile`, creates a new revision, and shifts 100 % traffic;
-  existing service config (env vars, memory, scaling) is retained:
+  existing service config (env vars, memory, scaling) is retained.
+
+  Always pass `--project xsd-viewer-495407` explicitly: your active gcloud
+  config may default to a different project, in which case omitting the flag
+  deploys to the wrong project and silently creates an unrelated `xsdviewer`
+  service there instead of updating the public site.
 
   ```bash
-  gcloud run deploy xsdviewer --source . --region europe-west1
+  gcloud run deploy xsdviewer --source . --region europe-west1 \
+    --project xsd-viewer-495407
   ```
 
   Full setup, sizing, env-var and rollback details:
