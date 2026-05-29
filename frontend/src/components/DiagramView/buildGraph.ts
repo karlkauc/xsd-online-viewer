@@ -20,6 +20,7 @@ import type {
   Particle,
   SchemaModel,
 } from "../../types/schema";
+import { computeRootElements } from "../../lib/rootElements";
 
 export const NODE_WIDTH = 220;
 export const NODE_HEIGHT = 56; // base height for a plain element node
@@ -415,7 +416,7 @@ export function buildDiagramGraph(
   };
 
   let nextTopY = 0;
-  for (const element of model.elements) {
+  for (const element of computeRootElements(model)) {
     const { span } = placeElement(element, 0, nextTopY, null, context);
     nextTopY = span.bottomY + TREE_GAP;
   }

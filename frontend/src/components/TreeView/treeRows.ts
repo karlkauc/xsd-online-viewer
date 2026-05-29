@@ -12,6 +12,7 @@ import type {
   SimpleType,
 } from "../../types/schema";
 import { resolveReference } from "../../lib/indexSchema";
+import { computeRootElements } from "../../lib/rootElements";
 
 export interface TreeRow {
   id: string;
@@ -155,8 +156,10 @@ export function buildTreeRows(
     // detail panel — so this is a no-op.
   };
 
-  // Top-level entry points: start with global elements, then global types.
-  for (const element of model.elements) {
+  // Top-level entry points: start with the document-root elements, then
+  // global types. Only globals that aren't referenced elsewhere count as
+  // roots — see computeRootElements().
+  for (const element of computeRootElements(model)) {
     descendElement(element, 0);
   }
   if (filterKinds.has("complexType")) {
