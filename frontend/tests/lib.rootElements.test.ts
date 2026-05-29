@@ -1,21 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { computeRootElements } from "../src/lib/rootElements";
-import type {
-  ComplexType,
-  ElementDecl,
-  Particle,
-  SchemaModel,
-} from "../src/types/schema";
+import type { ElementDecl, SchemaModel, SourceFile } from "../src/types/schema";
 
 const NS = "http://example.com/ns";
 
-function globalElement(name: string, typeName: string | null): ElementDecl {
+function globalElement(name: string, fileId: string): ElementDecl {
   return {
     id: `element:{${NS}}${name}`,
     name,
     qname: `{${NS}}${name}`,
     ref: null,
-    type_name: typeName,
+    type_name: "xs:string",
     type_inline_simple: null,
     type_inline_complex: null,
     min_occurs: 1,
@@ -29,69 +24,21 @@ function globalElement(name: string, typeName: string | null): ElementDecl {
     target_namespace: NS,
     is_global: true,
     annotation: null,
-    source_ref: { file_id: "f1", line: 1 },
+    source_ref: { file_id: fileId, line: 1 },
   };
 }
 
-// A particle that references a global element by ``ref`` (no inline name/type).
-function refParticle(ref: string): Particle {
+function file(id: string, relationship: SourceFile["relationship"]): SourceFile {
   return {
-    kind: "element",
-    min_occurs: 1,
-    max_occurs: 1,
-    element: {
-      ...globalElement("__ref__", null),
-      id: `element:ref:${ref}`,
-      name: null,
-      qname: null,
-      ref,
-      is_global: false,
-      target_namespace: null,
-    },
-    group_ref: null,
-    group_inline: null,
-    children: [],
-    wildcard_namespace: null,
-    wildcard_process_contents: null,
-    annotation: null,
+    id,
+    filename: `${id}.xsd`,
+    target_namespace: NS,
+    relationship,
+    content: null,
   };
 }
 
-function complexType(name: string, children: Particle[]): ComplexType {
-  return {
-    id: `complexType:{${NS}}${name}`,
-    name,
-    anonymous: false,
-    abstract: false,
-    mixed: false,
-    content_kind: "complex",
-    derivation: "none",
-    base: null,
-    particle: {
-      kind: "sequence",
-      min_occurs: 1,
-      max_occurs: 1,
-      element: null,
-      group_ref: null,
-      group_inline: null,
-      children,
-      wildcard_namespace: null,
-      wildcard_process_contents: null,
-      annotation: null,
-    },
-    attributes: [],
-    attribute_group_refs: [],
-    simple_content_base: null,
-    simple_content_facets: [],
-    annotation: null,
-    source_ref: { file_id: "f1", line: 1 },
-  };
-}
-
-function model(
-  elements: ElementDecl[],
-  complexTypes: ComplexType[],
-): SchemaModel {
+function model(elements: ElementDecl[], files: SourceFile[]): SchemaModel {
   return {
     schema_id: "test",
     target_namespace: NS,
@@ -101,64 +48,55 @@ function model(
     elements,
     attributes: [],
     simple_types: [],
-    complex_types: complexTypes,
+    complex_types: [],
     groups: [],
     attribute_groups: [],
-    files: [
-      {
-        id: "f1",
-        filename: "main.xsd",
-        target_namespace: NS,
-        relationship: "main",
-        content: null,
-      },
-    ],
+    files,
     diagnostics: [],
   };
 }
 
+const MAIN = file("main", "main");
+const INCLUDED = file("inc", "include");
+
 describe("computeRootElements", () => {
-  it("drops globals that are referenced via ref= elsewhere", () => {
-    // Root (unreferenced) + Child (referenced inside RootType) + Orphan
-    // (unreferenced global, e.g. from an included file).
-    const root = globalElement("Root", "tns:RootType");
-    const child = globalElement("Child", "xs:string");
-    const orphan = globalElement("Orphan", "xs:string");
-    const rootType = complexType("RootType", [refParticle("tns:Child")]);
+  it("keeps only globals declared in the main file", () => {
+    const root = globalElement("FundsXML4", "main");
+    const inc1 = globalElement("Manifest", "inc");
+    const inc2 = globalElement("SignatureProperties", "inc");
 
-    const roots = computeRootElements(model([root, child, orphan], [rootType]));
+    const roots = computeRootElements(
+      model([root, inc1, inc2], [MAIN, INCLUDED]),
+    );
 
-    expect(roots.map((e) => e.name)).toEqual(["Root", "Orphan"]);
+    expect(roots.map((e) => e.name)).toEqual(["FundsXML4"]);
   });
 
-  it("returns every element unchanged when there are no refs", () => {
-    const a = globalElement("A", "xs:string");
-    const b = globalElement("B", "xs:string");
+  it("keeps every main-file global regardless of references", () => {
+    // "Main file only" ignores ref usage — a referenced main-file global is
+    // still a root.
+    const a = globalElement("A", "main");
+    const b = globalElement("B", "main");
 
-    const roots = computeRootElements(model([a, b], []));
+    const roots = computeRootElements(model([a, b], [MAIN]));
 
     expect(roots.map((e) => e.name)).toEqual(["A", "B"]);
   });
 
-  it("falls back to the full list when every global is referenced", () => {
-    // A recursive root references itself — filtering would leave nothing, so
-    // the safeguard keeps the view non-empty.
-    const a = globalElement("A", "tns:AType");
-    const aType = complexType("AType", [refParticle("tns:A")]);
+  it("falls back to the full list when the main file declares no globals", () => {
+    // A pure include aggregator: every global comes from an included file.
+    const inc1 = globalElement("Manifest", "inc");
 
-    const roots = computeRootElements(model([a], [aType]));
+    const roots = computeRootElements(model([inc1], [MAIN, INCLUDED]));
 
-    expect(roots.map((e) => e.name)).toEqual(["A"]);
+    expect(roots.map((e) => e.name)).toEqual(["Manifest"]);
   });
 
-  it("matches refs that resolve by bare local name", () => {
-    const root = globalElement("Root", "tns:RootType");
-    const child = globalElement("Child", "xs:string");
-    // ref written without a prefix should still resolve to the global.
-    const rootType = complexType("RootType", [refParticle("Child")]);
+  it("falls back to the full list when no file is marked main", () => {
+    const a = globalElement("A", "inc");
 
-    const roots = computeRootElements(model([root, child], [rootType]));
+    const roots = computeRootElements(model([a], [INCLUDED]));
 
-    expect(roots.map((e) => e.name)).toEqual(["Root"]);
+    expect(roots.map((e) => e.name)).toEqual(["A"]);
   });
 });

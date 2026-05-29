@@ -1,79 +1,29 @@
-// Determines which global elements are "document roots" — i.e. elements that
-// can legitimately start an instance document.
+// Determines which global elements are document roots to render at the top
+// level of the diagram and tree.
 //
 // The parser merges the top-level <xs:element> declarations of the main file
 // AND every <xs:include>/<xs:import>ed file into one flat ``model.elements``
-// list. Rendering all of them as diagram/tree roots is noisy: an included
-// schema's globals (e.g. the building blocks behind FundsXML4) show up as
-// peers of the real root. We instead show only the globals that are never
-// referenced (via ``ref=``) anywhere in the schema — those are the actual
-// document entry points.
-//
-// Note: substitution-group members (``substitution_group``) are intentionally
-// NOT treated as references — they are alternative document roots in their own
-// right and should still appear.
+// list. Rendering all of them as roots is noisy: an included schema's globals
+// (e.g. the ~24 globals of xmldsig-core-schema.xsd behind FundsXML) show up as
+// peers of the real root. We therefore keep only the globals declared in the
+// main file — the file the user actually loaded. Included declarations remain
+// in the model (and are still reachable by reference), they just don't appear
+// as standalone roots.
 
-import type { ElementDecl, Particle, SchemaModel } from "../types/schema";
+import type { ElementDecl, SchemaModel } from "../types/schema";
 
-const localName = (qname: string): string =>
-  qname.includes(":") ? qname.split(":").pop()! : qname;
-
-// Walk every particle reachable from a global structure, collecting the
-// ``ref`` of each element particle. Mirrors the descent rules of
-// ``visitParticle``/``visitComplexType`` in indexSchema.ts.
-function collectElementRefs(model: SchemaModel): Set<string> {
-  const refs = new Set<string>();
-
-  const walkParticle = (particle: Particle): void => {
-    if (particle.element) {
-      if (particle.element.ref) refs.add(particle.element.ref);
-      // An element particle may carry an anonymous inline complex type whose
-      // own content model can reference further globals.
-      if (particle.element.type_inline_complex?.particle) {
-        walkParticle(particle.element.type_inline_complex.particle);
-      }
-    }
-    if (particle.group_inline?.particle) walkParticle(particle.group_inline.particle);
-    for (const child of particle.children) walkParticle(child);
-  };
-
-  for (const complex of model.complex_types) {
-    if (complex.particle) walkParticle(complex.particle);
-  }
-  for (const group of model.groups) {
-    if (group.particle) walkParticle(group.particle);
-  }
-  for (const element of model.elements) {
-    if (element.type_inline_complex?.particle) {
-      walkParticle(element.type_inline_complex.particle);
-    }
-  }
-
-  return refs;
-}
-
-// Returns the global elements that act as document roots: every element in
-// ``model.elements`` that is not referenced by ``ref=`` somewhere in the
-// schema. Falls back to the full list if nothing survives the filter (e.g. a
-// schema whose only globals reference each other recursively) so the views
-// never end up empty.
 export function computeRootElements(model: SchemaModel): ElementDecl[] {
-  const refs = collectElementRefs(model);
-  if (refs.size === 0) return model.elements;
+  // ``model.files`` marks exactly one source file as "main" (the loaded
+  // entry point). Match elements back to it via their source_ref.file_id.
+  const mainFileId = model.files.find((f) => f.relationship === "main")?.id;
+  if (mainFileId == null) return model.elements;
 
-  // Resolve refs against global elements by qname or by bare local name —
-  // same matching strategy as resolveReference() in indexSchema.ts.
-  const localRefs = new Set<string>();
-  for (const ref of refs) localRefs.add(localName(ref));
+  const roots = model.elements.filter(
+    (el) => el.source_ref?.file_id === mainFileId,
+  );
 
-  const referencedIds = new Set<string>();
-  for (const element of model.elements) {
-    const matches =
-      (element.qname != null && refs.has(element.qname)) ||
-      (element.name != null && localRefs.has(element.name));
-    if (matches) referencedIds.add(element.id);
-  }
-
-  const roots = model.elements.filter((el) => !referencedIds.has(el.id));
+  // Safeguard: a main file that declares no globals of its own (a pure
+  // include/import aggregator) would leave nothing to show — fall back to the
+  // full list so the views are never empty.
   return roots.length > 0 ? roots : model.elements;
 }
