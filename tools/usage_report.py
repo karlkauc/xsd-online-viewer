@@ -3,7 +3,7 @@
 
 Reads the `usage_event` table (docs/USAGE_STATS.md) on the Hetzner VPS and
 prints aggregates: volume per day, sources, visitors, countries, referrers,
-top schemas, error rate, parse-duration percentiles, DB size. No writes.
+top schemas, error rate, parse-duration percentiles, feedback, DB size. No writes.
 
 Connection (env-overridable; defaults match the Cloud Run deploy):
     USAGE_DB_HOST  (default 62.238.116.11)
@@ -116,6 +116,10 @@ def main() -> None:
             SELECT received_at::timestamp(0) at, event_type, source, status, left(error_detail, 80) detail
             FROM usage_event WHERE status IN ('parse_error','rejected') {and_}
             ORDER BY received_at DESC LIMIT 10;"""),
+        ("Feedback (latest 20)", f"""
+            SELECT received_at::timestamp(0) at, left(message, 100) message, email, page,
+                   left(error_detail, 60) error_detail, country_code cc
+            FROM feedback {where} ORDER BY received_at DESC LIMIT 20;"""),
         ("DB size", """
             SELECT pg_size_pretty(pg_total_relation_size('usage_event')) table_size,
                    pg_size_pretty(pg_database_size(current_database())) db_size,

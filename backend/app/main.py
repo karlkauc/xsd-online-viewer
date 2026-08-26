@@ -17,12 +17,14 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app import __version__
 from app.api.export import router as export_router
+from app.api.feedback import router as feedback_router
 from app.api.releases import router as releases_router
 from app.api.schema import router as schema_router
 from app.config import settings
 from app.logging_setup import configure_logging, new_request_id, request_id_var
 from app.rate_limit import limiter
 from app.usage.context import RequestUsage, UsageTracker, bind, emit, unbind
+from app.usage.feedback import FeedbackStore
 from app.usage.geoip import GeoIp
 from app.usage.recorder import UsageRecorder
 
@@ -90,6 +92,7 @@ def build_usage_tracker() -> UsageTracker:
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     tracker = build_usage_tracker()
     application.state.usage = tracker
+    application.state.feedback = FeedbackStore(settings.usage_db_url, settings.usage_db_password)
     await tracker.start()
     try:
         yield
@@ -190,6 +193,7 @@ async def health() -> dict[str, str]:
 app.include_router(schema_router, prefix="/api")
 app.include_router(export_router, prefix="/api")
 app.include_router(releases_router, prefix="/api")
+app.include_router(feedback_router, prefix="/api")
 
 # --- Static frontend ------------------------------------------------------
 # Serves the built React SPA. In dev, the Vite dev-server runs separately and

@@ -3,6 +3,8 @@ import { Uploader } from "./components/Uploader";
 import { TreeView } from "./components/TreeView/TreeView";
 import { DetailPanel } from "./components/DetailPanel";
 import { SearchPalette } from "./components/SearchPalette";
+import { FeedbackDialog } from "./components/FeedbackDialog";
+import { openFeedback } from "./components/UploadError";
 import { DiagramView } from "./components/DiagramView/DiagramView";
 import { TextView } from "./components/TextView/TextView";
 import { ValidationPanel } from "./components/ValidationPanel/ValidationPanel";
@@ -177,6 +179,15 @@ export default function App() {
               Export HTML
             </a>
           )}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => openFeedback()}
+            title="Send feedback"
+            aria-label="Send feedback"
+          >
+            💬 Feedback
+          </button>
           <ThemeToggle />
         </div>
       </header>
@@ -277,6 +288,7 @@ export default function App() {
       )}
 
       <SearchPalette />
+      <FeedbackDialog />
     </div>
   );
 }

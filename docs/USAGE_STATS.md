@@ -28,6 +28,17 @@ One row per event in table `usage_event` (DDL: `backend/sql/usage_stats.sql`):
 | `duration_ms`, `status`, `status_code`, `error_detail` | timing and outcome (`ok`/`invalid`/`parse_error`/`rejected`); `error_detail` is the exception message, ≤255 chars |
 | `app_version`, `received_at` | build version, server timestamp |
 
+### Feedback
+
+`POST /api/feedback` (💬 button in the app) writes one row per message to table
+`feedback` (same DDL file): `message` (≤ 4000 chars), optional `email` (only
+if the user typed one), `page`, `schema_name`, `error_detail` (the error the
+user was looking at, prefilled by the UI), plus the same `visitor_hash`,
+`country_code`, `user_agent`, `device`, `app_version` as above. The insert is
+synchronous (the user gets a real success/failure) and rate-limited to
+5/minute per IP; a hidden honeypot field drops naive bots. Without
+`USAGE_DB_URL` the endpoint answers 503.
+
 **Never collected:** schema/XML content, raw IP, cookies, anything from the
 browser beyond the standard request headers. There is no client-side tracking
 script (the CSP forbids one anyway).
@@ -140,6 +151,10 @@ SELECT target_namespace, count(*) FROM usage_event WHERE event_type='schema_load
 SELECT country_code, count(DISTINCT visitor_hash) FROM usage_event WHERE device<>'bot' GROUP BY 1 ORDER BY 2 DESC;
 SELECT referrer, count(*) FROM usage_event WHERE event_type='page_view' GROUP BY 1 ORDER BY 2 DESC LIMIT 25;
 SELECT device, count(*) FROM usage_event GROUP BY 1;
+
+-- Feedback
+SELECT received_at::timestamp(0), left(message, 120), email, page, error_detail
+FROM feedback ORDER BY received_at DESC LIMIT 20;
 
 -- Size watch
 SELECT pg_size_pretty(pg_total_relation_size('usage_event')), count(*) FROM usage_event;

@@ -72,3 +72,8 @@ def override_xsd_bytes() -> bytes:
 @pytest.fixture
 def override_base_xsd_bytes() -> bytes:
     return (FIXTURES_DIR / "override-base.xsd").read_bytes()
+
+
+@pytest.fixture
+def xmldsig_bytes() -> bytes:
+    return (FIXTURES_DIR / "xmldsig-core-schema.xsd").read_bytes()

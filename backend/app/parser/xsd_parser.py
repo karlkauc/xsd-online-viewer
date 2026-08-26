@@ -19,6 +19,11 @@ from urllib.parse import urljoin, urlparse
 
 from lxml import etree
 
+from app.parser.errors import (
+    humanize_syntax_error,
+    no_xsd_in_zip_message,
+    not_a_schema_message,
+)
 from app.parser.model import (
     Alternative,
     Annotation,
@@ -320,16 +325,17 @@ class XsdParser:
             return None
         except etree.XMLSyntaxError as exc:
             self.state.diagnostics.append(
-                Diagnostic(severity="error", message=f"{filename}: {exc}", file_id=None)
+                Diagnostic(
+                    severity="error",
+                    message=humanize_syntax_error(exc, filename, content),
+                    file_id=None,
+                )
             )
             return None
         root = tree.getroot()
         if _namespace_and_local(root.tag) != (XSD_NS, "schema"):
             self.state.diagnostics.append(
-                Diagnostic(
-                    severity="error",
-                    message=f"{filename}: root element is not xs:schema",
-                )
+                Diagnostic(severity="error", message=not_a_schema_message(filename, root.tag))
             )
             return None
         target_ns = root.get("targetNamespace") or target_ns_hint
@@ -1185,7 +1191,7 @@ def parse_zip(zip_bytes: bytes, main_filename: str | None = None) -> SchemaModel
     if main_filename is None:
         xsd_candidates = [n for n in files if n.lower().endswith(".xsd")]
         if not xsd_candidates:
-            raise ValueError("ZIP archive contains no .xsd files")
+            raise ValueError(no_xsd_in_zip_message(list(files)))
         main_filename = min(xsd_candidates, key=lambda n: (n.count("/"), len(n)))
     if main_filename not in files:
         raise ValueError(f"{main_filename!r} not found in archive")
@@ -1258,7 +1264,7 @@ def parse_with_url_fallback(
     if main_filename is None:
         xsd_candidates = [n for n in files if n.lower().endswith(".xsd")]
         if not xsd_candidates:
-            raise ValueError("no main XSD identified")
+            raise ValueError(no_xsd_in_zip_message(list(files)))
         main_filename = min(xsd_candidates, key=lambda n: (n.count("/"), len(n)))
     if main_filename not in files:
         raise ValueError(f"{main_filename!r} not present")

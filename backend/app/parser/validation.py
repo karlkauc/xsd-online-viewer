@@ -32,7 +32,7 @@ from app.parser.model import (
     SchemaModel,
     SimpleType,
 )
-from app.parser.security import _reject_known_bombs, make_parser
+from app.parser.security import inspect_dtd, make_parser
 
 logger = logging.getLogger(__name__)
 
@@ -124,13 +124,15 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
         main_on_disk: Path | None = None
         used_paths: set[PurePosixPath] = set()
         unavailable: list[str] = []
+        main_has_entities = False
 
         for idx, source in enumerate(model.files):
             if source.content is None:
                 unavailable.append(source.filename)
                 continue
             data = source.content.encode("utf-8")
-            _reject_known_bombs(data)
+            if inspect_dtd(data) and source.relationship == "main":
+                main_has_entities = True
 
             rel = _safe_relative_path(source.filename, f"file-{idx}.xsd")
             if rel in used_paths:
@@ -151,7 +153,7 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
             raise ValidationSetupError("schema source is unavailable; cannot validate")
 
         try:
-            xsd_tree = etree.parse(str(main_on_disk), make_parser())
+            xsd_tree = etree.parse(str(main_on_disk), make_parser(internal_entities=main_has_entities))
             return etree.XMLSchema(xsd_tree)
         except etree.XMLSchemaParseError as exc:
             detail = str(exc)
@@ -174,7 +176,7 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
 def pretty_print_and_parse(xml_bytes: bytes) -> bytes:
     """Pretty-print ``xml_bytes``. Raises ``etree.XMLSyntaxError`` if the input
     is not well-formed (handled by the caller as a distinct error class)."""
-    _reject_known_bombs(xml_bytes)
+    inspect_dtd(xml_bytes)
     parser = etree.XMLParser(
         remove_blank_text=True,
         resolve_entities=False,

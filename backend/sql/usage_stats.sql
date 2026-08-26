@@ -32,3 +32,22 @@ CREATE INDEX IF NOT EXISTS idx_usage_event_received  ON usage_event (received_at
 CREATE INDEX IF NOT EXISTS idx_usage_event_type_time ON usage_event (event_type, received_at);
 CREATE INDEX IF NOT EXISTS idx_usage_event_visitor   ON usage_event (visitor_hash);
 CREATE INDEX IF NOT EXISTS idx_usage_event_country   ON usage_event (country_code);
+
+-- User feedback submitted through the in-app dialog (POST /api/feedback).
+-- Same anonymisation as usage_event; the email is optional and typed in voluntarily.
+CREATE TABLE IF NOT EXISTS feedback (
+  feedback_id   uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  received_at   timestamptz NOT NULL DEFAULT now(),
+  message       text        NOT NULL,   -- ≤ 4000 chars, enforced by the API
+  email         text,                   -- optional reply address, user-provided
+  page          text,                   -- SPA path the dialog was opened from
+  schema_name   text,                   -- schema loaded at the time, if any
+  error_detail  text,                   -- error message the user was looking at, if any
+  visitor_hash  text,
+  country_code  char(2),
+  user_agent    text,
+  device        text,
+  app_version   text
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_received ON feedback (received_at);

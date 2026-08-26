@@ -67,6 +67,10 @@ one click away, including its `xmldsig-core-schema.xsd` companion.
   duration and outcome). Schema *content* is never written anywhere. Details
   and the full column list: [docs/USAGE_STATS.md](docs/USAGE_STATS.md).
   Self-hosted installs have this off unless `USAGE_DB_URL` is set.
+- **Feedback is optional and anonymous.** The 💬 Feedback button stores your
+  message (plus the page, the loaded schema's name and the error you were
+  looking at, if any) in the same statistics database — never your IP. An
+  email address is kept only if you type one in.
 - **No account, no login.** Just open the site and drop a file.
 - **You can run it yourself.** The whole app is a single Docker container —
   see [docs/TECHNICAL.md](docs/TECHNICAL.md) for self-hosting.
@@ -81,10 +85,14 @@ authoritative schema and an established validator. Use is at your own risk.
 
 ## Found a bug? Missing a feature?
 
-Please open an issue on GitHub — bug reports, reproduction steps and feature
-requests are all welcome:
+Use the **💬 Feedback** button in the app, or open an issue on GitHub — bug
+reports, reproduction steps and feature requests are all welcome:
 
 ➡️ <https://github.com/karlkauc/online-xsd-viewer/issues>
+
+Have an XML **document** rather than a schema? The sister project
+[XML Viewer](https://www.xml-viewer.online/) shows the document as a tree and
+diagram and validates it against any XSD.
 
 ## Technical details, self-hosting & development
 

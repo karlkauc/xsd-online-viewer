@@ -107,7 +107,15 @@ The same middleware binds a per-request usage context (client IP, user agent,
 referrer) that routers turn into `usage_event` rows via `app.usage.context.emit()`
 — see [USAGE_STATS.md](USAGE_STATS.md). The recorder starts/stops in the app
 lifespan and is a no-op unless `USAGE_DB_URL` is set, so tests and local dev
-never touch a database.
+never touch a database. `POST /api/feedback` (`app/api/feedback.py`) writes
+user feedback synchronously into the same database via `app.usage.feedback`
+and answers 503 when it is not configured.
+
+Parse failures reach the client as a plain-text `detail`; `app/parser/errors.py`
+makes those messages human ("root element is `<games>`, not `<xs:schema>`",
+"not an XML file"), and the frontend's `lib/uploadErrors.ts` classifies them
+to show a matching hint (`components/UploadError.tsx`) — e.g. a link to the
+sister project xml-viewer.online for XML documents.
 
 ### Endpoints
 

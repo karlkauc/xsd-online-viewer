@@ -168,3 +168,31 @@ export function exportHtmlUrl(schemaId: string): string {
 export function exportFormattedFileUrl(schemaId: string, fileId: string): string {
   return `${API_BASE}/schema/${schemaId}/file/${fileId}/formatted`;
 }
+
+export interface FeedbackPayload {
+  message: string;
+  email?: string;
+  page?: string;
+  schema_name?: string;
+  error_detail?: string;
+  /** Honeypot — must stay empty; bots that fill it are dropped server-side. */
+  website?: string;
+}
+
+export async function sendFeedback(payload: FeedbackPayload): Promise<void> {
+  const response = await fetch(`${API_BASE}/feedback`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // ignore
+    }
+    throw new ApiError(detail, response.status);
+  }
+}

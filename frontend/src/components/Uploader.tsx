@@ -9,6 +9,8 @@ import {
 import { useSelection } from "../stores/selectionStore";
 import { readModeFromPath, writeModePath, type Mode } from "../lib/modeRoute";
 import { FundsXmlReleases } from "./FundsXmlReleases";
+import { UploadError } from "./UploadError";
+import { looksLikeSchema, shouldSniff, XML_VIEWER_URL } from "../lib/uploadErrors";
 
 const MODE_LABELS: Record<Mode, string> = {
   file: "File / ZIP",
@@ -22,6 +24,8 @@ export function Uploader() {
   const [mode, setMode] = useState<Mode>(() => readModeFromPath());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorFile, setErrorFile] = useState<string | undefined>(undefined);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [text, setText] = useState("");
   const [url, setUrl] = useState("");
   const [mainFilename, setMainFilename] = useState("");
@@ -29,10 +33,21 @@ export function Uploader() {
   const [dragOver, setDragOver] = useState(false);
 
   const handleFile = useCallback(
-    async (file: File) => {
+    async (file: File, { force = false }: { force?: boolean } = {}) => {
       setError(null);
+      setErrorFile(file.name);
+      setPendingFile(null);
       setBusy(true);
       try {
+        if (!force && shouldSniff(file.name)) {
+          // Avoid shipping a multi-MB XML document only to get a 400 back.
+          const head = await file.slice(0, 2048).text();
+          if (!looksLikeSchema(head)) {
+            setPendingFile(file);
+            setError(`${file.name}: no <xs:schema> root found — this looks like an XML document, not an XML Schema`);
+            return;
+          }
+        }
         const response = await uploadSchemaFile(file, mainFilename.trim() || undefined);
         setSchema(response.schema_id, response.model);
       } catch (err) {
@@ -46,6 +61,8 @@ export function Uploader() {
 
   const handleText = useCallback(async () => {
     setError(null);
+    setErrorFile(undefined);
+    setPendingFile(null);
     setBusy(true);
     try {
       const response = await uploadSchemaText(text);
@@ -60,6 +77,8 @@ export function Uploader() {
   const loadFromUrl = useCallback(
     async (target: string) => {
       setError(null);
+      setErrorFile(target);
+      setPendingFile(null);
       setBusy(true);
       try {
         const response = await loadSchemaFromUrl(target);
@@ -80,6 +99,8 @@ export function Uploader() {
   const loadFromRelease = useCallback(
     async (tagName: string, filename: string) => {
       setError(null);
+      setErrorFile(`${tagName}/${filename}`);
+      setPendingFile(null);
       setBusy(true);
       try {
         const response = await loadSchemaFromRelease(tagName, filename);
@@ -121,6 +142,13 @@ export function Uploader() {
       <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
         Drop an <code>.xsd</code> file or a <code>.zip</code> archive (for multi-file schemas),
         paste schema source, or point to a URL.
+      </p>
+      <p className="text-xs text-slate-500 dark:text-slate-400 -mt-4 mb-6">
+        Have an XML <strong>document</strong> to inspect or validate instead? Use our sister tool{" "}
+        <a href={XML_VIEWER_URL} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+          XML Viewer
+        </a>
+        .
       </p>
 
       <div className="flex flex-wrap gap-1 mb-4" role="tablist">
@@ -245,9 +273,11 @@ export function Uploader() {
 
       {busy && <p className="mt-4 text-sm text-slate-500">Parsing…</p>}
       {error && (
-        <p className="mt-4 text-sm text-red-600 dark:text-red-400" role="alert">
-          {error}
-        </p>
+        <UploadError
+          message={error}
+          schemaName={errorFile}
+          onUploadAnyway={pendingFile ? () => void handleFile(pendingFile, { force: true }) : undefined}
+        />
       )}
     </div>
   );

@@ -1,7 +1,9 @@
 """Security-critical parser and network helpers.
 
-Every ``lxml`` call goes through :func:`make_parser` so that external
+Every ``lxml`` call goes through :func:`parse_bytes` so that external
 entities, DTD loading and network access at parse-time are globally off.
+The only DTD markup accepted is a bounded internal subset of literal-value
+entities (see :func:`inspect_dtd`), which some W3C schemas rely on.
 URL fetching for ``schemaLocation`` references goes through
 :func:`fetch_schema_url`, which restricts schemes to http(s), blocks
 private IP ranges, caps response size and limits redirects. Hosts are
@@ -13,6 +15,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
 import socket
 from dataclasses import dataclass
 
@@ -33,18 +36,22 @@ class SecurityError(ValueError):
 # ---------------------------------------------------------------------------
 
 
-def make_parser() -> etree.XMLParser:
+def make_parser(*, internal_entities: bool = False) -> etree.XMLParser:
     """Return a parser configured to block XXE and external network access.
 
-    - ``resolve_entities=False`` disables entity substitution (XXE).
+    - ``resolve_entities`` is off by default (no entity substitution ⇒ no XXE).
+      It is switched on only for documents whose DOCTYPE passed
+      :func:`inspect_dtd` — a bounded internal subset of literal-value
+      entities, which is what the W3C xmldsig/xenc schemas ship with.
     - ``no_network=True`` forbids the parser from fetching DTDs/entities.
-    - ``load_dtd=False`` skips DTD processing entirely.
+    - ``load_dtd=False`` never loads an external DTD subset, even when the
+      DOCTYPE names one via SYSTEM/PUBLIC.
     - ``huge_tree=False`` leaves lxml's internal XML-bomb mitigations active.
     - ``remove_comments=False`` so comments are preserved in the tree; we
       want to show them in the viewer.
     """
     return etree.XMLParser(
-        resolve_entities=False,
+        resolve_entities=internal_entities,
         no_network=True,
         load_dtd=False,
         dtd_validation=False,
@@ -60,8 +67,8 @@ def parse_bytes(data: bytes, filename: str | None = None) -> etree._ElementTree:
     """Parse XML bytes with the hardened parser, raising ``SecurityError``
     on DTD / external entity constructs.
     """
-    _reject_known_bombs(data)
-    parser = make_parser()
+    has_safe_subset = inspect_dtd(data)
+    parser = make_parser(internal_entities=has_safe_subset)
     try:
         root = etree.fromstring(data, parser)
     except etree.XMLSyntaxError as exc:
@@ -71,16 +78,71 @@ def parse_bytes(data: bytes, filename: str | None = None) -> etree._ElementTree:
     return etree.ElementTree(root)
 
 
-_BANNED_TOKENS = (b"<!DOCTYPE", b"<!ENTITY", b"<!ATTLIST", b"<!NOTATION")
+# ---------------------------------------------------------------------------
+# DOCTYPE inspection
+# ---------------------------------------------------------------------------
+
+DTD_HEAD_BYTES = 16 * 1024
+MAX_DTD_DECLARATIONS = 32
+MAX_ENTITY_VALUE_CHARS = 512
+
+_DTD_TOKENS = (b"<!DOCTYPE", b"<!ENTITY", b"<!ATTLIST", b"<!NOTATION", b"<!ELEMENT")
+_DOCTYPE_RE = re.compile(rb"<!DOCTYPE\b(?P<header>[^\[>]*)(?:\[(?P<subset>.*?)\]\s*)?>", re.S)
+_COMMENT_RE = re.compile(rb"<!--.*?-->", re.S)
+_DECL_RE = re.compile(rb"<!(?P<kind>ENTITY|ATTLIST)\b(?P<body>[^>]*)>", re.S)
+_ENTITY_BODY_RE = re.compile(
+    rb"^\s*(?:%\s+)?[A-Za-z_:][\w.:-]*\s+(?P<q>[\"'])(?P<value>[^\"']*)(?P=q)\s*$", re.S
+)
+_UNSAFE_IN_VALUE = re.compile(rb"[&%<]")
+
+DTD_REJECTED_MESSAGE = (
+    "DTD constructs are not allowed in uploads (only a DOCTYPE with simple, literal-value "
+    "<!ENTITY> declarations is accepted); remove the DOCTYPE and inline the entity values"
+)
 
 
-def _reject_known_bombs(data: bytes) -> None:
-    # Cheap pre-filter: any DTD markup inside an XSD is either unnecessary
-    # (XSDs should not carry DTDs) or a vector for a billion-laughs attack.
-    head = data[:4096].upper()
-    for token in _BANNED_TOKENS:
-        if token in head:
-            raise SecurityError(f"DTD construct {token.decode()!r} is not permitted in uploads")
+def inspect_dtd(data: bytes) -> bool:
+    """Return True when ``data`` carries a DOCTYPE that is safe to expand.
+
+    Accepted: at most one DOCTYPE (with or without a PUBLIC/SYSTEM external
+    id — the parser never loads it) whose internal subset contains only
+    comments plus ≤ ``MAX_DTD_DECLARATIONS`` ``<!ENTITY>`` / ``<!ATTLIST>``
+    declarations with literal values that reference nothing (no ``&``, ``%``
+    or ``<``). That rules out XXE, billion-laughs nesting and injected
+    markup while letting the W3C xmldsig/xenc schemas through.
+
+    Raises :class:`SecurityError` for everything else that looks like DTD
+    markup; returns False when there is no DTD at all.
+    """
+    head = data[:DTD_HEAD_BYTES]
+    upper = head.upper()
+    if not any(token in upper for token in _DTD_TOKENS):
+        return False
+    match = _DOCTYPE_RE.search(head)
+    if match is None:
+        raise SecurityError(DTD_REJECTED_MESSAGE)
+    remainder = head[: match.start()] + head[match.end() :]
+    if any(token in remainder.upper() for token in _DTD_TOKENS):
+        raise SecurityError(DTD_REJECTED_MESSAGE)
+    subset = _COMMENT_RE.sub(b"", match.group("subset") or b"")
+    declarations = 0
+    pos = 0
+    for decl in _DECL_RE.finditer(subset):
+        if subset[pos : decl.start()].strip():
+            raise SecurityError(DTD_REJECTED_MESSAGE)
+        pos = decl.end()
+        declarations += 1
+        body = decl.group("body")
+        if decl.group("kind") == b"ENTITY":
+            entity = _ENTITY_BODY_RE.match(body)
+            if entity is None or len(entity.group("value")) > MAX_ENTITY_VALUE_CHARS:
+                raise SecurityError(DTD_REJECTED_MESSAGE)
+            body = entity.group("value")
+        if _UNSAFE_IN_VALUE.search(body):
+            raise SecurityError(DTD_REJECTED_MESSAGE)
+    if subset[pos:].strip() or declarations > MAX_DTD_DECLARATIONS:
+        raise SecurityError(DTD_REJECTED_MESSAGE)
+    return True
 
 
 # ---------------------------------------------------------------------------
