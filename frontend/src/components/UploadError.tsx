@@ -1,18 +1,29 @@
+import { useState } from "react";
 import { classifyUploadError, XML_VIEWER_URL } from "../lib/uploadErrors";
+import { openInXmlViewer } from "../lib/xmlViewerHandoff";
 
 interface Props {
   message: string;
   /** Present when the error was raised before upload and the user may override. */
   onUploadAnyway?: () => void;
   schemaName?: string;
+  /** The uploaded file, so an XML document can be handed to the XML viewer. */
+  file?: File;
 }
 
 export function openFeedback(detail: { errorDetail?: string; schemaName?: string } = {}) {
   window.dispatchEvent(new CustomEvent("xsdv:open-feedback", { detail }));
 }
 
-export function UploadError({ message, onUploadAnyway, schemaName }: Props) {
+export function UploadError({ message, onUploadAnyway, schemaName, file }: Props) {
   const { kind, title } = classifyUploadError(message);
+  const [handoff, setHandoff] = useState<"idle" | "sending" | "sent" | "failed">("idle");
+
+  const sendToXmlViewer = () => {
+    if (!file) return;
+    setHandoff("sending");
+    void openInXmlViewer(file).then((ok) => setHandoff(ok ? "sent" : "failed"));
+  };
 
   return (
     <div
@@ -29,14 +40,46 @@ export function UploadError({ message, onUploadAnyway, schemaName }: Props) {
               This viewer reads XML <em>Schema</em> files (<code>.xsd</code>). To inspect or validate an
               XML <em>document</em>, use our sister tool:
             </p>
-            <a
-              href={XML_VIEWER_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-primary inline-block"
-            >
-              Open XML Viewer ↗
-            </a>
+            {file ? (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-primary inline-block"
+                  disabled={handoff === "sending"}
+                  onClick={sendToXmlViewer}
+                >
+                  Open in XML Viewer ↗
+                </button>
+                {handoff === "sending" && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Opening XML Viewer and sending <code>{file.name}</code>…
+                  </p>
+                )}
+                {handoff === "sent" && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    <code>{file.name}</code> was sent to the XML Viewer tab.
+                  </p>
+                )}
+                {handoff === "failed" && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Could not send the file automatically (popup blocked?). Open{" "}
+                    <a href={XML_VIEWER_URL} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+                      the XML Viewer
+                    </a>{" "}
+                    and upload <code>{file.name}</code> there.
+                  </p>
+                )}
+              </>
+            ) : (
+              <a
+                href={XML_VIEWER_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-primary inline-block"
+              >
+                Open XML Viewer ↗
+              </a>
+            )}
             <p className="text-xs text-slate-500 dark:text-slate-400">
               If you have the schema this document follows, upload that <code>.xsd</code> here instead.
             </p>

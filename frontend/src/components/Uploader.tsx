@@ -26,6 +26,9 @@ export function Uploader() {
   const [error, setError] = useState<string | null>(null);
   const [errorFile, setErrorFile] = useState<string | undefined>(undefined);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  // The file of the last attempt, kept so an XML document can be handed to
+  // the XML viewer without asking the user to pick it again.
+  const [lastFile, setLastFile] = useState<File | null>(null);
   const [text, setText] = useState("");
   const [url, setUrl] = useState("");
   const [mainFilename, setMainFilename] = useState("");
@@ -37,6 +40,7 @@ export function Uploader() {
       setError(null);
       setErrorFile(file.name);
       setPendingFile(null);
+      setLastFile(file);
       setBusy(true);
       try {
         if (!force && shouldSniff(file.name)) {
@@ -63,6 +67,7 @@ export function Uploader() {
     setError(null);
     setErrorFile(undefined);
     setPendingFile(null);
+    setLastFile(null);
     setBusy(true);
     try {
       const response = await uploadSchemaText(text);
@@ -79,6 +84,7 @@ export function Uploader() {
       setError(null);
       setErrorFile(target);
       setPendingFile(null);
+      setLastFile(null);
       setBusy(true);
       try {
         const response = await loadSchemaFromUrl(target);
@@ -101,6 +107,7 @@ export function Uploader() {
       setError(null);
       setErrorFile(`${tagName}/${filename}`);
       setPendingFile(null);
+      setLastFile(null);
       setBusy(true);
       try {
         const response = await loadSchemaFromRelease(tagName, filename);
@@ -276,6 +283,7 @@ export function Uploader() {
         <UploadError
           message={error}
           schemaName={errorFile}
+          file={lastFile ?? undefined}
           onUploadAnyway={pendingFile ? () => void handleFile(pendingFile, { force: true }) : undefined}
         />
       )}
