@@ -82,6 +82,10 @@ frontend/              React SPA
       DetailPanel.tsx    Selected node metadata, facets, usages
       SearchPalette.tsx  Ctrl/Cmd-K fuzzy search
       Diagnostics.tsx    Parse warnings/errors
+      FeedbackDialog.tsx Modal feedback form → POST /api/feedback
+      AboutDialog.tsx    Modal with version (GET /api/health), GitHub,
+                         xml-viewer.online and license links
+      UploadError.tsx    Classified upload errors + hints (lib/uploadErrors.ts)
     types/schema.ts    TypeScript mirror of SchemaModel
   tests/               Vitest
 
@@ -115,7 +119,15 @@ Parse failures reach the client as a plain-text `detail`; `app/parser/errors.py`
 makes those messages human ("root element is `<games>`, not `<xs:schema>`",
 "not an XML file"), and the frontend's `lib/uploadErrors.ts` classifies them
 to show a matching hint (`components/UploadError.tsx`) — e.g. a link to the
-sister project xml-viewer.online for XML documents.
+sister project xml-viewer.online for XML documents. That link
+(`XML_VIEWER_URL` in `lib/uploadErrors.ts`) is also in the header and the
+About dialog; the GitHub repo URL lives in `components/AboutDialog.tsx`
+(`GITHUB_REPO_URL`).
+
+Modal dialogs (search palette, feedback, about) are mounted once in `App.tsx`
+and opened from anywhere via window events (`xsdv:open-search`,
+`xsdv:open-feedback`, `xsdv:open-about`) — helpers `openFeedback()` and
+`openAbout()` wrap the dispatch.
 
 ### Endpoints
 

@@ -85,14 +85,17 @@ authoritative schema and an established validator. Use is at your own risk.
 
 ## Found a bug? Missing a feature?
 
-Use the **💬 Feedback** button in the app, or open an issue on GitHub — bug
-reports, reproduction steps and feature requests are all welcome:
+Use the **💬 Feedback** button in the app, or open an issue on GitHub (the
+**GitHub** button in the header and the **ℹ️ About** dialog link there too) —
+bug reports, reproduction steps and feature requests are all welcome:
 
-➡️ <https://github.com/karlkauc/online-xsd-viewer/issues>
+➡️ <https://github.com/karlkauc/xsd-online-viewer/issues>
 
 Have an XML **document** rather than a schema? The sister project
 [XML Viewer](https://www.xml-viewer.online/) shows the document as a tree and
-diagram and validates it against any XSD.
+diagram and validates it against any XSD. It is linked from the header
+(**XML Viewer ↗**), the upload page and the About dialog; if you upload an
+XML document by mistake, the error message points there as well.
 
 ## Technical details, self-hosting & development
 
