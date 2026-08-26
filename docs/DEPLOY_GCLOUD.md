@@ -61,6 +61,13 @@ aus. Production läuft hinter der Custom-Domain
 > Variable Komma-getrennte Regexes — `--set-env-vars` interpretiert
 > Kommas aber als Variablentrenner. Workaround siehe
 > [Env-Vars mit Kommas](#env-vars-mit-kommas-allowed_schema_hosts).
+>
+> **Production-Stand (seit 2026-08-26, Revision `xsdviewer-00016`):** die
+> Variable ist **nicht gesetzt** — alle öffentlichen Hosts sind erlaubt.
+> Zuvor galt eine GitHub-only-Whitelist, die u. a. `docs.oasis-open.org`
+> blockierte. Wieder einschalten:
+> `gcloud run services update xsdviewer --region europe-west1 --project xsd-viewer-495407 --update-env-vars '^@^ALLOWED_SCHEMA_HOSTS=…'`;
+> ausschalten: `… --remove-env-vars ALLOWED_SCHEMA_HOSTS`.
 
 ## Wichtige Cloud-Run-Limits
 
@@ -106,7 +113,7 @@ Quelle der Defaults: `backend/app/config.py`. In Cloud Run per
 |----------|---------|----------------------|
 | `PORT` | `8080` | nicht setzen — Cloud Run injiziert ihn |
 | `MAX_UPLOAD_MB` | `50` | **`32`** (Cloud-Run-Limit) |
-| `ALLOWED_SCHEMA_HOSTS` | leer | leer = jede öffentliche URL erlaubt; setzen, wenn der Endpoint auf eine Host-Whitelist beschränkt werden soll (Lockdown) |
+| `ALLOWED_SCHEMA_HOSTS` | leer | **leer lassen** (Production seit 2026-08-26 ohne Whitelist); nur setzen, wenn der Endpoint auf eine Host-Whitelist beschränkt werden soll (Lockdown) |
 | `SCHEMA_CACHE_TTL_MIN` | `60` | `60` ist OK |
 | `SCHEMA_CACHE_MAX_ENTRIES` | `32` | `32` ist OK; bei Memory-Druck reduzieren |
 | `LOG_LEVEL` | `INFO` | `INFO` |
