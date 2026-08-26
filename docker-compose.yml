@@ -13,6 +13,12 @@ services:
       #   ALLOWED_SCHEMA_HOSTS: '^raw\.githubusercontent\.com$,^github\.com$'
       LOG_LEVEL: INFO
       MAX_UPLOAD_MB: "50"
+      # Usage statistics are off unless USAGE_DB_URL is set — see
+      # docs/USAGE_STATS.md. Host Postgres is reachable as 172.17.0.1.
+      #   USAGE_DB_URL: postgresql://xsdviewer@172.17.0.1:5432/xsdviewer_stats
+      #   USAGE_DB_PASSWORD: "..."
+      #   USAGE_HASH_SECRET: "..."
+      #   MAXMIND_LICENSE_KEY: "..."
     healthcheck:
       test:
         - CMD

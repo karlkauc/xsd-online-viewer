@@ -25,6 +25,7 @@ from app.parser.model import (
     SchemaModel,
     SimpleType,
 )
+from app.usage.context import emit
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,10 @@ router = APIRouter(tags=["export"])
 async def export_html(schema_id: str) -> Response:
     model = schema_cache.get(schema_id)
     if model is None:
+        emit("export", source="html", status="rejected", status_code=404)
         raise HTTPException(status_code=404, detail="schema not found or expired")
     document = _render_html(model)
+    emit("export", source="html", status="ok", status_code=200, file_count=len(model.files))
     return Response(
         content=document,
         media_type="text/html; charset=utf-8",
@@ -48,11 +51,13 @@ async def export_html(schema_id: str) -> Response:
 async def export_formatted_file(schema_id: str, file_id: str) -> Response:
     model = schema_cache.get(schema_id)
     if model is None:
+        emit("export", source="formatted", status="rejected", status_code=404)
         raise HTTPException(status_code=404, detail="schema not found or expired")
     for source in model.files:
         if source.id == file_id and source.content is not None:
             pretty = _pretty_xml(source.content)
             filename = source.filename.split("/")[-1] or "schema.xsd"
+            emit("export", source="formatted", status="ok", status_code=200)
             return Response(
                 content=pretty,
                 media_type="application/xml; charset=utf-8",

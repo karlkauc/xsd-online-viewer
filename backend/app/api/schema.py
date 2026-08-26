@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
+from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
@@ -20,6 +22,8 @@ from app.parser.validation import (
 )
 from app.parser.xsd_parser import parse_with_url_fallback
 from app.rate_limit import WRITE_LIMIT, limiter
+from app.usage.context import emit
+from app.usage.events import schema_display_name, truncate
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +58,57 @@ class ValidateUrlPayload(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-async def _read_upload(upload: UploadFile) -> bytes:
+def _ms(started: float) -> int:
+    return int((time.perf_counter() - started) * 1000)
+
+
+def reject(event_type: str, source: str, status_code: int, detail: str, **fields) -> HTTPException:
+    """Record a rejected request (size limit, SSRF guard, expired cache) and build the HTTPException."""
+    emit(event_type, source=source, status="rejected", status_code=status_code, error_detail=detail, **fields)
+    return HTTPException(status_code=status_code, detail=detail)
+
+
+def ingest_schema(
+    *, source: str, schema_name: str | None, input_bytes: int, parse: Callable[[], SchemaModel]
+) -> SchemaResponse:
+    """Run a parser callable, cache the result and emit one ``schema_load`` usage event."""
+    started = time.perf_counter()
+    name = schema_display_name(source, schema_name)
+    try:
+        model = parse()
+    except (SecurityError, ValueError) as exc:
+        emit(
+            "schema_load",
+            source=source,
+            schema_name=name,
+            input_bytes=input_bytes,
+            duration_ms=_ms(started),
+            status="parse_error",
+            status_code=400,
+            error_detail=str(exc),
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    response = finalize_schema_response(model)
+    emit(
+        "schema_load",
+        source=source,
+        schema_name=name,
+        target_namespace=truncate(model.target_namespace),
+        input_bytes=input_bytes,
+        file_count=len(model.files),
+        element_count=len(model.elements),
+        type_count=len(model.simple_types) + len(model.complex_types),
+        diagnostic_count=len(model.diagnostics),
+        duration_ms=_ms(started),
+        status="ok",
+        status_code=200,
+    )
+    return response
+
+
+async def _read_upload(
+    upload: UploadFile, *, event_type: str = "schema_load", source: str = "upload"
+) -> bytes:
     max_bytes = settings.max_upload_bytes
     chunks: list[bytes] = []
     total = 0
@@ -64,9 +118,12 @@ async def _read_upload(upload: UploadFile) -> bytes:
             break
         total += len(chunk)
         if total > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"upload exceeds {settings.max_upload_mb} MB limit",
+            raise reject(
+                event_type,
+                source,
+                413,
+                f"upload exceeds {settings.max_upload_mb} MB limit",
+                schema_name=schema_display_name(source, upload.filename),
             )
         chunks.append(chunk)
     return b"".join(chunks)
@@ -105,24 +162,23 @@ async def upload_schema(
     """Accept a single .xsd file or a .zip archive."""
     content = await _read_upload(file)
     name = file.filename or "schema.xsd"
-    try:
-        if name.lower().endswith(".zip") or (file.content_type or "").endswith("zip"):
-            model = parse_with_url_fallback(
-                zip_bytes=content,
-                main_filename=main_filename,
-                main_bytes=None,
-                base_url=None,
-            )
-        else:
-            model = parse_with_url_fallback(
-                zip_bytes=None,
-                main_filename=name,
-                main_bytes=content,
-                base_url=None,
-            )
-    except (SecurityError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return finalize_schema_response(model)
+    if name.lower().endswith(".zip") or (file.content_type or "").endswith("zip"):
+        return ingest_schema(
+            source="upload",
+            schema_name=main_filename or name,
+            input_bytes=len(content),
+            parse=lambda: parse_with_url_fallback(
+                zip_bytes=content, main_filename=main_filename, main_bytes=None, base_url=None
+            ),
+        )
+    return ingest_schema(
+        source="upload",
+        schema_name=name,
+        input_bytes=len(content),
+        parse=lambda: parse_with_url_fallback(
+            zip_bytes=None, main_filename=name, main_bytes=content, base_url=None
+        ),
+    )
 
 
 @router.post("/schema/url", response_model=SchemaResponse)
@@ -131,18 +187,18 @@ async def load_schema_from_url(request: Request, payload: UrlPayload) -> SchemaR
     try:
         fetched = fetch_schema_url(payload.url)
     except SecurityError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise reject(
+            "schema_load", "url", 400, str(exc), schema_name=schema_display_name("url", payload.url)
+        ) from exc
 
-    try:
-        model = parse_with_url_fallback(
-            zip_bytes=None,
-            main_filename=fetched.url,
-            main_bytes=fetched.content,
-            base_url=fetched.url,
-        )
-    except (SecurityError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return finalize_schema_response(model)
+    return ingest_schema(
+        source="url",
+        schema_name=fetched.url,
+        input_bytes=len(fetched.content),
+        parse=lambda: parse_with_url_fallback(
+            zip_bytes=None, main_filename=fetched.url, main_bytes=fetched.content, base_url=fetched.url
+        ),
+    )
 
 
 @router.post("/schema/text", response_model=SchemaResponse)
@@ -150,20 +206,21 @@ async def load_schema_from_url(request: Request, payload: UrlPayload) -> SchemaR
 async def load_schema_from_text(request: Request, payload: TextPayload) -> SchemaResponse:
     data = payload.content.encode("utf-8")
     if len(data) > settings.max_upload_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"content exceeds {settings.max_upload_mb} MB limit",
+        raise reject(
+            "schema_load",
+            "text",
+            413,
+            f"content exceeds {settings.max_upload_mb} MB limit",
+            schema_name=schema_display_name("text", payload.filename),
         )
-    try:
-        model = parse_with_url_fallback(
-            zip_bytes=None,
-            main_filename=payload.filename,
-            main_bytes=data,
-            base_url=None,
-        )
-    except (SecurityError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return finalize_schema_response(model)
+    return ingest_schema(
+        source="text",
+        schema_name=payload.filename,
+        input_bytes=len(data),
+        parse=lambda: parse_with_url_fallback(
+            zip_bytes=None, main_filename=payload.filename, main_bytes=data, base_url=None
+        ),
+    )
 
 
 @router.get("/schema/{schema_id}", response_model=SchemaResponse)
@@ -179,16 +236,28 @@ async def get_cached_schema(schema_id: str) -> SchemaResponse:
 # ---------------------------------------------------------------------------
 
 
-def _validate_xml_against_schema(schema_id: str, xml_bytes: bytes) -> ValidationResponse:
+def _validate_xml_against_schema(schema_id: str, xml_bytes: bytes, source: str) -> ValidationResponse:
+    started = time.perf_counter()
     model = schema_cache.get(schema_id)
     if model is None:
-        raise HTTPException(status_code=404, detail="schema not found or expired")
+        raise reject("validate", source, 404, "schema not found or expired", input_bytes=len(xml_bytes))
     try:
-        return validate_xml(model, xml_bytes)
+        result = validate_xml(model, xml_bytes)
     except ValidationSetupError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise reject("validate", source, 422, str(exc), input_bytes=len(xml_bytes)) from exc
     except SecurityError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise reject("validate", source, 400, str(exc), input_bytes=len(xml_bytes)) from exc
+    emit(
+        "validate",
+        source=source,
+        target_namespace=truncate(model.target_namespace),
+        input_bytes=len(xml_bytes),
+        error_count=len(result.errors),
+        duration_ms=_ms(started),
+        status="ok" if result.is_valid else "invalid",
+        status_code=200,
+    )
+    return result
 
 
 @router.post("/schema/{schema_id}/validate/upload", response_model=ValidationResponse)
@@ -196,8 +265,8 @@ def _validate_xml_against_schema(schema_id: str, xml_bytes: bytes) -> Validation
 async def validate_xml_upload(
     request: Request, schema_id: str, file: UploadFile
 ) -> ValidationResponse:
-    content = await _read_upload(file)
-    return _validate_xml_against_schema(schema_id, content)
+    content = await _read_upload(file, event_type="validate", source="upload")
+    return _validate_xml_against_schema(schema_id, content, "upload")
 
 
 @router.post("/schema/{schema_id}/validate/text", response_model=ValidationResponse)
@@ -207,11 +276,8 @@ async def validate_xml_text(
 ) -> ValidationResponse:
     data = payload.content.encode("utf-8")
     if len(data) > settings.max_upload_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"content exceeds {settings.max_upload_mb} MB limit",
-        )
-    return _validate_xml_against_schema(schema_id, data)
+        raise reject("validate", "text", 413, f"content exceeds {settings.max_upload_mb} MB limit")
+    return _validate_xml_against_schema(schema_id, data, "text")
 
 
 @router.post("/schema/{schema_id}/validate/url", response_model=ValidationResponse)
@@ -222,5 +288,5 @@ async def validate_xml_url(
     try:
         fetched = fetch_schema_url(payload.url)
     except SecurityError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _validate_xml_against_schema(schema_id, fetched.content)
+        raise reject("validate", "url", 400, str(exc)) from exc
+    return _validate_xml_against_schema(schema_id, fetched.content, "url")

@@ -52,6 +52,11 @@ backend/               FastAPI app + parser
     api/
       schema.py        Upload / URL / text / cached endpoints
       export.py        HTML snapshot export
+    usage/             Optional anonymous usage statistics (docs/USAGE_STATS.md)
+      events.py        Pure event builders: visitor hash, device, referrer, names
+      recorder.py      Async queue + psycopg writer; inert without USAGE_DB_URL
+      geoip.py         GeoLite2-Country lookup (downloaded at startup)
+      context.py       Per-request ContextVar + `emit()` used by routers
     parser/
       xsd_parser.py    The lxml walker — the big one (~950 LOC)
       model.py         Pydantic models (SchemaModel et al.)
@@ -97,6 +102,12 @@ mounts the built frontend at `/assets/*` and catches all other paths with an
 SPA fallback that returns `index.html` with a hardened `Content-Security-Policy`
 (`default-src 'self'`, no inline scripts). In dev, Vite serves the SPA on a
 separate port and proxies `/api` through.
+
+The same middleware binds a per-request usage context (client IP, user agent,
+referrer) that routers turn into `usage_event` rows via `app.usage.context.emit()`
+— see [USAGE_STATS.md](USAGE_STATS.md). The recorder starts/stops in the app
+lifespan and is a no-op unless `USAGE_DB_URL` is set, so tests and local dev
+never touch a database.
 
 ### Endpoints
 

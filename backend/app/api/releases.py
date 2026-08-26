@@ -19,7 +19,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from app.api.schema import SchemaResponse, finalize_schema_response
+from app.api.schema import SchemaResponse, ingest_schema
 from app.parser.security import SecurityError, fetch_schema_url
 from app.parser.xsd_parser import parse_files_map
 from app.rate_limit import WRITE_LIMIT, limiter
@@ -227,8 +227,9 @@ async def load_release_schema(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         files[asset.filename] = fetched.content
 
-    try:
-        model = parse_files_map(files, main_filename=payload.main_filename)
-    except (SecurityError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return finalize_schema_response(model)
+    return ingest_schema(
+        source="release",
+        schema_name=f"{tag}/{payload.main_filename}",
+        input_bytes=sum(len(content) for content in files.values()),
+        parse=lambda: parse_files_map(files, main_filename=payload.main_filename),
+    )

@@ -115,6 +115,12 @@ Quelle der Defaults: `backend/app/config.py`. In Cloud Run per
 | `FETCH_MAX_RESPONSE_MB` | `10` | Default beibehalten |
 | `FETCH_MAX_REDIRECTS` | `3` | Default beibehalten |
 | `CORS_ALLOW_ORIGINS` | leer | nur setzen, wenn ein separates Frontend zugreift |
+| `USAGE_DB_URL` | leer | `postgresql://xsdviewer@62.238.116.11:5432/xsdviewer_stats?sslmode=require` — leer = Statistik aus (`docs/USAGE_STATS.md`) |
+| `USAGE_DB_PASSWORD` | leer | per `--update-secrets` aus Secret `xsdviewer-usage-db-password` |
+| `USAGE_HASH_SECRET` | leer | per `--update-secrets` aus Secret `xsdviewer-usage-hash-secret` |
+| `MAXMIND_LICENSE_KEY` | leer | per `--update-secrets` aus Secret `xsdviewer-maxmind-license-key`; leer = kein Land |
+| `USAGE_DRAIN_SECONDS` | `2` | max. Wartezeit pro Request, bis Usage-Events geschrieben sind (Cloud-Run-CPU-Throttling) |
+| `GEOIP_DB_PATH` | `/tmp/geoip/GeoLite2-Country.mmdb` | Default beibehalten (Download beim Start) |
 
 ### Env-Vars mit Kommas (`ALLOWED_SCHEMA_HOSTS`)
 

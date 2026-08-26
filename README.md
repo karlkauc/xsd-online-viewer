@@ -59,9 +59,14 @@ one click away, including its `xmldsig-core-schema.xsd` companion.
 
 ## Your data stays with you
 
-- **Nothing is stored.** Uploads are parsed in memory and dropped from a
-  short-lived cache. There is no database, no file persistence, no analytics
-  on your schemas.
+- **Your schemas are not stored.** Uploads are parsed in memory and dropped
+  from a short-lived cache; no file persistence, no third-party analytics.
+  The public site records anonymous **aggregate usage statistics** (a daily
+  rotating visitor hash — never the raw IP —, country, browser family,
+  referrer, the schema's file name / URL / target namespace and size, parse
+  duration and outcome). Schema *content* is never written anywhere. Details
+  and the full column list: [docs/USAGE_STATS.md](docs/USAGE_STATS.md).
+  Self-hosted installs have this off unless `USAGE_DB_URL` is set.
 - **No account, no login.** Just open the site and drop a file.
 - **You can run it yourself.** The whole app is a single Docker container —
   see [docs/TECHNICAL.md](docs/TECHNICAL.md) for self-hosting.
