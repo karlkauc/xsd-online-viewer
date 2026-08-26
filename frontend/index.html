@@ -6,17 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Online XSD Viewer</title>
-    <script>
-      // Apply theme before React mounts to avoid flash.
-      (() => {
-        const stored = localStorage.getItem("xsdv-theme");
-        const preferred = window.matchMedia("(prefers-color-scheme: dark)").matches
-          ? "dark"
-          : "light";
-        const theme = stored || preferred;
-        document.documentElement.classList.toggle("dark", theme === "dark");
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body class="bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100">
     <div id="root"></div>
