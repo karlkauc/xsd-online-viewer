@@ -196,3 +196,14 @@ export async function sendFeedback(payload: FeedbackPayload): Promise<void> {
     throw new ApiError(detail, response.status);
   }
 }
+
+export interface HealthResponse {
+  status: string;
+  version: string;
+}
+
+export async function fetchHealth(): Promise<HealthResponse> {
+  const response = await fetch(`${API_BASE}/health`);
+  if (!response.ok) throw new ApiError(`HTTP ${response.status}`, response.status);
+  return (await response.json()) as HealthResponse;
+}

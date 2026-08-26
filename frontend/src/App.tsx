@@ -3,6 +3,7 @@ import { Uploader } from "./components/Uploader";
 import { TreeView } from "./components/TreeView/TreeView";
 import { DetailPanel } from "./components/DetailPanel";
 import { SearchPalette } from "./components/SearchPalette";
+import { AboutDialog, GITHUB_REPO_URL, openAbout } from "./components/AboutDialog";
 import { FeedbackDialog } from "./components/FeedbackDialog";
 import { openFeedback } from "./components/UploadError";
 import { DiagramView } from "./components/DiagramView/DiagramView";
@@ -188,6 +189,19 @@ export default function App() {
           >
             💬 Feedback
           </button>
+          <a
+            className="btn"
+            href={GITHUB_REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Source code on GitHub"
+            aria-label="Source code on GitHub"
+          >
+            GitHub
+          </a>
+          <button type="button" className="btn" onClick={() => openAbout()} title="About this app" aria-label="About this app">
+            ℹ️ About
+          </button>
           <ThemeToggle />
         </div>
       </header>
@@ -289,6 +303,7 @@ export default function App() {
 
       <SearchPalette />
       <FeedbackDialog />
+      <AboutDialog />
     </div>
   );
 }
