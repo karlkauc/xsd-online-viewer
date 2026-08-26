@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchHealth } from "../api/client";
+import { XML_VIEWER_URL } from "../lib/uploadErrors";
 import { openFeedback } from "./UploadError";
 
 export const GITHUB_REPO_URL = "https://github.com/karlkauc/xsd-online-viewer";
@@ -99,6 +100,12 @@ export function AboutDialog() {
             >
               Send feedback
             </button>
+          </li>
+          <li>
+            <a className={linkClass} href={XML_VIEWER_URL} target="_blank" rel="noopener noreferrer">
+              XML Viewer
+            </a>
+            {" — sister tool for viewing and validating XML documents"}
           </li>
           <li>
             <a className={linkClass} href={`${GITHUB_REPO_URL}/blob/master/LICENSE`} target="_blank" rel="noopener noreferrer">

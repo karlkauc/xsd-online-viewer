@@ -14,6 +14,7 @@ import { Breadcrumb } from "./components/Breadcrumb";
 import { XPathBar } from "./components/XPathBar";
 import { Diagnostics } from "./components/Diagnostics";
 import { ThemeToggle } from "./components/ThemeToggle";
+import { XML_VIEWER_URL } from "./lib/uploadErrors";
 import { MobileNav, type MobilePane } from "./components/MobileNav";
 import { useSelection, type ViewTab } from "./stores/selectionStore";
 import { exportHtmlUrl } from "./api/client";
@@ -189,6 +190,16 @@ export default function App() {
           >
             💬 Feedback
           </button>
+          <a
+            className="btn"
+            href={XML_VIEWER_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Have an XML document instead? Open our sister tool XML Viewer"
+            aria-label="Open XML Viewer (sister tool for XML documents)"
+          >
+            XML Viewer ↗
+          </a>
           <a
             className="btn"
             href={GITHUB_REPO_URL}
