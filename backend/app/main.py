@@ -10,8 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -23,7 +22,8 @@ from app.api.schema import router as schema_router
 from app.config import settings
 from app.logging_setup import configure_logging, new_request_id, request_id_var
 from app.rate_limit import limiter
-from app.usage.context import RequestUsage, UsageTracker, bind, emit, unbind
+from app.spa import mount_spa
+from app.usage.context import RequestUsage, UsageTracker, bind, unbind
 from app.usage.feedback import FeedbackStore
 from app.usage.geoip import GeoIp
 from app.usage.recorder import UsageRecorder
@@ -201,43 +201,7 @@ app.include_router(feedback_router, prefix="/api")
 # settings.static_dir and FastAPI serves them here.
 _static_path = Path(settings.static_dir)
 if _static_path.is_dir() and (_static_path / "index.html").is_file():
-    app.mount("/assets", StaticFiles(directory=_static_path / "assets"), name="assets")
-
-    _static_root = _static_path.resolve()
-
-    @app.get("/{full_path:path}")
-    async def spa_fallback(full_path: str) -> Response:
-        if full_path.startswith("api/"):
-            return JSONResponse(status_code=404, content={"error": "not_found"})
-        # Serve root-level static files (favicon.svg, robots.txt, …) directly
-        # instead of returning the SPA shell. Guarded against path traversal.
-        if full_path and full_path != "index.html":
-            candidate = (_static_path / full_path).resolve()
-            if (
-                _static_root in candidate.parents
-                and candidate.is_file()
-            ):
-                return FileResponse(candidate)
-        index_file = _static_path / "index.html"
-        emit("page_view", path="/" + full_path, status_code=200)
-        csp = (
-            "default-src 'self'; "
-            "script-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data: blob:; "
-            "font-src 'self' data:; "
-            "connect-src 'self'"
-        )
-        return Response(
-            content=index_file.read_bytes(),
-            media_type="text/html",
-            headers={
-                "Content-Security-Policy": csp,
-                "X-Frame-Options": "DENY",
-                "X-Content-Type-Options": "nosniff",
-                "Referrer-Policy": "no-referrer",
-            },
-        )
+    mount_spa(app, _static_path)
 else:
     logger.info(
         "static assets not found; API-only mode",

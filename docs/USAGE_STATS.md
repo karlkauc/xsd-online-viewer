@@ -19,7 +19,7 @@ One row per event in table `usage_event` (DDL: `backend/sql/usage_stats.sql`):
 | `country_code` | ISO-3166-1 alpha-2 derived server-side via MaxMind GeoLite2; NULL if unknown |
 | `user_agent`, `device` | UA string (≤255) and a cheap classification `desktop`/`mobile`/`bot`/`unknown` |
 | `referrer` | `scheme://host/path` of the `Referer` header, query dropped |
-| `path` | page_view only — SPA path (`/`, `/url`, `/fundsxml`, …) |
+| `path` | page_view only — SPA path (`/`, `/paste`, `/url`, `/fundsxml`); unknown paths get a 404 and are not recorded |
 | `source` | `upload`/`text`/`url`/`release` (loads, validations); `html`/`formatted` (exports) |
 | `schema_name` | upload/text: file **basename**; url: URL without query string; release: `tag/file` |
 | `target_namespace` | of the main schema |

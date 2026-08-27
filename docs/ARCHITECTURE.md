@@ -102,9 +102,12 @@ docker-compose.yml     Single service
 
 `backend/app/main.py` builds the FastAPI app, wires CORS, a request-id/logging
 middleware, and mounts two routers under `/api`. In production, `main.py` also
-mounts the built frontend at `/assets/*` and catches all other paths with an
-SPA fallback that returns `index.html` with a hardened `Content-Security-Policy`
-(`default-src 'self'`, no inline scripts). In dev, Vite serves the SPA on a
+mounts the built frontend at `/assets/*` (`app/spa.py`). The SPA fallback
+returns `index.html` with a hardened `Content-Security-Policy`
+(`default-src 'self'`, no inline scripts) **only for known client routes**
+(`SPA_ROUTES`, mirrored from `frontend/src/lib/modeRoute.ts` — add new
+client paths in both places). Any other path gets a plain 404, so scanner
+probes like `/wp-login.php` neither see a 200 nor count as page views. In dev, Vite serves the SPA on a
 separate port and proxies `/api` through.
 
 The same middleware binds a per-request usage context (client IP, user agent,
