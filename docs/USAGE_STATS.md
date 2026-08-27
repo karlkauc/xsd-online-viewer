@@ -74,7 +74,7 @@ request → request_logging middleware binds RequestUsage(ip, ua, referrer)
 | `USAGE_DB_PASSWORD` | DB password (Secret Manager on Cloud Run) |
 | `USAGE_HASH_SECRET` | random secret for the daily salt; empty ⇒ warning, date-only salt |
 | `MAXMIND_LICENSE_KEY` | free GeoLite2 key; empty ⇒ no country |
-| `GEOIP_DB_PATH` | default `/tmp/geoip/GeoLite2-Country.mmdb` |
+| `GEOIP_DB_PATH` | default `/tmp/geoip/GeoLite2-Country.mmdb`; the image sets `/app/geoip/GeoLite2-Country.mmdb`, which `scripts/deploy.sh` fills before each deploy (a per-instance runtime download hit MaxMind's daily limit with HTTP 429) |
 | `USAGE_DRAIN_SECONDS` | default `2` — upper bound the middleware waits for pending writes on requests that emitted events |
 
 ## Production database

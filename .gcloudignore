@@ -1,0 +1,9 @@
+# Upload set for `gcloud run deploy --source .` (Cloud Build).
+# Mirrors .gitignore but keeps the GeoLite2 database that scripts/deploy.sh
+# downloads right before deploying — it is gitignored, yet must reach the build.
+#!include:.gitignore
+.git
+node_modules
+e2e
+docs
+!backend/geoip/*.mmdb

@@ -55,9 +55,13 @@ cd frontend && npm ci && npm run dev
   service there instead of updating the public site.
 
   ```bash
-  gcloud run deploy xsdviewer --source . --region europe-west1 \
-    --project xsd-viewer-495407
+  scripts/deploy.sh   # downloads GeoLite2 DB into backend/geoip/, then:
+  # gcloud run deploy xsdviewer --source . --region europe-west1 --project xsd-viewer-495407
   ```
+
+  Prefer the script: without the `.mmdb` in `backend/geoip/` the image falls
+  back to a per-instance MaxMind download, which hits their daily limit
+  (HTTP 429) and leaves `country_code` NULL in the usage stats.
 
   Full setup, sizing, env-var and rollback details:
   `docs/DEPLOY_GCLOUD.md`.

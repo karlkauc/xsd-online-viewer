@@ -19,6 +19,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     STATIC_DIR=/app/static \
+    GEOIP_DB_PATH=/app/geoip/GeoLite2-Country.mmdb \
     PORT=8080
 
 # lxml needs libxml2/libxslt runtime libraries
@@ -37,6 +38,14 @@ RUN pip install --no-cache-dir .
 
 COPY --from=frontend /src/frontend/dist ./static
 COPY LICENSE NOTICE README.md ./
+
+# GeoLite2-Country database (optional). scripts/deploy.sh downloads it into
+# backend/geoip/ before the build so every instance starts with it and no
+# MaxMind download happens at runtime (their per-day limit was exhausted by
+# Cloud Run instance churn). If the file is absent the app falls back to a
+# runtime download when MAXMIND_LICENSE_KEY is set; the dir is app-owned so
+# that fallback can write.
+COPY --chown=app:app backend/geoip ./geoip
 
 USER app
 

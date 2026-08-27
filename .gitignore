@@ -62,3 +62,6 @@ Thumbs.db
 
 # Intermediate Playwright recordings used to generate docs/media/*.gif
 docs/media/_raw/
+
+# GeoLite2 database, downloaded by scripts/deploy.sh and baked into the image
+backend/geoip/*.mmdb

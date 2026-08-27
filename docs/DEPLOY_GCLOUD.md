@@ -127,7 +127,7 @@ Quelle der Defaults: `backend/app/config.py`. In Cloud Run per
 | `USAGE_HASH_SECRET` | leer | per `--update-secrets` aus Secret `xsdviewer-usage-hash-secret` |
 | `MAXMIND_LICENSE_KEY` | leer | per `--update-secrets` aus Secret `xsdviewer-maxmind-license-key`; leer = kein Land |
 | `USAGE_DRAIN_SECONDS` | `2` | max. Wartezeit pro Request, bis Usage-Events geschrieben sind (Cloud-Run-CPU-Throttling) |
-| `GEOIP_DB_PATH` | `/tmp/geoip/GeoLite2-Country.mmdb` | Default beibehalten (Download beim Start) |
+| `GEOIP_DB_PATH` | `/app/geoip/GeoLite2-Country.mmdb` (Dockerfile) | DB wird von `scripts/deploy.sh` vor dem Build heruntergeladen und ins Image gebacken; fehlt sie, Fallback auf Download beim Start (MaxMind-Tageslimit → 429 bei häufigen Instanz-Starts) |
 
 ### Env-Vars mit Kommas (`ALLOWED_SCHEMA_HOSTS`)
 

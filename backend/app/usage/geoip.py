@@ -1,9 +1,12 @@
 """Country lookup via MaxMind GeoLite2-Country (optional).
 
-The database is *not* shipped in the image (GeoLite2 EULA). At startup:
-  * if ``db_path`` exists, it is opened directly (docker-compose / dev);
+At startup:
+  * if ``db_path`` exists, it is opened directly. In production the file is
+    baked into the image by ``scripts/deploy.sh`` (``/app/geoip/``), because a
+    per-instance download on Cloud Run exhausted MaxMind's daily download
+    limit (HTTP 429) and left ``country_code`` NULL for whole nights;
   * else if a licence key is configured, the ~6 MB tarball is downloaded in a
-    background thread and opened once ready;
+    background thread and opened once ready (docker-compose / dev fallback);
   * else lookups return ``None`` and ``country_code`` stays NULL.
 
 Attribution: "This product includes GeoLite2 data created by MaxMind,

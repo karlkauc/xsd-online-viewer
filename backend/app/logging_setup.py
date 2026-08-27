@@ -42,6 +42,10 @@ def configure_logging(level: str) -> None:
     root.setLevel(level)
     logging.getLogger("uvicorn").handlers = [handler]
     logging.getLogger("uvicorn.access").handlers = [handler]
+    # httpx logs every request URL at INFO — including query strings such as
+    # the MaxMind license_key. Keep only warnings and errors from it.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def new_request_id() -> str:
