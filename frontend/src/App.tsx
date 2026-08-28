@@ -19,7 +19,7 @@ import { MobileNav, type MobilePane } from "./components/MobileNav";
 import { useSelection, type ViewTab } from "./stores/selectionStore";
 import { exportHtmlUrl } from "./api/client";
 import { readHashSelection, writeHashSelection } from "./lib/deepLink";
-import { API_DOCS_PATH, isApiDocsRoute } from "./lib/modeRoute";
+import { API_DOCS_DESCRIPTION, API_DOCS_PATH, API_DOCS_TITLE, isApiDocsRoute } from "./lib/modeRoute";
 import { ApiDocsPage } from "./components/ApiDocsPage";
 
 const TAB_LABELS: Record<ViewTab, string> = {
@@ -101,6 +101,25 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem("xsdv:structureCollapsed", structureCollapsed ? "1" : "0");
   }, [structureCollapsed]);
+
+  // Per-route <title>/description/canonical so search engines index the
+  // docs page distinctly from the viewer (the SPA shell is otherwise identical).
+  useEffect(() => {
+    if (!docsRoute) return;
+    const previousTitle = document.title;
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+    const canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    const previousDescription = meta?.content ?? "";
+    const previousCanonical = canonical?.href ?? "";
+    document.title = API_DOCS_TITLE;
+    if (meta) meta.content = API_DOCS_DESCRIPTION;
+    if (canonical) canonical.href = `${window.location.origin}${API_DOCS_PATH}`;
+    return () => {
+      document.title = previousTitle;
+      if (meta) meta.content = previousDescription;
+      if (canonical) canonical.href = previousCanonical;
+    };
+  }, [docsRoute]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

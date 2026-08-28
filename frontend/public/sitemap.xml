@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://www.xsd-viewer.online/</loc><changefreq>monthly</changefreq><priority>1.0</priority></url>
+  <url><loc>https://www.xsd-viewer.online/paste</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://www.xsd-viewer.online/url</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>https://www.xsd-viewer.online/fundsxml</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://www.xsd-viewer.online/api-docs</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+</urlset>

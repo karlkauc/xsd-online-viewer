@@ -10,6 +10,10 @@ export type Mode = "file" | "text" | "url" | "releases";
 // it is a client route the server must serve the shell for.
 export const API_DOCS_PATH = "/api-docs";
 
+export const API_DOCS_TITLE = "XML validation via API (curl, PowerShell, Python) — Online XSD Viewer";
+export const API_DOCS_DESCRIPTION =
+  "Validate XML against an XSD from the command line: upload the schema, validate the document, save the JSON error report. Examples for curl, PowerShell and Python, plus size, timeout and rate limits.";
+
 export function isApiDocsRoute(): boolean {
   return window.location.pathname.replace(/\/+$/, "") === API_DOCS_PATH;
 }
