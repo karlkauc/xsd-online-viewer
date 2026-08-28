@@ -19,6 +19,8 @@ import { MobileNav, type MobilePane } from "./components/MobileNav";
 import { useSelection, type ViewTab } from "./stores/selectionStore";
 import { exportHtmlUrl } from "./api/client";
 import { readHashSelection, writeHashSelection } from "./lib/deepLink";
+import { API_DOCS_PATH, isApiDocsRoute } from "./lib/modeRoute";
+import { ApiDocsPage } from "./components/ApiDocsPage";
 
 const TAB_LABELS: Record<ViewTab, string> = {
   tree: "Tree",
@@ -85,6 +87,7 @@ export default function App() {
   const diagnosticsVisible = useSelection((s) => s.diagnosticsVisible);
   const setDiagnosticsVisible = useSelection((s) => s.setDiagnosticsVisible);
   const diagnosticsCount = model?.diagnostics?.length ?? 0;
+  const docsRoute = isApiDocsRoute();
 
   const [structureCollapsed, setStructureCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -202,6 +205,14 @@ export default function App() {
           </a>
           <a
             className="btn"
+            href={docsRoute ? "/" : API_DOCS_PATH}
+            title={docsRoute ? "Back to the viewer" : "Validate XML against an XSD from the command line (curl, PowerShell, Python)"}
+            aria-label={docsRoute ? "Back to the viewer" : "API documentation"}
+          >
+            {docsRoute ? "← Viewer" : "API"}
+          </a>
+          <a
+            className="btn"
             href={GITHUB_REPO_URL}
             target="_blank"
             rel="noopener noreferrer"
@@ -217,7 +228,11 @@ export default function App() {
         </div>
       </header>
 
-      {!model ? (
+      {docsRoute ? (
+        <main className="flex-1 min-h-0">
+          <ApiDocsPage />
+        </main>
+      ) : !model ? (
         <main className="flex-1 overflow-auto">
           <Uploader />
         </main>

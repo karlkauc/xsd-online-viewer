@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchHealth } from "../api/client";
 import { XML_VIEWER_URL } from "../lib/uploadErrors";
 import { openFeedback } from "./UploadError";
+import { API_DOCS_PATH } from "../lib/modeRoute";
 
 export const GITHUB_REPO_URL = "https://github.com/karlkauc/xsd-online-viewer";
 
@@ -100,6 +101,12 @@ export function AboutDialog() {
             >
               Send feedback
             </button>
+          </li>
+          <li>
+            <a className={linkClass} href={API_DOCS_PATH}>
+              API documentation
+            </a>
+            {" — validate XML against an XSD from curl, PowerShell or Python"}
           </li>
           <li>
             <a className={linkClass} href={XML_VIEWER_URL} target="_blank" rel="noopener noreferrer">

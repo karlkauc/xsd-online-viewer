@@ -18,7 +18,7 @@ from app.usage.context import emit
 
 # Keep in sync with MODE_TO_PATH in frontend/src/lib/modeRoute.ts.
 # Deep links to schema nodes use the URL hash, which never reaches the server.
-SPA_ROUTES: frozenset[str] = frozenset({"", "paste", "url", "fundsxml"})
+SPA_ROUTES: frozenset[str] = frozenset({"", "paste", "url", "fundsxml", "api-docs"})
 
 CSP = (
     "default-src 'self'; "

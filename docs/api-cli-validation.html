@@ -1,0 +1,629 @@
+<title>XSD Viewer CLI Validation</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #fafbfc;
+    --surface: #ffffff;
+    --ink: #1b2430;
+    --muted: #5b6672;
+    --line: #d9dfe5;
+    --accent: #1f6f8b;
+    --accent-ink: #ffffff;
+    --code-bg: #eef2f5;
+    --code-ink: #1b2430;
+    --ok: #2f7d4f;
+    --bad: #b03a2e;
+    --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12171d; --surface: #1a2027; --ink: #e6ebf0; --muted: #98a4b0;
+      --line: #2c3540; --accent: #5fb3d0; --accent-ink: #0d1318;
+      --code-bg: #0e1319; --code-ink: #dbe3ea; --ok: #63c48a; --bad: #ef7b6f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12171d; --surface: #1a2027; --ink: #e6ebf0; --muted: #98a4b0;
+    --line: #2c3540; --accent: #5fb3d0; --accent-ink: #0d1318;
+    --code-bg: #0e1319; --code-ink: #dbe3ea; --ok: #63c48a; --bad: #ef7b6f;
+  }
+
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); line-height: 1.55; margin: 0; }
+  .wrap { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
+
+  header { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+  .eyebrow { font-family: var(--mono); font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 .4rem; }
+  h1 { font-size: 1.85rem; font-weight: 600; margin: 0; line-height: 1.2; text-wrap: balance; }
+  .lead { color: var(--muted); margin: .5rem 0 0; max-width: 38rem; }
+
+  .lang { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--surface); }
+  .lang button { font: inherit; font-size: .85rem; font-weight: 500; padding: .4rem .9rem; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+  .lang button + button { border-left: 1px solid var(--line); }
+  .lang button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .lang button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  h2 { font-size: 1.25rem; font-weight: 600; margin: 2.5rem 0 .75rem; padding-top: .25rem; }
+  h3 { font-size: 1rem; font-weight: 600; margin: 1.5rem 0 .5rem; }
+  p, li { max-width: 65ch; }
+  a { color: var(--accent); }
+
+  code { font-family: var(--mono); font-size: .88em; background: var(--code-bg); color: var(--code-ink); padding: .1em .35em; border-radius: 4px; }
+  pre { background: var(--code-bg); color: var(--code-ink); border: 1px solid var(--line); border-radius: 6px; padding: 1rem 1.1rem; overflow-x: auto; font-family: var(--mono); font-size: .84rem; line-height: 1.5; margin: .75rem 0 1.25rem; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .c { color: var(--muted); }
+
+  .steps { counter-reset: step; list-style: none; padding: 0; margin: 1rem 0; display: grid; gap: .6rem; }
+  .steps li { display: grid; grid-template-columns: 1.6rem 1fr; gap: .6rem; align-items: baseline; }
+  .steps li::before { counter-increment: step; content: counter(step); font-family: var(--mono); font-size: .8rem; color: var(--accent); border: 1px solid var(--accent); border-radius: 50%; width: 1.4rem; height: 1.4rem; display: inline-grid; place-items: center; }
+
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; margin: .75rem 0 1.25rem; }
+  .tbl { overflow-x: auto; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; font-size: .78rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  td code { white-space: nowrap; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  .note { border-left: 3px solid var(--accent); background: var(--surface); padding: .75rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .note strong { color: var(--accent); }
+  .ok { color: var(--ok); font-weight: 500; }
+  .bad { color: var(--bad); font-weight: 500; }
+
+  [lang="de"], [lang="en"] { display: none; }
+  html[data-lang="de"] [lang="de"], html[data-lang="en"] [lang="en"] { display: block; }
+  html[data-lang="both"] [lang="de"], html[data-lang="both"] [lang="en"] { display: block; }
+  html[data-lang="both"] section[lang="en"] { border-top: 2px dashed var(--line); margin-top: 3rem; padding-top: 1rem; }
+</style>
+
+<div class="wrap">
+<header>
+  <div>
+    <p class="eyebrow">xsd-viewer.online · REST API</p>
+    <h1>XML validation from the command line</h1>
+    <p class="lead">Well-formedness check and XSD validation with <code>curl</code>, and how to keep the error report.</p>
+  </div>
+  <div class="lang" role="group" aria-label="Sprache / Language">
+    <button type="button" data-lang="de" aria-pressed="true">Deutsch</button>
+    <button type="button" data-lang="en" aria-pressed="false">English</button>
+    <button type="button" data-lang="both" aria-pressed="false">DE + EN</button>
+  </div>
+</header>
+
+<!-- ======================= DEUTSCH ======================= -->
+<section lang="de">
+  <h2>Überblick</h2>
+  <p>Der Online XSD Viewer stellt seine Funktionen als HTTP-API unter <code>https://www.xsd-viewer.online/api/</code> bereit. Alles, was die Web-Oberfläche kann, geht daher auch mit <code>curl</code> oder aus jedem Skript heraus – ohne Browser, ohne Login.</p>
+  <p>Die Validierung läuft in zwei Schritten:</p>
+  <ol class="steps">
+    <li>Das XSD (einzelne Datei, Zip-Paket oder URL) hochladen. Die Antwort enthält eine <code>schema_id</code>.</li>
+    <li>Das XML gegen diese <code>schema_id</code> validieren. Die Antwort ist der vollständige Fehlerreport als JSON.</li>
+  </ol>
+  <p>Die Prüfung umfasst automatisch beides: zuerst die <strong>Wohlgeformtheit</strong> (ist es überhaupt gültiges XML?), dann – falls wohlgeformt – die <strong>Schema-Validierung</strong> gegen das XSD.</p>
+
+  <h2>Schritt 1: XSD laden und <code>schema_id</code> holen</h2>
+  <h3>Einzelne XSD-Datei</h3>
+<pre><code>SCHEMA_ID=$(curl -s -F "file=@FundsXML4.xsd" \
+  https://www.xsd-viewer.online/api/schema/upload | jq -r .schema_id)
+
+echo "$SCHEMA_ID"</code></pre>
+  <h3>Zip mit mehreren XSD-Dateien (Includes/Imports)</h3>
+  <p>Mit <code>main_filename</code> das Wurzel-Schema innerhalb des Zips angeben:</p>
+<pre><code>SCHEMA_ID=$(curl -s -F "file=@schema-bundle.zip" -F "main_filename=Root.xsd" \
+  https://www.xsd-viewer.online/api/schema/upload | jq -r .schema_id)</code></pre>
+  <h3>XSD per URL</h3>
+<pre><code>SCHEMA_ID=$(curl -s -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/schema.xsd"}' \
+  https://www.xsd-viewer.online/api/schema/url | jq -r .schema_id)</code></pre>
+  <p>Ohne <code>jq</code>: Die Antwort ist ein JSON-Objekt <code>{"schema_id": "...", "model": {...}}</code>; das <code>model</code> ist die geparste Schema-Struktur und kann ignoriert werden.</p>
+  <div class="note"><strong>Wichtig:</strong> Die <code>schema_id</code> zeigt auf einen serverseitigen Cache und läuft nach 60 Minuten ab (Details unter <a href="#limits-de">Limits</a>). Ein <code>404 schema not found or expired</code> bei der Validierung bedeutet nur: Schritt 1 wiederholen.</div>
+
+  <h2>Schritt 2: XML validieren</h2>
+  <h3>XML-Datei hochladen</h3>
+<pre><code>curl -s -F "file=@document.xml" \
+  https://www.xsd-viewer.online/api/schema/$SCHEMA_ID/validate/upload \
+  -o report.json</code></pre>
+  <h3>XML per URL</h3>
+<pre><code>curl -s -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/document.xml"}' \
+  https://www.xsd-viewer.online/api/schema/$SCHEMA_ID/validate/url \
+  -o report.json</code></pre>
+  <h3>XML als Text im JSON-Body</h3>
+<pre><code>jq -Rs '{content: ., filename: "document.xml"}' document.xml \
+  | curl -s -H "Content-Type: application/json" -d @- \
+    https://www.xsd-viewer.online/api/schema/$SCHEMA_ID/validate/text \
+    -o report.json</code></pre>
+
+  <h2>Der Fehlerreport</h2>
+  <p>Die Validierung antwortet immer mit <strong>HTTP 200</strong> – auch bei Fehlern. Das Ergebnis steht im JSON-Body. Genau dieser Body <em>ist</em> der Fehlerreport; einen separaten Download-Endpunkt gibt es nicht, deshalb speichert man ihn direkt mit <code>-o report.json</code>.</p>
+<pre><code>{
+  "schema_id": "…",
+  "is_valid": false,
+  "reformatted_xml": "&lt;?xml version=…&gt;\n&lt;Root&gt;\n  …",
+  "errors": [
+    {
+      "line": 4,
+      "column": null,
+      "message": "Element '{http://example.com/simple}Age': This element is not expected. Expected is ( {http://example.com/simple}LastName ).",
+      "severity": "error",
+      "kind": "schema-validation",
+      "path": "/*/*[2]",
+      "type_name": null,
+      "domain": "SCHEMASV"
+    }
+  ]
+}</code></pre>
+  <div class="tbl"><table>
+    <tr><th>Feld</th><th>Bedeutung</th></tr>
+    <tr><td><code>is_valid</code></td><td><span class="ok">true</span> = wohlgeformt und schemakonform. <span class="bad">false</span> = mindestens ein Fehler in <code>errors</code>.</td></tr>
+    <tr><td><code>reformatted_xml</code></td><td>Das eingereichte XML, hübsch formatiert. <strong>Alle Zeilen-/Spaltenangaben beziehen sich auf diesen Text</strong>, nicht auf die Originaldatei. Bei nicht wohlgeformtem XML: <code>null</code>.</td></tr>
+    <tr><td><code>errors[].kind</code></td><td><code>not-well-formed</code> – XML-Syntaxfehler, Parser hat abgebrochen (dann genau ein Eintrag, keine Schema-Prüfung).<br><code>schema-validation</code> – XML ist wohlgeformt, verletzt aber das XSD.</td></tr>
+    <tr><td><code>errors[].line / column</code></td><td>Position im <code>reformatted_xml</code>. <code>column</code> ist in der Praxis meist <code>null</code> (libxml2 liefert für Schema-Fehler keine Spalte); bei Syntaxfehlern steht die Spalte im Meldungstext.</td></tr>
+    <tr><td><code>errors[].message</code></td><td>Fehlermeldung des Validators (libxml2), z. B. fehlendes Pflichtelement, falscher Datentyp, Pattern-Verstoß.</td></tr>
+    <tr><td><code>errors[].path</code></td><td>Positionsbasierter XPath zum betroffenen Element, z. B. <code>/*/*[2]</code> (= zweites Kind des Wurzelelements); Elementnamen stehen in der <code>message</code>.</td></tr>
+    <tr><td><code>errors[].severity</code></td><td><code>fatal</code>, <code>error</code> oder <code>warning</code>.</td></tr>
+  </table></div>
+
+  <h3>Nur Wohlgeformtheit prüfen?</h3>
+  <p>Einen eigenen „nur wohlgeformt“-Endpunkt gibt es nicht, aber die Unterscheidung ist eindeutig: Ist <code>is_valid</code> false und der erste Fehler hat <code>kind: "not-well-formed"</code>, ist die Datei kein gültiges XML. Alle anderen Fehler setzen Wohlgeformtheit bereits voraus.</p>
+<pre><code>jq -r 'if .is_valid then "wohlgeformt + valide"
+       elif .errors[0].kind == "not-well-formed" then "NICHT wohlgeformt: " + .errors[0].message
+       else "wohlgeformt, aber \(.errors|length) Schema-Fehler" end' report.json</code></pre>
+
+  <h2>Report weiterverarbeiten und herunterladen</h2>
+  <h3>Als JSON speichern (Rohreport)</h3>
+<pre><code>curl -s -F "file=@document.xml" \
+  https://www.xsd-viewer.online/api/schema/$SCHEMA_ID/validate/upload \
+  -o report.json</code></pre>
+  <h3>Als lesbare Textdatei</h3>
+<pre><code>jq -r '.errors[] | "\(.kind)\tL\(.line):\(.column)\t\(.path // "-")\t\(.message)"' \
+  report.json &gt; errors.txt</code></pre>
+  <h3>Als CSV</h3>
+<pre><code>jq -r '["line","column","kind","severity","path","message"],
+       (.errors[] | [.line,.column,.kind,.severity,.path,.message]) | @csv' \
+  report.json &gt; errors.csv</code></pre>
+  <h3>Formatiertes XML mit passenden Zeilennummern</h3>
+  <p>Damit die Zeilennummern im Report zum XML passen, das man vor sich hat:</p>
+<pre><code>jq -r '.reformatted_xml // empty' report.json &gt; document.pretty.xml
+jq -r '.errors[] | "\(.line): \(.message)"' report.json</code></pre>
+
+  <h2>Komplettes Skript für CI / Batch</h2>
+<pre><code>#!/usr/bin/env bash
+set -euo pipefail
+API=https://www.xsd-viewer.online/api
+XSD=$1; XML=$2
+
+SCHEMA_ID=$(curl -sf -F "file=@$XSD" "$API/schema/upload" | jq -r .schema_id)
+curl -sf -F "file=@$XML" "$API/schema/$SCHEMA_ID/validate/upload" -o report.json
+
+if jq -e .is_valid report.json &gt;/dev/null; then
+  echo "OK: $XML ist valide"
+else
+  echo "FEHLER in $XML:" &gt;&amp;2
+  jq -r '.errors[] | "  L\(.line):\(.column) [\(.kind)] \(.message)"' report.json &gt;&amp;2
+  exit 1
+fi</code></pre>
+  <p>Aufruf: <code>./validate.sh schema.xsd document.xml</code>. Exit-Code 0 bei valide, 1 bei Fehlern, ≠ 0 auch bei HTTP-Fehlern (durch <code>curl -f</code>).</p>
+  <p>Mehrere XML-Dateien gegen dasselbe Schema: die <code>schema_id</code> nur einmal holen und in einer Schleife wiederverwenden – das spart Uploads und schont das Rate-Limit.</p>
+
+  <h2>Beispiele: curl, PowerShell, Python</h2>
+  <p>Alle drei Varianten machen dasselbe: XSD hochladen, XML validieren, Report als <code>report.json</code> speichern und die Fehler ausgeben. Exit-Code 0 = valide, 1 = Fehler.</p>
+  <div class="note"><strong>Getestet am 28.08.2026</strong> gegen die Live-API: alle curl-, jq- und Python-Beispiele (valide, invalide, nicht wohlgeformt, Zip-Bundle, URL-Ladeweg, 404-Neuladen, 413 bei 33 MB). Die PowerShell-Beispiele sind aus der offiziellen <code>Invoke-RestMethod</code>-Dokumentation abgeleitet, konnten aber mangels Windows-Umgebung nicht ausgeführt werden.</div>
+
+  <h3>curl (Bash, ohne jq)</h3>
+  <p>Wer kein <code>jq</code> hat, kann die <code>schema_id</code> mit <code>sed</code> herausziehen und den Report mit <code>python3 -m json.tool</code> lesbar machen:</p>
+<pre><code>API=https://www.xsd-viewer.online/api
+
+SCHEMA_ID=$(curl -sf -F "file=@schema.xsd" "$API/schema/upload" \
+            | sed -E 's/.*"schema_id":"([^"]+)".*/\1/')
+echo "schema_id: $SCHEMA_ID"                          <span class="c"># Zwischenstand prüfen</span>
+
+curl -sf -F "file=@document.xml" "$API/schema/$SCHEMA_ID/validate/upload" -o report.json
+
+python3 -m json.tool report.json | head -40           <span class="c"># lesbar ausgeben</span>
+grep -q '"is_valid":true' report.json &amp;&amp; echo VALIDE || { echo INVALID; exit 1; }</code></pre>
+
+  <h3>PowerShell 7+</h3>
+  <p><code>Invoke-RestMethod -Form</code> (ab PowerShell 7) baut den Multipart-Upload selbst; die JSON-Antwort kommt direkt als Objekt zurück.</p>
+<pre><code>$Api = "https://www.xsd-viewer.online/api"
+
+$schema = Invoke-RestMethod -Method Post -Uri "$Api/schema/upload" `
+            -Form @{ file = Get-Item .\schema.xsd }
+$schemaId = $schema.schema_id
+
+$report = Invoke-RestMethod -Method Post -Uri "$Api/schema/$schemaId/validate/upload" `
+            -Form @{ file = Get-Item .\document.xml }
+
+$report | ConvertTo-Json -Depth 5 | Set-Content report.json -Encoding utf8
+
+if ($report.is_valid) {
+    Write-Host "VALIDE" -ForegroundColor Green
+} else {
+    $report.errors | Format-Table line, column, kind, message -AutoSize
+    $report.errors | Select-Object line, column, kind, severity, path, message |
+        Export-Csv errors.csv -NoTypeInformation -Encoding utf8
+    exit 1
+}</code></pre>
+  <div class="note"><strong>Windows PowerShell 5.1:</strong> <code>-Form</code> gibt es dort nicht. Entweder <code>curl.exe</code> (seit Windows 10 1803 an Bord, <em>nicht</em> das Alias <code>curl</code>) mit den Bash-Beispielen verwenden, oder auf die JSON-Endpunkte ausweichen: <code>Invoke-RestMethod -Method Post -ContentType "application/json" -Body (@{filename="schema.xsd"; content=(Get-Content schema.xsd -Raw)} | ConvertTo-Json)</code> gegen <code>/api/schema/text</code> bzw. <code>/validate/text</code>.</div>
+
+  <h3>Python 3 (nur Standardbibliothek)</h3>
+  <p>Ohne Zusatzpakete über die JSON-Endpunkte <code>/schema/text</code> und <code>/validate/text</code> – dann entfällt der Multipart-Aufbau. Bei <code>404</code> wird das Schema einmal neu geladen.</p>
+<pre><code>#!/usr/bin/env python3
+import json, sys, urllib.request, urllib.error
+from pathlib import Path
+
+API = "https://www.xsd-viewer.online/api"
+
+def post_json(path, payload):
+    req = urllib.request.Request(
+        API + path, data=json.dumps(payload).encode(), method="POST",
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.load(r)
+
+def load_schema(xsd: Path) -> str:
+    return post_json("/schema/text", {"filename": xsd.name,
+                                      "content": xsd.read_text("utf-8")})["schema_id"]
+
+def validate(schema_id: str, xml: Path, xsd: Path) -> dict:
+    payload = {"filename": xml.name, "content": xml.read_text("utf-8")}
+    try:
+        return post_json(f"/schema/{schema_id}/validate/text", payload)
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise SystemExit(f"HTTP {e.code}: {e.read().decode()}")
+        schema_id = load_schema(xsd)          <span class="c"># expired → reload once</span>
+        return post_json(f"/schema/{schema_id}/validate/text", payload)
+
+if __name__ == "__main__":
+    xsd, xml = Path(sys.argv[1]), Path(sys.argv[2])
+    report = validate(load_schema(xsd), xml, xsd)
+    Path("report.json").write_text(json.dumps(report, indent=2), "utf-8")
+    if report["is_valid"]:
+        print("VALIDE")
+    else:
+        for e in report["errors"]:
+            print(f"L{e['line']}:{e['column']} [{e['kind']}] {e['message']}")
+        print(f"{len(report['errors'])} Fehler", file=sys.stderr)
+        sys.exit(1)</code></pre>
+
+  <h3>Python 3 mit <code>requests</code></h3>
+  <p>Mit <code>pip install requests</code> wird der Datei-Upload zum Einzeiler und auch Zip-Bundles lassen sich einfach mitschicken:</p>
+<pre><code>import json, sys, requests
+
+API = "https://www.xsd-viewer.online/api"
+
+with open("schema-bundle.zip", "rb") as f:
+    r = requests.post(f"{API}/schema/upload", files={"file": f},
+                      data={"main_filename": "Root.xsd"}, timeout=60)
+r.raise_for_status()
+schema_id = r.json()["schema_id"]
+
+with open("document.xml", "rb") as f:
+    r = requests.post(f"{API}/schema/{schema_id}/validate/upload",
+                      files={"file": f}, timeout=60)
+r.raise_for_status()
+report = r.json()
+
+with open("report.json", "w", encoding="utf-8") as out:
+    json.dump(report, out, indent=2)
+
+print("VALIDE" if report["is_valid"] else
+      "\n".join(f"L{e['line']}: {e['message']}" for e in report["errors"]))
+sys.exit(0 if report["is_valid"] else 1)</code></pre>
+  <p>Mehrere Dateien: die Funktion in einer Schleife über <code>*.xml</code> aufrufen und dabei <code>SCHEMA_ID</code>/<code>schema_id</code> wiederverwenden – wegen des Rate-Limits (30/min) ggf. eine kurze Pause zwischen den Aufrufen einbauen.</p>
+
+  <h2 id="limits-de">Limits: Größe, Timeouts, Cache</h2>
+  <p>Die Werte gelten für die öffentliche Instanz auf <code>www.xsd-viewer.online</code> (Google Cloud Run). Bei einer eigenen Docker-Installation sind sie über Umgebungsvariablen einstellbar (in Klammern).</p>
+  <div class="tbl"><table>
+    <tr><th>Limit</th><th>Wert</th><th>Details</th></tr>
+    <tr><td>Upload-Größe (XSD, Zip, XML)</td><td class="num">32 MB</td><td>Harte Grenze des Cloud-Run-Loadbalancers; das Backend lehnt darüber mit <code>413</code> ab. Gilt pro Request, also auch für den XML-Body bei <code>/validate/text</code> (UTF-8-kodiert). (<code>MAX_UPLOAD_MB</code>, Default 50)</td></tr>
+    <tr><td>Abruf per URL</td><td class="num">10 MB · 10 s · 3 Redirects</td><td>Bei <code>/schema/url</code> und <code>/validate/url</code>: max. 10 MB Antwort, 10 s Verbindungs-/Lese-Timeout, höchstens 3 Weiterleitungen. Nur <code>http</code>/<code>https</code>, keine privaten/lokalen Adressen. Überschreitung → <code>400</code>. (<code>FETCH_MAX_RESPONSE_MB</code>, <code>FETCH_TIMEOUT_SECONDS</code>, <code>FETCH_MAX_REDIRECTS</code>)</td></tr>
+    <tr><td>Request-Timeout</td><td class="num">60 s</td><td>Cloud Run bricht Anfragen nach 60 s ab (HTTP 504). Parsen und Validieren dauern normalerweise deutlich unter 1 s (gemessen: ~0,2 s pro Request für ein kleines Schema); sehr große Schemata mit vielen Includes können mehrere Sekunden brauchen. Beim ersten Request nach Inaktivität kommt ein Kaltstart von 1–3 s hinzu.</td></tr>
+    <tr><td>Rate-Limit</td><td class="num">30 Requests / Minute</td><td>Pro Client-IP, für alle schreibenden Endpunkte zusammen (<code>/schema/upload|url|text</code> und alle <code>/validate/*</code>). Darüber <code>429</code>. Bei Batch-Läufen: <code>schema_id</code> wiederverwenden und ggf. <code>sleep 2</code> zwischen Validierungen.</td></tr>
+    <tr><td>Gültigkeit der <code>schema_id</code></td><td class="num">60 min · 32 Einträge</td><td>Der Schema-Cache ist ein In-Memory-LRU pro Server-Instanz: Einträge verfallen 60 min nach dem Laden, und bei mehr als 32 gecachten Schemata fliegt das älteste raus. (<code>SCHEMA_CACHE_TTL_MIN</code>, <code>SCHEMA_CACHE_MAX_ENTRIES</code>)</td></tr>
+    <tr><td>Instanzen</td><td class="num">0–5</td><td>Cloud Run skaliert horizontal. Weil der Cache <em>pro Instanz</em> lebt, kann eine <code>schema_id</code> bei Lastspitzen auf einer anderen Instanz landen und dort <code>404</code> liefern – siehe Hinweis unten.</td></tr>
+    <tr><td>DTD / Entities im XML</td><td class="num">≤ 32 Deklarationen · ≤ 512 Zeichen</td><td>Aus Sicherheitsgründen werden nur einfache interne <code>&lt;!ENTITY&gt;</code>/<code>&lt;!ATTLIST&gt;</code>-Deklarationen mit literalen Werten akzeptiert; externe Entities, Parameter-Entities und verschachtelte Referenzen führen zu <code>400</code>. Abhilfe: DOCTYPE entfernen und Entity-Werte inline schreiben.</td></tr>
+  </table></div>
+  <div class="note"><strong>Robuste Skripte:</strong> Da eine <code>schema_id</code> aus drei Gründen ungültig werden kann (TTL, Cache-Verdrängung, andere Instanz), sollte ein Skript auf <code>404</code> reagieren, indem es das XSD einmal neu hochlädt und die Validierung wiederholt. Die <code>schema_id</code> ist deterministisch: derselbe Inhalt über denselben Ladeweg ergibt dieselbe ID (Upload und <code>/schema/text</code> liefern für dieselbe Datei die gleiche ID, <code>/schema/url</code> eine andere).</div>
+<pre><code>validate() {  <span class="c"># $1 = XML-Datei; nutzt globale $XSD, $SCHEMA_ID</span>
+  local code
+  code=$(curl -s -o report.json -w '%{http_code}' -F "file=@$1"          "$API/schema/$SCHEMA_ID/validate/upload")
+  if [ "$code" = 404 ]; then   <span class="c"># Schema abgelaufen → neu laden, einmal wiederholen</span>
+    SCHEMA_ID=$(curl -sf -F "file=@$XSD" "$API/schema/upload" | jq -r .schema_id)
+    code=$(curl -s -o report.json -w '%{http_code}' -F "file=@$1"            "$API/schema/$SCHEMA_ID/validate/upload")
+  fi
+  [ "$code" = 200 ] || { echo "HTTP $code: $(jq -r .detail report.json)" &gt;&amp;2; return 2; }
+  jq -e .is_valid report.json &gt;/dev/null
+}</code></pre>
+
+  <h2>Fehlercodes und Grenzen</h2>
+  <div class="tbl"><table>
+    <tr><th>HTTP</th><th>Ursache</th><th>Abhilfe</th></tr>
+    <tr><td class="num">200</td><td>Validierung durchgeführt (Ergebnis in <code>is_valid</code>)</td><td>–</td></tr>
+    <tr><td class="num">400</td><td>URL abgelehnt (kein http/https, private Adresse, &gt; 3 Redirects, &gt; 10 MB, &gt; 10 s) oder unsicheres XML (z. B. externe Entities)</td><td>Datei stattdessen hochladen</td></tr>
+    <tr><td class="num">404</td><td><code>schema_id</code> unbekannt oder abgelaufen</td><td>Schritt 1 wiederholen</td></tr>
+    <tr><td class="num">413</td><td>Datei zu groß (&gt; 32 MB)</td><td>Datei verkleinern / aufteilen</td></tr>
+    <tr><td class="num">422</td><td>XSD konnte nicht zum Validator kompiliert werden (z. B. fehlende Imports)</td><td>Vollständiges Zip mit allen Imports hochladen</td></tr>
+    <tr><td class="num">429</td><td>Rate-Limit erreicht (30 Requests/min pro IP)</td><td>Kurz warten, <code>schema_id</code> wiederverwenden</td></tr>
+    <tr><td class="num">504</td><td>Request-Timeout (60 s) überschritten</td><td>Schema verkleinern / Includes reduzieren, erneut versuchen</td></tr>
+  </table></div>
+  <p>Fehlerantworten (≠ 200) haben die Form <code>{"detail": "…"}</code>.</p>
+</section>
+
+<!-- ======================= ENGLISH ======================= -->
+<section lang="en">
+  <h2>Overview</h2>
+  <p>The Online XSD Viewer exposes its features as an HTTP API at <code>https://www.xsd-viewer.online/api/</code>. Everything the web UI does can therefore be driven with <code>curl</code> or from any script – no browser, no login.</p>
+  <p>Validation is a two-step flow:</p>
+  <ol class="steps">
+    <li>Upload the XSD (single file, zip bundle or URL). The response contains a <code>schema_id</code>.</li>
+    <li>Validate the XML against that <code>schema_id</code>. The response is the complete error report as JSON.</li>
+  </ol>
+  <p>The check covers both stages automatically: first <strong>well-formedness</strong> (is it valid XML at all?), then – if well-formed – <strong>schema validation</strong> against the XSD.</p>
+
+  <h2>Step 1: Load the XSD and get a <code>schema_id</code></h2>
+  <h3>Single XSD file</h3>
+<pre><code>SCHEMA_ID=$(curl -s -F "file=@FundsXML4.xsd" \
+  https://www.xsd-viewer.online/api/schema/upload | jq -r .schema_id)
+
+echo "$SCHEMA_ID"</code></pre>
+  <h3>Zip with several XSD files (includes/imports)</h3>
+  <p>Use <code>main_filename</code> to name the root schema inside the zip:</p>
+<pre><code>SCHEMA_ID=$(curl -s -F "file=@schema-bundle.zip" -F "main_filename=Root.xsd" \
+  https://www.xsd-viewer.online/api/schema/upload | jq -r .schema_id)</code></pre>
+  <h3>XSD from a URL</h3>
+<pre><code>SCHEMA_ID=$(curl -s -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/schema.xsd"}' \
+  https://www.xsd-viewer.online/api/schema/url | jq -r .schema_id)</code></pre>
+  <p>Without <code>jq</code>: the response is a JSON object <code>{"schema_id": "...", "model": {...}}</code>; <code>model</code> is the parsed schema structure and can be ignored here.</p>
+  <div class="note"><strong>Important:</strong> the <code>schema_id</code> points to a server-side cache and expires after 60 minutes (see <a href="#limits-en">Limits</a>). A <code>404 schema not found or expired</code> during validation simply means: repeat step 1.</div>
+
+  <h2>Step 2: Validate the XML</h2>
+  <h3>Upload an XML file</h3>
+<pre><code>curl -s -F "file=@document.xml" \
+  https://www.xsd-viewer.online/api/schema/$SCHEMA_ID/validate/upload \
+  -o report.json</code></pre>
+  <h3>XML from a URL</h3>
+<pre><code>curl -s -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/document.xml"}' \
+  https://www.xsd-viewer.online/api/schema/$SCHEMA_ID/validate/url \
+  -o report.json</code></pre>
+  <h3>XML as text in the JSON body</h3>
+<pre><code>jq -Rs '{content: ., filename: "document.xml"}' document.xml \
+  | curl -s -H "Content-Type: application/json" -d @- \
+    https://www.xsd-viewer.online/api/schema/$SCHEMA_ID/validate/text \
+    -o report.json</code></pre>
+
+  <h2>The error report</h2>
+  <p>Validation always answers with <strong>HTTP 200</strong> – even when there are errors. The outcome is in the JSON body. That body <em>is</em> the error report; there is no separate download endpoint, so you save it directly with <code>-o report.json</code>.</p>
+<pre><code>{
+  "schema_id": "…",
+  "is_valid": false,
+  "reformatted_xml": "&lt;?xml version=…&gt;\n&lt;Root&gt;\n  …",
+  "errors": [
+    {
+      "line": 4,
+      "column": null,
+      "message": "Element '{http://example.com/simple}Age': This element is not expected. Expected is ( {http://example.com/simple}LastName ).",
+      "severity": "error",
+      "kind": "schema-validation",
+      "path": "/*/*[2]",
+      "type_name": null,
+      "domain": "SCHEMASV"
+    }
+  ]
+}</code></pre>
+  <div class="tbl"><table>
+    <tr><th>Field</th><th>Meaning</th></tr>
+    <tr><td><code>is_valid</code></td><td><span class="ok">true</span> = well-formed and schema-conformant. <span class="bad">false</span> = at least one entry in <code>errors</code>.</td></tr>
+    <tr><td><code>reformatted_xml</code></td><td>The submitted XML, pretty-printed. <strong>All line/column numbers refer to this text</strong>, not to the original file. <code>null</code> when the XML is not well-formed.</td></tr>
+    <tr><td><code>errors[].kind</code></td><td><code>not-well-formed</code> – XML syntax error, the parser stopped (exactly one entry, no schema check).<br><code>schema-validation</code> – the XML is well-formed but violates the XSD.</td></tr>
+    <tr><td><code>errors[].line / column</code></td><td>Position inside <code>reformatted_xml</code>. <code>column</code> is usually <code>null</code> in practice (libxml2 reports no column for schema errors); for syntax errors the column is part of the message text.</td></tr>
+    <tr><td><code>errors[].message</code></td><td>Validator message (libxml2), e.g. missing mandatory element, wrong data type, pattern mismatch.</td></tr>
+    <tr><td><code>errors[].path</code></td><td>Positional XPath to the offending element, e.g. <code>/*/*[2]</code> (= second child of the root element); element names are in the <code>message</code>.</td></tr>
+    <tr><td><code>errors[].severity</code></td><td><code>fatal</code>, <code>error</code> or <code>warning</code>.</td></tr>
+  </table></div>
+
+  <h3>Only checking well-formedness?</h3>
+  <p>There is no dedicated "well-formed only" endpoint, but the distinction is unambiguous: if <code>is_valid</code> is false and the first error has <code>kind: "not-well-formed"</code>, the file is not valid XML. Every other error already implies well-formedness.</p>
+<pre><code>jq -r 'if .is_valid then "well-formed + valid"
+       elif .errors[0].kind == "not-well-formed" then "NOT well-formed: " + .errors[0].message
+       else "well-formed, but \(.errors|length) schema error(s)" end' report.json</code></pre>
+
+  <h2>Processing and downloading the report</h2>
+  <h3>Save as JSON (raw report)</h3>
+<pre><code>curl -s -F "file=@document.xml" \
+  https://www.xsd-viewer.online/api/schema/$SCHEMA_ID/validate/upload \
+  -o report.json</code></pre>
+  <h3>As a readable text file</h3>
+<pre><code>jq -r '.errors[] | "\(.kind)\tL\(.line):\(.column)\t\(.path // "-")\t\(.message)"' \
+  report.json &gt; errors.txt</code></pre>
+  <h3>As CSV</h3>
+<pre><code>jq -r '["line","column","kind","severity","path","message"],
+       (.errors[] | [.line,.column,.kind,.severity,.path,.message]) | @csv' \
+  report.json &gt; errors.csv</code></pre>
+  <h3>Pretty-printed XML with matching line numbers</h3>
+  <p>So that the line numbers in the report match the XML you are looking at:</p>
+<pre><code>jq -r '.reformatted_xml // empty' report.json &gt; document.pretty.xml
+jq -r '.errors[] | "\(.line): \(.message)"' report.json</code></pre>
+
+  <h2>Complete script for CI / batch use</h2>
+<pre><code>#!/usr/bin/env bash
+set -euo pipefail
+API=https://www.xsd-viewer.online/api
+XSD=$1; XML=$2
+
+SCHEMA_ID=$(curl -sf -F "file=@$XSD" "$API/schema/upload" | jq -r .schema_id)
+curl -sf -F "file=@$XML" "$API/schema/$SCHEMA_ID/validate/upload" -o report.json
+
+if jq -e .is_valid report.json &gt;/dev/null; then
+  echo "OK: $XML is valid"
+else
+  echo "ERRORS in $XML:" &gt;&amp;2
+  jq -r '.errors[] | "  L\(.line):\(.column) [\(.kind)] \(.message)"' report.json &gt;&amp;2
+  exit 1
+fi</code></pre>
+  <p>Usage: <code>./validate.sh schema.xsd document.xml</code>. Exit code 0 when valid, 1 on validation errors, non-zero on HTTP errors as well (thanks to <code>curl -f</code>).</p>
+  <p>Several XML files against the same schema: fetch the <code>schema_id</code> once and reuse it in a loop – fewer uploads, friendlier to the rate limit.</p>
+
+  <h2>Examples: curl, PowerShell, Python</h2>
+  <p>All three variants do the same thing: upload the XSD, validate the XML, save the report as <code>report.json</code> and print the errors. Exit code 0 = valid, 1 = errors.</p>
+  <div class="note"><strong>Tested on 2026-08-28</strong> against the live API: every curl, jq and Python example (valid, invalid, not well-formed, zip bundle, URL loading, 404 reload, 413 at 33 MB). The PowerShell examples follow the official <code>Invoke-RestMethod</code> documentation but could not be executed for lack of a Windows environment.</div>
+
+  <h3>curl (Bash, without jq)</h3>
+  <p>Without <code>jq</code>, pull the <code>schema_id</code> out with <code>sed</code> and pretty-print the report with <code>python3 -m json.tool</code>:</p>
+<pre><code>API=https://www.xsd-viewer.online/api
+
+SCHEMA_ID=$(curl -sf -F "file=@schema.xsd" "$API/schema/upload" \
+            | sed -E 's/.*"schema_id":"([^"]+)".*/\1/')
+echo "schema_id: $SCHEMA_ID"                          <span class="c"># quick check</span>
+
+curl -sf -F "file=@document.xml" "$API/schema/$SCHEMA_ID/validate/upload" -o report.json
+
+python3 -m json.tool report.json | head -40           <span class="c"># readable output</span>
+grep -q '"is_valid":true' report.json &amp;&amp; echo VALID || { echo INVALID; exit 1; }</code></pre>
+
+  <h3>PowerShell 7+</h3>
+  <p><code>Invoke-RestMethod -Form</code> (PowerShell 7 and later) builds the multipart upload itself; the JSON response arrives as an object.</p>
+<pre><code>$Api = "https://www.xsd-viewer.online/api"
+
+$schema = Invoke-RestMethod -Method Post -Uri "$Api/schema/upload" `
+            -Form @{ file = Get-Item .\schema.xsd }
+$schemaId = $schema.schema_id
+
+$report = Invoke-RestMethod -Method Post -Uri "$Api/schema/$schemaId/validate/upload" `
+            -Form @{ file = Get-Item .\document.xml }
+
+$report | ConvertTo-Json -Depth 5 | Set-Content report.json -Encoding utf8
+
+if ($report.is_valid) {
+    Write-Host "VALID" -ForegroundColor Green
+} else {
+    $report.errors | Format-Table line, column, kind, message -AutoSize
+    $report.errors | Select-Object line, column, kind, severity, path, message |
+        Export-Csv errors.csv -NoTypeInformation -Encoding utf8
+    exit 1
+}</code></pre>
+  <div class="note"><strong>Windows PowerShell 5.1:</strong> has no <code>-Form</code>. Either use <code>curl.exe</code> (bundled since Windows 10 1803 – <em>not</em> the <code>curl</code> alias) with the Bash examples, or fall back to the JSON endpoints: <code>Invoke-RestMethod -Method Post -ContentType "application/json" -Body (@{filename="schema.xsd"; content=(Get-Content schema.xsd -Raw)} | ConvertTo-Json)</code> against <code>/api/schema/text</code> and <code>/validate/text</code>.</div>
+
+  <h3>Python 3 (standard library only)</h3>
+  <p>No extra packages, using the JSON endpoints <code>/schema/text</code> and <code>/validate/text</code> – that avoids building multipart bodies. On <code>404</code> the schema is reloaded once.</p>
+<pre><code>#!/usr/bin/env python3
+import json, sys, urllib.request, urllib.error
+from pathlib import Path
+
+API = "https://www.xsd-viewer.online/api"
+
+def post_json(path, payload):
+    req = urllib.request.Request(
+        API + path, data=json.dumps(payload).encode(), method="POST",
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.load(r)
+
+def load_schema(xsd: Path) -> str:
+    return post_json("/schema/text", {"filename": xsd.name,
+                                      "content": xsd.read_text("utf-8")})["schema_id"]
+
+def validate(schema_id: str, xml: Path, xsd: Path) -> dict:
+    payload = {"filename": xml.name, "content": xml.read_text("utf-8")}
+    try:
+        return post_json(f"/schema/{schema_id}/validate/text", payload)
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            raise SystemExit(f"HTTP {e.code}: {e.read().decode()}")
+        schema_id = load_schema(xsd)          <span class="c"># expired → reload once</span>
+        return post_json(f"/schema/{schema_id}/validate/text", payload)
+
+if __name__ == "__main__":
+    xsd, xml = Path(sys.argv[1]), Path(sys.argv[2])
+    report = validate(load_schema(xsd), xml, xsd)
+    Path("report.json").write_text(json.dumps(report, indent=2), "utf-8")
+    if report["is_valid"]:
+        print("VALID")
+    else:
+        for e in report["errors"]:
+            print(f"L{e['line']}:{e['column']} [{e['kind']}] {e['message']}")
+        print(f"{len(report['errors'])} error(s)", file=sys.stderr)
+        sys.exit(1)</code></pre>
+
+  <h3>Python 3 with <code>requests</code></h3>
+  <p>With <code>pip install requests</code> the file upload becomes a one-liner and zip bundles are just as easy:</p>
+<pre><code>import json, sys, requests
+
+API = "https://www.xsd-viewer.online/api"
+
+with open("schema-bundle.zip", "rb") as f:
+    r = requests.post(f"{API}/schema/upload", files={"file": f},
+                      data={"main_filename": "Root.xsd"}, timeout=60)
+r.raise_for_status()
+schema_id = r.json()["schema_id"]
+
+with open("document.xml", "rb") as f:
+    r = requests.post(f"{API}/schema/{schema_id}/validate/upload",
+                      files={"file": f}, timeout=60)
+r.raise_for_status()
+report = r.json()
+
+with open("report.json", "w", encoding="utf-8") as out:
+    json.dump(report, out, indent=2)
+
+print("VALID" if report["is_valid"] else
+      "\n".join(f"L{e['line']}: {e['message']}" for e in report["errors"]))
+sys.exit(0 if report["is_valid"] else 1)</code></pre>
+  <p>Several files: call the function in a loop over <code>*.xml</code>, reusing <code>SCHEMA_ID</code>/<code>schema_id</code> – add a short pause between calls if you approach the rate limit (30/min).</p>
+
+  <h2 id="limits-en">Limits: size, timeouts, cache</h2>
+  <p>These values apply to the public instance at <code>www.xsd-viewer.online</code> (Google Cloud Run). On a self-hosted Docker installation they are configurable via environment variables (in parentheses).</p>
+  <div class="tbl"><table>
+    <tr><th>Limit</th><th>Value</th><th>Details</th></tr>
+    <tr><td>Upload size (XSD, zip, XML)</td><td class="num">32 MB</td><td>Hard limit of the Cloud Run load balancer; the backend rejects anything larger with <code>413</code>. Applies per request, so also to the XML body of <code>/validate/text</code> (UTF-8 encoded). (<code>MAX_UPLOAD_MB</code>, default 50)</td></tr>
+    <tr><td>Fetch by URL</td><td class="num">10 MB · 10 s · 3 redirects</td><td>For <code>/schema/url</code> and <code>/validate/url</code>: max. 10 MB response, 10 s connect/read timeout, at most 3 redirects. Only <code>http</code>/<code>https</code>, no private/local addresses. Exceeding any of these → <code>400</code>. (<code>FETCH_MAX_RESPONSE_MB</code>, <code>FETCH_TIMEOUT_SECONDS</code>, <code>FETCH_MAX_REDIRECTS</code>)</td></tr>
+    <tr><td>Request timeout</td><td class="num">60 s</td><td>Cloud Run aborts requests after 60 s (HTTP 504). Parsing and validation normally finish well under 1 s (measured: ~0.2 s per request for a small schema); very large schemas with many includes can take several seconds. The first request after a period of inactivity adds a 1–3 s cold start.</td></tr>
+    <tr><td>Rate limit</td><td class="num">30 requests / minute</td><td>Per client IP, shared by all write endpoints (<code>/schema/upload|url|text</code> and every <code>/validate/*</code>). Beyond that: <code>429</code>. For batch runs, reuse the <code>schema_id</code> and add a <code>sleep 2</code> between validations if needed.</td></tr>
+    <tr><td><code>schema_id</code> lifetime</td><td class="num">60 min · 32 entries</td><td>The schema cache is an in-memory LRU per server instance: entries expire 60 min after loading, and once more than 32 schemas are cached the oldest is evicted. (<code>SCHEMA_CACHE_TTL_MIN</code>, <code>SCHEMA_CACHE_MAX_ENTRIES</code>)</td></tr>
+    <tr><td>Instances</td><td class="num">0–5</td><td>Cloud Run scales horizontally. Because the cache lives <em>per instance</em>, a <code>schema_id</code> may hit a different instance under load and return <code>404</code> there – see the note below.</td></tr>
+    <tr><td>DTD / entities in the XML</td><td class="num">≤ 32 declarations · ≤ 512 chars</td><td>For security only simple internal <code>&lt;!ENTITY&gt;</code>/<code>&lt;!ATTLIST&gt;</code> declarations with literal values are accepted; external entities, parameter entities and nested references yield <code>400</code>. Fix: drop the DOCTYPE and inline the entity values.</td></tr>
+  </table></div>
+  <div class="note"><strong>Robust scripts:</strong> since a <code>schema_id</code> can become invalid for three reasons (TTL, cache eviction, different instance), a script should react to <code>404</code> by re-uploading the XSD once and retrying the validation. The <code>schema_id</code> is deterministic: the same content via the same loading path yields the same id (upload and <code>/schema/text</code> give the same id for the same file, <code>/schema/url</code> a different one).</div>
+<pre><code>validate() {  <span class="c"># $1 = XML file; uses global $XSD, $SCHEMA_ID</span>
+  local code
+  code=$(curl -s -o report.json -w '%{http_code}' -F "file=@$1"          "$API/schema/$SCHEMA_ID/validate/upload")
+  if [ "$code" = 404 ]; then   <span class="c"># schema expired → reload, retry once</span>
+    SCHEMA_ID=$(curl -sf -F "file=@$XSD" "$API/schema/upload" | jq -r .schema_id)
+    code=$(curl -s -o report.json -w '%{http_code}' -F "file=@$1"            "$API/schema/$SCHEMA_ID/validate/upload")
+  fi
+  [ "$code" = 200 ] || { echo "HTTP $code: $(jq -r .detail report.json)" &gt;&amp;2; return 2; }
+  jq -e .is_valid report.json &gt;/dev/null
+}</code></pre>
+
+  <h2>Error codes and limits</h2>
+  <div class="tbl"><table>
+    <tr><th>HTTP</th><th>Cause</th><th>Fix</th></tr>
+    <tr><td class="num">200</td><td>Validation ran (result in <code>is_valid</code>)</td><td>–</td></tr>
+    <tr><td class="num">400</td><td>URL rejected (not http/https, private address, &gt; 3 redirects, &gt; 10 MB, &gt; 10 s) or unsafe XML (e.g. external entities)</td><td>Upload the file instead</td></tr>
+    <tr><td class="num">404</td><td><code>schema_id</code> unknown or expired</td><td>Repeat step 1</td></tr>
+    <tr><td class="num">413</td><td>File too large (&gt; 32 MB)</td><td>Reduce / split the file</td></tr>
+    <tr><td class="num">422</td><td>XSD could not be compiled into a validator (e.g. missing imports)</td><td>Upload a complete zip with all imports</td></tr>
+    <tr><td class="num">429</td><td>Rate limit hit (30 requests/min per IP)</td><td>Wait briefly, reuse the <code>schema_id</code></td></tr>
+    <tr><td class="num">504</td><td>Request timeout (60 s) exceeded</td><td>Shrink the schema / reduce includes, retry</td></tr>
+  </table></div>
+  <p>Error responses (≠ 200) have the shape <code>{"detail": "…"}</code>.</p>
+</section>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var buttons = document.querySelectorAll('.lang button');
+  function set(lang) {
+    root.setAttribute('data-lang', lang);
+    buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.lang === lang)); });
+    try { localStorage.setItem('xsd-cli-doc-lang', lang); } catch (e) {}
+  }
+  var saved = null;
+  try { saved = localStorage.getItem('xsd-cli-doc-lang'); } catch (e) {}
+  set(saved || 'de');
+  buttons.forEach(function (b) { b.addEventListener('click', function () { set(b.dataset.lang); }); });
+})();
+</script>

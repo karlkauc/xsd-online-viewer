@@ -12,7 +12,7 @@ from app.spa import SPA_ROUTES, is_spa_route, mount_spa
 
 
 class TestIsSpaRoute:
-    @pytest.mark.parametrize("path", ["", "paste", "url", "fundsxml", "fundsxml/", "paste//"])
+    @pytest.mark.parametrize("path", ["", "paste", "url", "fundsxml", "fundsxml/", "paste//", "api-docs"])
     def test_known_routes(self, path: str) -> None:
         assert is_spa_route(path)
 
@@ -25,7 +25,7 @@ class TestIsSpaRoute:
         assert not is_spa_route(path)
 
     def test_routes_mirror_frontend(self) -> None:
-        assert frozenset({"", "paste", "url", "fundsxml"}) == SPA_ROUTES
+        assert frozenset({"", "paste", "url", "fundsxml", "api-docs"}) == SPA_ROUTES
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def client(tmp_path: Path) -> TestClient:
 
 
 class TestSpaFallback:
-    @pytest.mark.parametrize("path", ["/", "/paste", "/url", "/fundsxml", "/fundsxml/"])
+    @pytest.mark.parametrize("path", ["/", "/paste", "/url", "/fundsxml", "/fundsxml/", "/api-docs"])
     def test_client_routes_serve_shell(self, client: TestClient, path: str) -> None:
         r = client.get(path)
         assert r.status_code == 200
