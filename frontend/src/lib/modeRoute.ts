@@ -1,7 +1,8 @@
 // Maps the Uploader's input mode to/from the URL path so each input option is
 // directly addressable and shareable, e.g. /fundsxml selects the releases tab.
 // Mirrors the lightweight URL-manipulation approach in deepLink.ts.
-// Keep MODE_TO_PATH and API_DOCS_PATH in sync with SPA_ROUTES in backend/app/spa.py — the server
+// Keep MODE_TO_PATH, API_DOCS_PATH and API_DOCS_TITLE/DESCRIPTION in sync with ROUTE_META in
+// backend/app/spa.py — the server injects per-route <head> metadata into the shell and
 // serves the SPA shell only for these paths and answers 404 for anything else.
 
 export type Mode = "file" | "text" | "url" | "releases";

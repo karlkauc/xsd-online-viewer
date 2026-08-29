@@ -5,16 +5,84 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!--
+      Title, description, canonical and og:* are per-route placeholders: the
+      backend (backend/app/spa.py, render_shell) rewrites them for each client
+      route before serving the shell. Keep the attribute order as-is.
+    -->
     <title>Online XSD Viewer</title>
     <meta
       name="description"
       content="Free online XSD viewer: upload an XML Schema and explore it as a tree, XMLSpy-style diagram or highlighted source. Validate XML documents against the schema in the browser or via REST API."
     />
     <link rel="canonical" href="https://www.xsd-viewer.online/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Online XSD Viewer" />
+    <meta property="og:title" content="Online XSD Viewer" />
+    <meta
+      property="og:description"
+      content="Free online XSD viewer: upload an XML Schema and explore it as a tree, XMLSpy-style diagram or highlighted source. Validate XML documents against the schema in the browser or via REST API."
+    />
+    <meta property="og:url" content="https://www.xsd-viewer.online/" />
+    <meta property="og:image" content="https://www.xsd-viewer.online/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Online XSD Viewer — tree, diagram and text view of an XML Schema" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <!-- Not executed by the browser, so the CSP (script-src 'self') does not apply. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Online XSD Viewer",
+        "url": "https://www.xsd-viewer.online/",
+        "description": "Free online XSD viewer: upload an XML Schema and explore it as a tree, XMLSpy-style diagram or highlighted source. Validate XML documents against the schema in the browser or via REST API.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Any",
+        "browserRequirements": "Requires JavaScript",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+        "featureList": [
+          "Tree view of XML Schema declarations",
+          "XMLSpy-style schema diagram",
+          "Syntax-highlighted XSD source with annotations",
+          "XML validation against an XSD in the browser",
+          "REST API for XML validation (curl, PowerShell, Python)",
+          "FundsXML schema releases built in"
+        ],
+        "screenshot": "https://www.xsd-viewer.online/og-image.png",
+        "license": "https://github.com/karlkauc/xsd-online-viewer/blob/master/LICENSE"
+      }
+    </script>
     <script src="/theme-init.js"></script>
   </head>
   <body class="bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-    <div id="root"></div>
+    <!--
+      Static landing content: crawlers that do not execute JavaScript (and
+      Google's first, non-rendered pass) still see real text. React replaces
+      it on mount.
+    -->
+    <div id="root">
+      <main class="max-w-2xl mx-auto px-6 py-16 font-sans">
+        <h1 class="text-2xl font-semibold">Online XSD Viewer</h1>
+        <p class="mt-4">
+          Free online XML Schema (XSD) viewer. Upload an <code>.xsd</code> file, paste the
+          schema source or load it from a URL and explore the schema as an expandable tree,
+          an XMLSpy-style diagram or syntax-highlighted text — including annotations,
+          documentation, appinfo and source line numbers.
+        </p>
+        <p class="mt-4">
+          Validate XML documents against the schema directly in the browser, or from the
+          command line via the
+          <a class="underline" href="/api-docs">REST validation API</a> (curl, PowerShell,
+          Python). The <a class="underline" href="/fundsxml">FundsXML schema releases</a> are
+          built in and can be browsed without uploading anything.
+        </p>
+        <noscript>
+          <p class="mt-4">Please enable JavaScript to use the viewer.</p>
+        </noscript>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
