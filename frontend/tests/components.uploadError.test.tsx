@@ -23,6 +23,14 @@ describe("UploadError", () => {
     expect(screen.queryByRole("button", { name: /Upload anyway/ })).not.toBeInTheDocument();
   });
 
+  it("explains binary .xsd uploads, including cross-stitch patterns", () => {
+    render(
+      <UploadError message="uyutnye_tykvy.xsd: not an XML file — it starts with binary data (b'\\x10\\x05'), not text" />,
+    );
+    expect(screen.getByText(/This is a binary file, not a schema/)).toBeInTheDocument();
+    expect(screen.getByText(/cross-stitch patterns from/)).toBeInTheDocument();
+  });
+
   it("opens the feedback dialog with the error attached", async () => {
     const listener = vi.fn();
     window.addEventListener("xsdv:open-feedback", listener);

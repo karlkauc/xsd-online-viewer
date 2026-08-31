@@ -8,7 +8,13 @@ import zipfile
 import pytest
 from lxml import etree
 
-from app.parser.errors import humanize_syntax_error, no_xsd_in_zip_message, not_a_schema_message
+from app.parser.errors import (
+    describe_binary_format,
+    humanize_syntax_error,
+    is_binary,
+    no_xsd_in_zip_message,
+    not_a_schema_message,
+)
 from app.parser.xsd_parser import parse_single, parse_with_url_fallback
 
 
@@ -18,10 +24,27 @@ def _syntax_error(data: bytes) -> etree.XMLSyntaxError:
     return info.value
 
 
-def test_binary_file_is_not_xml() -> None:
+def test_known_binary_format_is_named() -> None:
     data = b"PK\x03\x04garbage"
     msg = humanize_syntax_error(_syntax_error(data), "dim.xsd", data)
-    assert msg.startswith("dim.xsd: not an XML file (it starts with b'PK\\x03\\x04")
+    assert msg == (
+        "dim.xsd: not an XML file — it looks like a ZIP archive "
+        "(or a .docx/.xlsx/.odt file), i.e. binary data, not text"
+    )
+
+
+def test_unknown_binary_shows_the_bytes() -> None:
+    # A cross-stitch pattern from Pattern Maker: same .xsd extension, no XML.
+    data = b"\x10\x05\x80\x03\xb4Q\x08\x00\x04\x00\x00\x00"
+    msg = humanize_syntax_error(_syntax_error(data), "uyutnye_tykvy.xsd", data)
+    assert msg.startswith("uyutnye_tykvy.xsd: not an XML file — it starts with binary data (b'\\x10\\x05")
+    assert msg.endswith("), not text")
+
+
+def test_plain_text_that_is_not_xml_keeps_the_old_wording() -> None:
+    data = b"name;value\n1;2\n"
+    msg = humanize_syntax_error(_syntax_error(data), "table.xsd", data)
+    assert msg == "table.xsd: not an XML file (it starts with b'name;value\\n1' instead of '<')"
 
 
 def test_empty_file() -> None:
@@ -60,3 +83,11 @@ def test_zip_without_xsd_lists_contents() -> None:
         z.writestr("model.stl", b"solid")
     with pytest.raises(ValueError, match="contains no .xsd file"):
         parse_with_url_fallback(zip_bytes=buf.getvalue(), main_filename=None, main_bytes=None, base_url=None)
+
+
+def test_binary_sniffing_helpers() -> None:
+    assert describe_binary_format(b"%PDF-1.7") == "a PDF document"
+    assert describe_binary_format(b"<?xml version") is None
+    assert is_binary(b"\x10\x05\x80\x03")
+    assert is_binary(b"text\x00more")
+    assert not is_binary(b"name;value\r\n")

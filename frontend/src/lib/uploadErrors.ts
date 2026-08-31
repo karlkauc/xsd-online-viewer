@@ -4,6 +4,7 @@ export const XML_VIEWER_URL = "https://www.xml-viewer.online/";
 
 export type UploadErrorKind =
   | "xml-document"
+  | "binary-file"
   | "not-xml"
   | "zip-no-xsd"
   | "dtd"
@@ -19,6 +20,7 @@ export interface ClassifiedError {
 
 const RULES: Array<[RegExp, UploadErrorKind, string]> = [
   [/not <xs:schema>|looks like an XML document|root element is not xs:schema/i, "xml-document", "This is an XML document, not an XML Schema"],
+  [/not an XML file.*binary/i, "binary-file", "This is a binary file, not a schema"],
   [/not an XML file|Start tag expected|the file is empty/i, "not-xml", "The file is not XML"],
   [/ZIP archive contains no/i, "zip-no-xsd", "The ZIP contains no schema"],
   [/DTD construct/i, "dtd", "The schema uses DTD declarations we cannot accept"],

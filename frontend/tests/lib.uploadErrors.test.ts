@@ -9,7 +9,13 @@ describe("classifyUploadError", () => {
     );
   });
   it("maps the other backend messages", () => {
-    expect(classifyUploadError("dim.xsd: not an XML file (it starts with b'PK')").kind).toBe("not-xml");
+    expect(classifyUploadError("dim.xsd: not an XML file (it starts with b'name;value')").kind).toBe("not-xml");
+    expect(classifyUploadError("p.xsd: not an XML file — it looks like a PDF document, i.e. binary data, not text").kind).toBe(
+      "binary-file",
+    );
+    expect(
+      classifyUploadError("uyutnye_tykvy.xsd: not an XML file — it starts with binary data (b'\\x10\\x05'), not text").kind,
+    ).toBe("binary-file");
     expect(classifyUploadError("ZIP archive contains no .xsd file (found: a.stl)").kind).toBe("zip-no-xsd");
     expect(classifyUploadError("DTD constructs are not allowed in uploads").kind).toBe("dtd");
     expect(classifyUploadError("upload exceeds 20 MB limit").kind).toBe("too-large");

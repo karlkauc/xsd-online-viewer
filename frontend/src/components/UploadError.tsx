@@ -85,6 +85,20 @@ export function UploadError({ message, onUploadAnyway, schemaName, file }: Props
             </p>
           </>
         )}
+        {kind === "binary-file" && (
+          <>
+            <p>
+              An <code>.xsd</code> schema is plain text starting with <code>&lt;?xml</code> or{" "}
+              <code>&lt;xs:schema</code>. This file contains binary data, so it is not a schema —
+              opening it in a text editor will show unreadable characters.
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Note: <code>.xsd</code> is also the file extension of cross-stitch patterns from
+              Pattern Maker (HobbyWare). Those patterns have nothing to do with XML Schema and can
+              only be opened in that program — this viewer cannot display them.
+            </p>
+          </>
+        )}
         {kind === "not-xml" && (
           <p>
             An <code>.xsd</code> file is plain text starting with <code>&lt;?xml</code> or{" "}
