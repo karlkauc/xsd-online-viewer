@@ -91,3 +91,34 @@ def test_binary_sniffing_helpers() -> None:
     assert is_binary(b"\x10\x05\x80\x03")
     assert is_binary(b"text\x00more")
     assert not is_binary(b"name;value\r\n")
+
+
+def test_schema_root_without_namespace_explains_the_missing_xmlns() -> None:
+    msg = not_a_schema_message("HU_LABEL_E.xsd", "schema")
+    assert msg == (
+        "HU_LABEL_E.xsd: the root element <schema> declares no namespace — an XML Schema "
+        'must declare xmlns="http://www.w3.org/2001/XMLSchema" (the prefix itself does not '
+        "matter, <schema> is as valid as <xs:schema>)"
+    )
+
+
+def test_schema_root_with_obsolete_draft_namespace() -> None:
+    msg = not_a_schema_message("old.xsd", "{http://www.w3.org/1999/XMLSchema}schema")
+    assert msg == (
+        "old.xsd: the root element <schema> uses the obsolete 1999 XML Schema draft namespace "
+        "(http://www.w3.org/1999/XMLSchema) — replace it with http://www.w3.org/2001/XMLSchema"
+    )
+    assert "2000/10" in not_a_schema_message("o.xsd", "{http://www.w3.org/2000/10/XMLSchema}schema")
+
+
+def test_schema_root_in_a_foreign_namespace() -> None:
+    msg = not_a_schema_message("weird.xsd", "{urn:acme}schema")
+    assert msg == (
+        "weird.xsd: the root element <schema> is in namespace urn:acme, not the XML Schema "
+        "namespace http://www.w3.org/2001/XMLSchema"
+    )
+
+
+def test_namespaceless_schema_reaches_the_new_message() -> None:
+    with pytest.raises(ValueError, match="declares no namespace"):
+        parse_single(b'<schema><element name="a"/></schema>', "HU_LABEL_E.xsd")

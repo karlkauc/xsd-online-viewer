@@ -4,6 +4,7 @@ export const XML_VIEWER_URL = "https://www.xml-viewer.online/";
 
 export type UploadErrorKind =
   | "xml-document"
+  | "schema-namespace"
   | "binary-file"
   | "not-xml"
   | "zip-no-xsd"
@@ -19,6 +20,8 @@ export interface ClassifiedError {
 }
 
 const RULES: Array<[RegExp, UploadErrorKind, string]> = [
+  // Must precede the xml-document rule: this root *is* a schema, only its xmlns is off.
+  [/the root element <schema>/i, "schema-namespace", "The schema's XML namespace is missing or wrong"],
   [/not <xs:schema>|looks like an XML document|root element is not xs:schema/i, "xml-document", "This is an XML document, not an XML Schema"],
   [/not an XML file.*binary/i, "binary-file", "This is a binary file, not a schema"],
   [/not an XML file|Start tag expected|the file is empty/i, "not-xml", "The file is not XML"],

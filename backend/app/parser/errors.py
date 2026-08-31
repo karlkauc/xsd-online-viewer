@@ -74,9 +74,50 @@ def humanize_syntax_error(exc: etree.XMLSyntaxError, filename: str, content: byt
     return f"{filename}: {message}"
 
 
+XSD_NS = "http://www.w3.org/2001/XMLSchema"
+
+# Namespaces of the pre-Recommendation drafts. Schemas written against them are
+# still in circulation, and their root really is a schema — just an old one.
+_DRAFT_NAMESPACES: dict[str, str] = {
+    "http://www.w3.org/1999/XMLSchema": "the obsolete 1999 XML Schema draft",
+    "http://www.w3.org/2000/10/XMLSchema": "the obsolete 2000/10 XML Schema draft",
+}
+
+
+def _namespace_of(tag: str) -> str | None:
+    if tag.startswith("{"):
+        return tag[1:].partition("}")[0]
+    return None
+
+
 def not_a_schema_message(filename: str, root_tag: object) -> str:
-    """Message for a well-formed file whose root is not ``xs:schema``."""
-    local = _local_name(root_tag)
+    """Message for a well-formed file whose root is not ``xs:schema``.
+
+    A root named ``schema`` in the wrong (or no) namespace is not an XML
+    document that was mistaken for a schema — it *is* a schema, written with a
+    missing or outdated ``xmlns``. Saying "not <xs:schema>" there reads as if
+    the prefix were the problem, so name the actual namespace instead.
+    """
+    tag = str(root_tag)
+    local = _local_name(tag)
+    if local == "schema":
+        namespace = _namespace_of(tag)
+        if namespace is None:
+            return (
+                f"{filename}: the root element <schema> declares no namespace — an XML "
+                f'Schema must declare xmlns="{XSD_NS}" (the prefix itself does not matter, '
+                "<schema> is as valid as <xs:schema>)"
+            )
+        draft = _DRAFT_NAMESPACES.get(namespace)
+        if draft:
+            return (
+                f"{filename}: the root element <schema> uses {draft} namespace "
+                f"({namespace}) — replace it with {XSD_NS}"
+            )
+        return (
+            f"{filename}: the root element <schema> is in namespace {namespace}, "
+            f"not the XML Schema namespace {XSD_NS}"
+        )
     return (
         f"{filename}: root element is <{local}>, not <xs:schema> — "
         "this looks like an XML document, not an XML Schema"

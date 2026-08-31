@@ -8,6 +8,23 @@ describe("classifyUploadError", () => {
       "xml-document",
     );
   });
+  it("keeps a <schema> root with a bad namespace out of the xml-document bucket", () => {
+    expect(
+      classifyUploadError(
+        'HU_LABEL_E.xsd: the root element <schema> declares no namespace — an XML Schema must declare xmlns="http://www.w3.org/2001/XMLSchema" (the prefix itself does not matter, <schema> is as valid as <xs:schema>)',
+      ).kind,
+    ).toBe("schema-namespace");
+    expect(
+      classifyUploadError(
+        "old.xsd: the root element <schema> uses the obsolete 1999 XML Schema draft namespace (http://www.w3.org/1999/XMLSchema) — replace it with http://www.w3.org/2001/XMLSchema",
+      ).kind,
+    ).toBe("schema-namespace");
+    expect(
+      classifyUploadError(
+        "weird.xsd: the root element <schema> is in namespace urn:acme, not the XML Schema namespace http://www.w3.org/2001/XMLSchema",
+      ).kind,
+    ).toBe("schema-namespace");
+  });
   it("maps the other backend messages", () => {
     expect(classifyUploadError("dim.xsd: not an XML file (it starts with b'name;value')").kind).toBe("not-xml");
     expect(classifyUploadError("p.xsd: not an XML file — it looks like a PDF document, i.e. binary data, not text").kind).toBe(

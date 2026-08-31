@@ -85,6 +85,22 @@ export function UploadError({ message, onUploadAnyway, schemaName, file }: Props
             </p>
           </>
         )}
+        {kind === "schema-namespace" && (
+          <>
+            <p>
+              The root element is a <code>schema</code>, so this is meant to be an XML Schema — but
+              it is not in the XML Schema namespace. The prefix is irrelevant:{" "}
+              <code>&lt;schema&gt;</code>, <code>&lt;xs:schema&gt;</code> and{" "}
+              <code>&lt;xsd:schema&gt;</code> all work, as long as that prefix (or the default
+              namespace) is bound to <code>http://www.w3.org/2001/XMLSchema</code>.
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Fix the root element, for example{" "}
+              <code>&lt;schema xmlns="http://www.w3.org/2001/XMLSchema"&gt;</code>, and upload again.
+              Schemas written against the 1999 or 2000 drafts need the same namespace change.
+            </p>
+          </>
+        )}
         {kind === "binary-file" && (
           <>
             <p>
