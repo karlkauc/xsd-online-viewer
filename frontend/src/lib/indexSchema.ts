@@ -204,6 +204,20 @@ export function overrideKey(kind: string, qname: string): string {
   return `${kind}:${qname}`;
 }
 
+// Follow an ``<xs:element ref="...">`` particle to the global declaration it
+// references. Returns null for a declaration that isn't a ref, or whose target
+// is missing (undeclared prefix, unresolved import). The caller substitutes the
+// target wherever the ref itself carries no content: type, children, docs.
+export function resolveElementRef(
+  element: ElementDecl,
+  indexById: Map<string, NodeIndexEntry>,
+): ElementDecl | null {
+  if (!element.ref || !element.ref_id) return null;
+  const entry = indexById.get(element.ref_id);
+  if (!entry || entry.kind !== "element") return null;
+  return entry.node as ElementDecl;
+}
+
 // Resolve a QName reference from a declaration to an entry in the index.
 // Handles the common case of matching by qname (namespace-qualified) or by
 // bare local name when no namespace prefix is present.

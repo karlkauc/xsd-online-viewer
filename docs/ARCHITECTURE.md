@@ -251,6 +251,19 @@ These IDs flow unchanged through the API, the Zustand index, the URL hash,
 and React Flow node ids — so deep links, cross-view selection, and
 tree/diagram synchronization all lean on the same primitive.
 
+An `<xs:element ref="ds:Signature"/>` particle keeps its own id
+(`element:ds:Signature`, the QName as written) and additionally carries
+`ref_id` — the id of the global declaration it points at, with the prefix
+expanded against the namespace declarations in scope
+(`element:{http://www.w3.org/2000/09/xmldsig#}Signature`). The parser mints it,
+so every view resolves a ref the same way, including across an `xs:import`
+whose globals are not document roots (`lib/rootElements.ts`). The frontend
+follows it through `resolveElementRef()` in `lib/indexSchema.ts`: tree,
+diagram, expand-all, content model and detail panel all substitute the
+referenced declaration for everything but the particle's own cardinality.
+Diagram layout guards the reference cycles this makes reachable (a type whose
+content refs the element defining it) with a root→node path set.
+
 ### Source locations
 
 Every declaration carries a `SourceRef { file_id, line }` minted during the

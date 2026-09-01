@@ -603,6 +603,7 @@ class XsdParser:
             name=name,
             qname=qname,
             ref=ref,
+            ref_id=self._resolve_ref_id("element", elem, ref),
             type_name=type_name,
             type_inline_simple=type_inline_simple,
             type_inline_complex=type_inline_complex,
@@ -1137,6 +1138,28 @@ class XsdParser:
 
     def _make_id(self, kind: str, qname: str) -> str:
         return f"{self.state.id_prefix}{kind}:{qname}"
+
+    def _resolve_ref_id(
+        self, kind: str, elem: etree._Element, ref: str | None
+    ) -> str | None:
+        """Turn a ``ref="prefix:Local"`` QName into the id of the global
+        declaration it names.
+
+        The prefix is expanded through the namespace declarations in scope at
+        ``elem`` (an unprefixed ref uses the default namespace), producing the
+        same ``{kind}:{{ns}}Local`` identifier the global declaration got from
+        ``_compose_qname``/``_make_id``. Global declarations always live in the
+        unprefixed id space, so ``id_prefix`` is deliberately not applied.
+        Returns ``None`` for a prefix no ``xmlns`` declaration covers.
+        """
+        if not ref:
+            return None
+        prefix, sep, local = ref.rpartition(":")
+        nsmap = elem.nsmap or {}
+        uri = nsmap.get(prefix) if sep else nsmap.get(None)
+        if sep and uri is None:
+            return None
+        return f"{kind}:{{{uri}}}{local}" if uri else f"{kind}:{local}"
 
 
 def _collect_namespaces(files: list[_LoadedFile]) -> dict[str, str]:

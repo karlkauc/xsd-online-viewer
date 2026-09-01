@@ -36,11 +36,18 @@ function resolveComplex(
 export function collectExpandableElementIds(model: SchemaModel): Set<string> {
   const result = new Set<string>();
   const index = buildComplexIndex(model);
+  const globalsById = new Map(model.elements.map((e) => [e.id, e]));
   const seenComplex = new Set<string>();
 
   function visitElement(element: ElementDecl): void {
+    // A ref particle carries no type of its own — the declaration it points
+    // at does, so expand-all must follow it (ds:Signature & co.).
+    const declaration =
+      (element.ref && element.ref_id ? globalsById.get(element.ref_id) : undefined) ??
+      element;
     const complex =
-      element.type_inline_complex ?? resolveComplex(element.type_name, index);
+      declaration.type_inline_complex ??
+      resolveComplex(declaration.type_name, index);
     if (!complex) return;
     result.add(element.id);
     if (seenComplex.has(complex.id)) return;

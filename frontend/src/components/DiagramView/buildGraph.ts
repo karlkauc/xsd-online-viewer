@@ -56,6 +56,13 @@ interface BuildContext {
   edges: Edge[];
   idCounter: number;
   typeIndex: Map<string, ComplexType>;
+  // Global element declarations by id, so an `<xs:element ref="…">` particle
+  // can be resolved to the declaration that actually carries its content.
+  elementIndex: Map<string, ElementDecl>;
+  // Ids of the elements on the current root→node path. A recursive schema
+  // (a type whose content refs the element it defines) would otherwise expand
+  // forever, since every repetition of the ref carries the same id.
+  pathIds: Set<string>;
 }
 
 function nextId(context: BuildContext): string {
@@ -73,6 +80,25 @@ function buildTypeIndex(model: SchemaModel): Map<string, ComplexType> {
     }
   }
   return index;
+}
+
+function buildElementIndex(model: SchemaModel): Map<string, ElementDecl> {
+  const index = new Map<string, ElementDecl>();
+  for (const element of model.elements) {
+    index.set(element.id, element);
+  }
+  return index;
+}
+
+// An `<xs:element ref="…">` particle holds no type of its own — everything the
+// node renders (type, children, documentation) lives on the referenced global
+// declaration, which for an imported namespace sits in another file.
+function resolveRefTarget(
+  element: ElementDecl,
+  context: BuildContext,
+): ElementDecl {
+  if (!element.ref || !element.ref_id) return element;
+  return context.elementIndex.get(element.ref_id) ?? element;
 }
 
 function resolveComplex(
@@ -117,12 +143,13 @@ function computeElementDisplay(
   hostParticle: Particle | null,
   context: BuildContext,
 ): ElementDisplay {
-  const inlineComplex = element.type_inline_complex;
-  const namedComplex = !inlineComplex ? resolveComplex(element.type_name, context) : undefined;
+  const target = resolveRefTarget(element, context);
+  const inlineComplex = target.type_inline_complex;
+  const namedComplex = !inlineComplex ? resolveComplex(target.type_name, context) : undefined;
   const resolvedComplex = inlineComplex ?? namedComplex ?? null;
 
   const attrs = inlineComplex?.attributes ?? [];
-  const docFull = collectDocumentation(element);
+  const docFull = collectDocumentation(element) ?? collectDocumentation(target);
   const docLines = truncateDocLines(docFull);
   const expandable = resolvedComplex != null;
   const assertCount = resolvedComplex?.assertions?.length ?? 0;
@@ -143,7 +170,7 @@ function computeElementDisplay(
     schemaId: element.id,
     kind: "element",
     label: element.name ?? element.ref ?? "?",
-    type: element.type_name,
+    type: target.type_name,
     occurs: hostParticle ? formatOccurs(hostParticle.min_occurs, hostParticle.max_occurs) : null,
     expandable,
     expanded: context.expandedIds.has(element.id),
@@ -208,7 +235,8 @@ function getExpandedParticle(
   context: BuildContext,
 ): Particle | null {
   if (!context.expandedIds.has(element.id)) return null;
-  const complex = element.type_inline_complex ?? resolveComplex(element.type_name, context);
+  const target = resolveRefTarget(element, context);
+  const complex = target.type_inline_complex ?? resolveComplex(target.type_name, context);
   return complex?.particle ?? null;
 }
 
@@ -216,7 +244,8 @@ function getOpenContentMode(
   element: ElementDecl,
   context: BuildContext,
 ): "interleave" | "suffix" | "none" | null {
-  const complex = element.type_inline_complex ?? resolveComplex(element.type_name, context);
+  const target = resolveRefTarget(element, context);
+  const complex = target.type_inline_complex ?? resolveComplex(target.type_name, context);
   return complex?.open_content?.mode ?? null;
 }
 
@@ -230,7 +259,9 @@ function placeElement(
   context: BuildContext,
 ): { flowId: string; span: Span } {
   const display = computeElementDisplay(element, hostParticle, context);
-  const expandedParticle = getExpandedParticle(element, context);
+  const expandedParticle = context.pathIds.has(element.id)
+    ? null
+    : getExpandedParticle(element, context);
 
   if (!expandedParticle) {
     const flowId = nextId(context);
@@ -252,6 +283,7 @@ function placeElement(
 
   const elementFlowId = nextId(context);
 
+  context.pathIds.add(element.id);
   const particleResult = placeParticle(
     expandedParticle,
     compositorX,
@@ -259,6 +291,7 @@ function placeElement(
     topY,
     context,
   );
+  context.pathIds.delete(element.id);
 
   // The root compositor of an expanded element is the visual host for any
   // open-content semantics declared on that element's complex type. Tag it
@@ -413,6 +446,8 @@ export function buildDiagramGraph(
     edges: [],
     idCounter: 0,
     typeIndex: buildTypeIndex(model),
+    elementIndex: buildElementIndex(model),
+    pathIds: new Set(),
   };
 
   let nextTopY = 0;

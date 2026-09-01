@@ -11,7 +11,7 @@ import type {
   SchemaNodeKind,
   SimpleType,
 } from "../../types/schema";
-import { resolveReference } from "../../lib/indexSchema";
+import { resolveElementRef, resolveReference } from "../../lib/indexSchema";
 import { computeRootElements } from "../../lib/rootElements";
 
 export interface TreeRow {
@@ -96,11 +96,15 @@ export function buildTreeRows(
 
   const descendElement = (element: ElementDecl, depth: number, hostParticle?: Particle) => {
     const rowId = element.id;
-    const typeHint = element.type_name ?? null;
+    // An `<xs:element ref="…">` particle carries no content of its own — the
+    // referenced global declaration holds the type. Descend through it so a
+    // ref into an imported namespace (ds:Signature) is drillable too.
+    const target = resolveElementRef(element, indexById) ?? element;
+    const typeHint = target.type_name ?? null;
     const hasChildren =
-      element.type_inline_complex != null ||
-      element.type_inline_simple != null ||
-      element.type_name != null;
+      target.type_inline_complex != null ||
+      target.type_inline_simple != null ||
+      target.type_name != null;
     pushRow({
       id: rowId,
       depth,
@@ -114,7 +118,18 @@ export function buildTreeRows(
     });
 
     if (!expandedIds.has(rowId) || !filterKinds.has("element")) return;
+    // Guard against a reference cycle (A refs B refs A) blowing the stack.
+    if (target !== element) {
+      if (stackSeen.includes(target.id)) return;
+      stackSeen.push(target.id);
+      descendElementBody(target, depth);
+      stackSeen.pop();
+      return;
+    }
+    descendElementBody(target, depth);
+  };
 
+  const descendElementBody = (element: ElementDecl, depth: number) => {
     if (element.type_inline_complex) {
       descendComplex(element.type_inline_complex, depth + 1);
     } else if (element.type_name) {

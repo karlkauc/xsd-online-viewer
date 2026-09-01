@@ -1,7 +1,7 @@
 import type { Particle } from "../../types/schema";
 import { flattenParticle } from "../../lib/particles";
 import { useSelection } from "../../stores/selectionStore";
-import { resolveReference } from "../../lib/indexSchema";
+import { resolveElementRef, resolveReference } from "../../lib/indexSchema";
 import { COMPOSITOR_GLYPH, GROUP_REF_GLYPH, WILDCARD_GLYPH } from "./symbols";
 import { KindBadge } from "../TreeView/KindBadge";
 
@@ -13,6 +13,7 @@ const INDENT_PX = 16;
 
 export function ChildrenTable({ particle }: ChildrenTableProps) {
   const index = useSelection((s) => s.index);
+  const indexById = useSelection((s) => s.indexById);
   const setSelected = useSelection((s) => s.setSelected);
   const rows = flattenParticle(particle);
 
@@ -144,11 +145,17 @@ export function ChildrenTable({ particle }: ChildrenTableProps) {
             // element row
             if (row.element) {
               const e = row.element;
-              const docFull = e.annotation?.documentation?.[0]?.text ?? null;
+              // A ref particle shows the referenced declaration's type,
+              // documentation and default — it declares none itself.
+              const decl = resolveElementRef(e, indexById) ?? e;
+              const docFull =
+                e.annotation?.documentation?.[0]?.text ??
+                decl.annotation?.documentation?.[0]?.text ??
+                null;
               const docFirst = docFull ? docFull.split(/\r?\n/)[0] : "";
-              const typeName = e.type_name;
+              const typeName = decl.type_name;
               const defOrFix =
-                e.fixed != null ? `[fixed] ${e.fixed}` : e.default ?? "—";
+                decl.fixed != null ? `[fixed] ${decl.fixed}` : decl.default ?? "—";
               return (
                 <tr
                   key={row.key}
@@ -170,9 +177,9 @@ export function ChildrenTable({ particle }: ChildrenTableProps) {
                       >
                         {typeName}
                       </button>
-                    ) : e.type_inline_complex ? (
+                    ) : decl.type_inline_complex ? (
                       <span className="text-slate-500">(inline complex)</span>
-                    ) : e.type_inline_simple ? (
+                    ) : decl.type_inline_simple ? (
                       <span className="text-slate-500">(inline simple)</span>
                     ) : (
                       <span className="text-slate-400">—</span>

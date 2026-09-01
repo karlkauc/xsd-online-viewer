@@ -540,3 +540,49 @@ class TestIncludeResolution:
         model = parse_single(library_xsd_bytes, "library.xsd")
         warnings = [d for d in model.diagnostics if d.severity == "warning"]
         assert any("unresolved" in d.message for d in warnings)
+
+
+class TestElementRefResolution:
+    """``<xs:element ref="...">`` particles must point at the global
+    declaration they reference — including across an ``xs:import`` (e.g.
+    ``ds:Signature`` from xmldsig-core behind FundsXML)."""
+
+    @staticmethod
+    def _host_model():
+        files = {
+            name: (FIXTURES / name).read_bytes()
+            for name in ("imports-dsig.xsd", "xmldsig-core-schema.xsd")
+        }
+        return parse_files_map(files, "imports-dsig.xsd")
+
+    @staticmethod
+    def _particles(model):
+        document = _find_element(model, "Document")
+        assert document is not None
+        assert document.type_inline_complex is not None
+        assert document.type_inline_complex.particle is not None
+        return document.type_inline_complex.particle.children
+
+    def test_imported_ref_points_at_global_declaration(self) -> None:
+        model = self._host_model()
+        signature = next(
+            p.element for p in self._particles(model) if p.element.ref == "ds:Signature"
+        )
+        assert signature.ref_id == (
+            "element:{http://www.w3.org/2000/09/xmldsig#}Signature"
+        )
+        assert signature.ref_id in {e.id for e in model.elements}
+
+    def test_same_namespace_ref_points_at_global_declaration(self) -> None:
+        model = self._host_model()
+        footer = next(
+            p.element for p in self._particles(model) if p.element.ref == "tns:Footer"
+        )
+        assert footer.ref_id == "element:{http://example.com/host}Footer"
+        assert footer.ref_id in {e.id for e in model.elements}
+
+    def test_named_declarations_have_no_ref_id(self) -> None:
+        model = self._host_model()
+        body = next(p.element for p in self._particles(model) if p.element.name == "Body")
+        assert body.ref_id is None
+        assert _find_element(model, "Footer").ref_id is None

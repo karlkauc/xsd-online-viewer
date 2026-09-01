@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { ContentModelView } from "../src/components/ContentModelView/ContentModelView";
 import { useSelection } from "../src/stores/selectionStore";
 import { smallModel } from "./fixtures/smallModel";
+import { refModel, DOCUMENT_ID, SIGNATURE_REF_ID } from "./fixtures/refModel";
 
 function selectId(id: string) {
   act(() => {
@@ -75,5 +76,34 @@ describe("ContentModelView", () => {
     });
     const { container } = render(<ContentModelView />);
     expect(container.firstChild).toBeNull();
+  });
+});
+
+describe("ContentModelView element references", () => {
+  beforeEach(() => {
+    useSelection.getState().clearSchema();
+  });
+
+  function selectInRefModel(id: string) {
+    act(() => {
+      useSelection.getState().setSchema("ref", refModel);
+      useSelection.getState().setSelected(id);
+    });
+  }
+
+  it("shows the content model of the declaration a ref points at", () => {
+    selectInRefModel(SIGNATURE_REF_ID);
+    render(<ContentModelView />);
+    expect(screen.getByText("Children")).toBeInTheDocument();
+    expect(screen.getByText("ds:SignedInfo")).toBeInTheDocument();
+    expect(screen.getByText(/^@Id$/)).toBeInTheDocument();
+  });
+
+  it("lists the referenced type in the children table", () => {
+    selectInRefModel(DOCUMENT_ID);
+    render(<ContentModelView />);
+    const row = screen.getByText("ds:Signature").closest("tr");
+    expect(row).not.toBeNull();
+    expect(row!.textContent).toContain("ds:SignatureType");
   });
 });

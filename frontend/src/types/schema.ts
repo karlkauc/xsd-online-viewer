@@ -167,6 +167,10 @@ export interface ElementDecl {
   name: string | null;
   qname: QName | null;
   ref: QName | null;
+  // Id of the global declaration `ref` points at (canonical
+  // `element:{namespace}Local` form, prefix already expanded by the parser),
+  // so a ref into an imported namespace resolves like any local one.
+  ref_id?: string | null;
   type_name: QName | null;
   type_inline_simple: SimpleType | null;
   type_inline_complex: ComplexType | null;

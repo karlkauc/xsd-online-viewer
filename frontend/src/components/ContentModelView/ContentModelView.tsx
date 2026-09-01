@@ -9,7 +9,7 @@ import type {
   SimpleType,
 } from "../../types/schema";
 import { useSelection } from "../../stores/selectionStore";
-import { resolveReference } from "../../lib/indexSchema";
+import { resolveElementRef, resolveReference } from "../../lib/indexSchema";
 import { Header } from "./Header";
 import { ChildrenTable } from "./ChildrenTable";
 import { AttributesTable } from "./AttributesTable";
@@ -51,7 +51,10 @@ export function ContentModelView() {
     if (!entry) return null;
 
     if (entry.kind === "element") {
-      const e = entry.node as ElementDecl;
+      const selectedElement = entry.node as ElementDecl;
+      // An `<xs:element ref="…">` particle has no content model of its own —
+      // show the one of the global declaration it references.
+      const e = resolveElementRef(selectedElement, indexById) ?? selectedElement;
       const inlineComplex = e.type_inline_complex;
       const namedComplex = !inlineComplex ? resolveComplex(e.type_name, index) : undefined;
       const complex = inlineComplex ?? namedComplex;
@@ -131,7 +134,7 @@ export function ContentModelView() {
     }
 
     return null;
-  }, [entry, index]);
+  }, [entry, index, indexById]);
 
   if (!entry) return null;
 

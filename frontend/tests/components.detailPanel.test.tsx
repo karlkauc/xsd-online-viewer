@@ -4,6 +4,7 @@ import { DetailPanel, FacetGroups } from "../src/components/DetailPanel";
 import { useSelection } from "../src/stores/selectionStore";
 import type { ComplexType, Facet, SchemaModel } from "../src/types/schema";
 import { smallModel } from "./fixtures/smallModel";
+import { refModel, SIGNATURE_ID, SIGNATURE_REF_ID } from "./fixtures/refModel";
 
 describe("DetailPanel", () => {
   beforeEach(() => {
@@ -204,5 +205,26 @@ describe("FacetGroups", () => {
     );
     expect(screen.getByText(/inherited from/)).toBeInTheDocument();
     expect(screen.getByText("CurrencyCode")).toBeInTheDocument();
+  });
+});
+
+describe("DetailPanel element references", () => {
+  beforeEach(() => {
+    useSelection.getState().clearSchema();
+  });
+
+  it("links a ref particle to the global declaration and shows its type", () => {
+    act(() => {
+      useSelection.getState().setSchema("ref", refModel);
+      useSelection.getState().setSelected(SIGNATURE_REF_ID);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("References")).toBeInTheDocument();
+    const link = screen.getByTitle("Go to element Signature");
+    expect(link).toHaveTextContent("ds:Signature");
+    expect(screen.getByText("ds:SignatureType")).toBeInTheDocument();
+
+    act(() => link.click());
+    expect(useSelection.getState().selectedId).toBe(SIGNATURE_ID);
   });
 });

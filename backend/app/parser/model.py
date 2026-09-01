@@ -229,6 +229,12 @@ class ElementDecl(BaseModel):
     name: str | None = None
     qname: QName | None = None
     ref: QName | None = None
+    # Identifier of the global declaration ``ref`` points at, in the canonical
+    # ``element:{namespace}Local`` form — the prefix is expanded through the
+    # namespace declarations in scope, so a ref into an imported namespace
+    # (``ds:Signature``) resolves like any local one. ``None`` when the
+    # declaration has no ``ref`` or the prefix is undeclared.
+    ref_id: str | None = None
     type_name: QName | None = None
     type_inline_simple: SimpleType | None = None
     type_inline_complex: ComplexType | None = None

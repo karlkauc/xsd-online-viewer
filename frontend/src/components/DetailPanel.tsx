@@ -274,17 +274,26 @@ function renderSpecifics(
 }
 
 function renderElement(element: ElementDecl, index: NodeIndexEntry[], setSelected: SetSelected) {
-  const inlineSimple = element.type_inline_simple ?? null;
+  // An `<xs:element ref="…">` particle contributes only its cardinality —
+  // type, flags and facets all live on the global declaration it points at,
+  // which for an imported namespace sits in another file.
+  const refEntry =
+    element.ref && element.ref_id
+      ? index.find((e) => e.id === element.ref_id && e.kind === "element")
+      : undefined;
+  const declaration = (refEntry?.node as ElementDecl | undefined) ?? element;
 
-  const simpleEntry = !inlineSimple && element.type_name
-    ? resolveReference(element.type_name, index, ["simpleType"])
+  const inlineSimple = declaration.type_inline_simple ?? null;
+
+  const simpleEntry = !inlineSimple && declaration.type_name
+    ? resolveReference(declaration.type_name, index, ["simpleType"])
     : undefined;
   const namedSimple = simpleEntry && "facets" in simpleEntry.node
     ? (simpleEntry.node as SimpleType)
     : undefined;
 
-  const complexEntry = !inlineSimple && !namedSimple && element.type_name
-    ? resolveReference(element.type_name, index, ["complexType"])
+  const complexEntry = !inlineSimple && !namedSimple && declaration.type_name
+    ? resolveReference(declaration.type_name, index, ["complexType"])
     : undefined;
   const namedComplex = complexEntry && "content_kind" in complexEntry.node
     ? (complexEntry.node as ComplexType)
@@ -294,18 +303,34 @@ function renderElement(element: ElementDecl, index: NodeIndexEntry[], setSelecte
     <section>
       <SectionHead title="Element" />
       <div className="space-y-3">
+        {element.ref && (
+          <DataRow label="References">
+            {refEntry ? (
+              <TypeRef
+                typeName={element.ref}
+                index={index}
+                setSelected={setSelected}
+                target={refEntry}
+              />
+            ) : (
+              <code className="font-mono text-[12px] text-slate-700 dark:text-slate-200">
+                {element.ref}
+              </code>
+            )}
+          </DataRow>
+        )}
         <DataRow label="Type">
-          {element.type_name ? (
-            <TypeRef typeName={element.type_name} index={index} setSelected={setSelected} />
-          ) : element.type_inline_complex ? (
+          {declaration.type_name ? (
+            <TypeRef typeName={declaration.type_name} index={index} setSelected={setSelected} />
+          ) : declaration.type_inline_complex ? (
             <InlineTag>inline complex</InlineTag>
           ) : (
             <InlineTag>inline simple</InlineTag>
           )}
         </DataRow>
-        {element.alternatives && element.alternatives.length > 0 && (
+        {declaration.alternatives && declaration.alternatives.length > 0 && (
           <AlternativesList
-            alternatives={element.alternatives}
+            alternatives={declaration.alternatives}
             renderTypeRef={(typeName) => (
               <TypeRef
                 typeName={typeName}
@@ -318,32 +343,32 @@ function renderElement(element: ElementDecl, index: NodeIndexEntry[], setSelecte
         <DataRow label="Cardinality">
           <Cardinality min={element.min_occurs} max={element.max_occurs} />
         </DataRow>
-        {(element.default || element.fixed) && (
+        {(declaration.default || declaration.fixed) && (
           <>
-            {element.default && (
+            {declaration.default && (
               <DataRow label="Default">
-                <code className="font-mono text-[12px]">{element.default}</code>
+                <code className="font-mono text-[12px]">{declaration.default}</code>
               </DataRow>
             )}
-            {element.fixed && (
+            {declaration.fixed && (
               <DataRow label="Fixed">
-                <code className="font-mono text-[12px]">{element.fixed}</code>
+                <code className="font-mono text-[12px]">{declaration.fixed}</code>
               </DataRow>
             )}
           </>
         )}
-        {(element.nillable || element.abstract) && (
+        {(declaration.nillable || declaration.abstract) && (
           <DataRow label="Flags">
             <div className="flex flex-wrap gap-1">
-              {element.nillable && <FlagChip tone="sky">nillable</FlagChip>}
-              {element.abstract && <FlagChip tone="violet">abstract</FlagChip>}
+              {declaration.nillable && <FlagChip tone="sky">nillable</FlagChip>}
+              {declaration.abstract && <FlagChip tone="violet">abstract</FlagChip>}
             </div>
           </DataRow>
         )}
-        {element.substitution_group && (
+        {declaration.substitution_group && (
           <DataRow label="Substitution group">
             <TypeRef
-              typeName={element.substitution_group}
+              typeName={declaration.substitution_group}
               index={index}
               setSelected={setSelected}
             />
@@ -788,12 +813,16 @@ function TypeRef({
   typeName,
   index,
   setSelected,
+  target: explicitTarget,
 }: {
   typeName: string;
   index: NodeIndexEntry[];
   setSelected: SetSelected;
+  // Pre-resolved destination — used where the caller already knows the exact
+  // node (an element ref carries the target's id), so no name lookup is needed.
+  target?: NodeIndexEntry;
 }) {
-  const target = resolveTypeRef(typeName, index);
+  const target = explicitTarget ?? resolveTypeRef(typeName, index);
   if (!target) {
     return <code className="font-mono text-[12px] text-slate-700 dark:text-slate-200">{typeName}</code>;
   }

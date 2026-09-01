@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Node } from "@xyflow/react";
+import type { SchemaModel } from "../src/types/schema";
 import {
   buildDiagramGraph,
   COMPOSITOR_HEIGHT,
 } from "../src/components/DiagramView/buildGraph";
 import { smallModel } from "./fixtures/smallModel";
+import { refModel, DOCUMENT_ID, SIGNATURE_REF_ID } from "./fixtures/refModel";
 
 const PERSON_ID = "element:{http://example.com/simple}Person";
 const ADDRESS_ID = "element:{http://example.com/simple}PersonType/Address";
@@ -137,5 +139,56 @@ describe("buildDiagramGraph node metadata", () => {
     const person = findBySchemaId(nodes, PERSON_ID)!;
     // Person carries a documentation line; FirstName has none. Person must be taller.
     expect(nodeHeight(person)).toBeGreaterThan(nodeHeight(firstName));
+  });
+});
+
+describe("buildDiagramGraph element references", () => {
+  it("expands a ref into the referenced global declaration", () => {
+    const collapsed = buildDiagramGraph(refModel, new Set([DOCUMENT_ID]), null);
+    const signature = findBySchemaId(collapsed.nodes, SIGNATURE_REF_ID);
+    expect(signature).toBeDefined();
+    const data = signature!.data as { expandable: boolean; type: string | null };
+    expect(data.expandable).toBe(true);
+    expect(data.type).toBe("ds:SignatureType");
+
+    const expanded = buildDiagramGraph(
+      refModel,
+      new Set([DOCUMENT_ID, SIGNATURE_REF_ID]),
+      null,
+    );
+    const signedInfo = expanded.nodes.find(
+      (n) => n.type === "element" && (n.data as { label: string }).label === "ds:SignedInfo",
+    );
+    expect(signedInfo).toBeDefined();
+  });
+});
+
+describe("buildDiagramGraph reference cycles", () => {
+  it("stops instead of recursing when a ref points back at an ancestor", () => {
+    // SignatureType gains a ref back to ds:Signature — the shape every
+    // recursive schema has (a node type containing a ref to its own element).
+    const cyclic = structuredClone(refModel) as SchemaModel;
+    const signatureType = cyclic.complex_types[0];
+    signatureType.particle!.children.push({
+      kind: "element",
+      min_occurs: 0,
+      max_occurs: "unbounded",
+      element: {
+        ...cyclic.elements[0].type_inline_complex!.particle!.children[1].element!,
+      },
+      group_ref: null,
+      group_inline: null,
+      children: [],
+      wildcard_namespace: null,
+      wildcard_process_contents: null,
+      annotation: null,
+    });
+
+    const { nodes } = buildDiagramGraph(
+      cyclic,
+      new Set([DOCUMENT_ID, SIGNATURE_REF_ID]),
+      null,
+    );
+    expect(nodes.length).toBeLessThan(20);
   });
 });
