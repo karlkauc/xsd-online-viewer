@@ -10,6 +10,69 @@ import { getNodesBounds, type Node } from "@xyflow/react";
 // diagrams downscale instead of silently failing the PNG encode.
 const MAX_SIDE = 8192;
 
+// html-to-image inlines computed styles per element — except inside <svg>,
+// which it deep-clones in one go (`cloneNode(true)`) and never walks. Anything
+// an SVG descendant gets from a stylesheet is therefore lost in the export, and
+// the exported image carries no stylesheet of its own. React Flow's edges are
+// exactly that case: `.react-flow__edge-path { stroke: var(--xy-edge-stroke) }`
+// lives in @xyflow/react's style.css, so without help the connector lines come
+// out with the SVG default `stroke: none` — invisible. Copy the properties that
+// decide how SVG paint onto the live elements just for the duration of the
+// export, then put the DOM back exactly as we found it.
+const SVG_PAINT_PROPERTIES = [
+  "color",
+  "fill",
+  "fill-opacity",
+  "fill-rule",
+  "stroke",
+  "stroke-width",
+  "stroke-opacity",
+  "stroke-linecap",
+  "stroke-linejoin",
+  "stroke-dasharray",
+  "stroke-dashoffset",
+  "opacity",
+  "marker-start",
+  "marker-mid",
+  "marker-end",
+  "paint-order",
+  "shape-rendering",
+  "text-anchor",
+  "dominant-baseline",
+  "font-family",
+  "font-size",
+  "font-weight",
+  "font-style",
+] as const;
+
+/** Inline SVG paint styles below `root`; returns an undo for the caller. */
+function inlineSvgPaintStyles(root: HTMLElement): () => void {
+  const elements = Array.from(root.querySelectorAll<SVGElement>("svg *")).filter(
+    (el): el is SVGElement => el instanceof SVGElement,
+  );
+
+  // Read every computed style before writing any, so we pay for a single style
+  // recalculation instead of one per element.
+  const pending = elements.map((el) => {
+    const computed = getComputedStyle(el);
+    const values = SVG_PAINT_PROPERTIES.map(
+      (name) => [name, computed.getPropertyValue(name)] as const,
+    ).filter(([, value]) => value !== "");
+    return { el, previous: el.getAttribute("style"), values };
+  });
+
+  for (const { el, values } of pending) {
+    for (const [name, value] of values) el.style.setProperty(name, value);
+  }
+
+  return () => {
+    for (const { el, previous } of pending) {
+      if (previous === null) el.removeAttribute("style");
+      else el.setAttribute("style", previous);
+    }
+  };
+}
+
 export interface ExportOptions {
   filename: string;
   backgroundColor?: string;
@@ -94,19 +157,25 @@ export async function exportFlowAsPng(
   await ensureNodesMeasured();
   const { width, height, transform, backgroundColor, filter } =
     computeRenderParams(nodes, opts);
-  const dataUrl = await toPng(viewportEl, {
-    backgroundColor,
-    width,
-    height,
-    pixelRatio: opts.pixelRatio ?? 2,
-    style: {
-      width: `${width}px`,
-      height: `${height}px`,
-      transform,
-    },
-    filter,
-    cacheBust: true,
-  });
+  const restoreSvgStyles = inlineSvgPaintStyles(viewportEl);
+  let dataUrl: string;
+  try {
+    dataUrl = await toPng(viewportEl, {
+      backgroundColor,
+      width,
+      height,
+      pixelRatio: opts.pixelRatio ?? 2,
+      style: {
+        width: `${width}px`,
+        height: `${height}px`,
+        transform,
+      },
+      filter,
+      cacheBust: true,
+    });
+  } finally {
+    restoreSvgStyles();
+  }
   triggerDownload(dataUrl, opts.filename);
 }
 
@@ -119,17 +188,23 @@ export async function exportFlowAsSvg(
   await ensureNodesMeasured();
   const { width, height, transform, backgroundColor, filter } =
     computeRenderParams(nodes, opts);
-  const dataUrl = await toSvg(viewportEl, {
-    backgroundColor,
-    width,
-    height,
-    style: {
-      width: `${width}px`,
-      height: `${height}px`,
-      transform,
-    },
-    filter,
-    cacheBust: true,
-  });
+  const restoreSvgStyles = inlineSvgPaintStyles(viewportEl);
+  let dataUrl: string;
+  try {
+    dataUrl = await toSvg(viewportEl, {
+      backgroundColor,
+      width,
+      height,
+      style: {
+        width: `${width}px`,
+        height: `${height}px`,
+        transform,
+      },
+      filter,
+      cacheBust: true,
+    });
+  } finally {
+    restoreSvgStyles();
+  }
   triggerDownload(dataUrl, opts.filename);
 }
