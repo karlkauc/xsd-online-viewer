@@ -4,6 +4,7 @@ import { useSelection } from "../../stores/selectionStore";
 import { resolveElementRef, resolveReference } from "../../lib/indexSchema";
 import { COMPOSITOR_GLYPH, GROUP_REF_GLYPH, WILDCARD_GLYPH } from "./symbols";
 import { KindBadge } from "../TreeView/KindBadge";
+import { TapToReveal } from "../TapToReveal";
 
 interface ChildrenTableProps {
   particle: Particle | null;
@@ -91,12 +92,8 @@ export function ChildrenTable({ particle }: ChildrenTableProps) {
                   <td className="py-1 pr-2 text-center text-slate-400" style={{ paddingLeft: padLeft }}>
                     …
                   </td>
-                  <td
-                    colSpan={6}
-                    className="py-1 pr-3 text-xs text-slate-500 italic"
-                    title={row.ellipsis}
-                  >
-                    deeper sub-tree (hover for details)
+                  <td colSpan={6} className="py-1 pr-3 text-xs text-slate-500 italic">
+                    <TapToReveal summary="deeper sub-tree" details={row.ellipsis} className="font-mono" />
                   </td>
                 </tr>
               );
@@ -189,11 +186,8 @@ export function ChildrenTable({ particle }: ChildrenTableProps) {
                   </td>
                   <td className="py-1.5 pr-3 font-mono text-xs">{row.occurs}</td>
                   <td className="py-1.5 pr-3 font-mono text-xs hidden md:table-cell">{defOrFix}</td>
-                  <td
-                    className="py-1.5 pr-3 text-slate-600 dark:text-slate-400 text-xs truncate max-w-[260px] hidden md:table-cell"
-                    title={docFull ?? undefined}
-                  >
-                    {docFirst}
+                  <td className="py-1.5 pr-3 text-slate-600 dark:text-slate-400 text-xs max-w-[260px] hidden md:table-cell">
+                    <TapToReveal summary={docFirst} details={docFull} />
                   </td>
                 </tr>
               );

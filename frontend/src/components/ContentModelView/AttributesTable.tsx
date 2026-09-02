@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { AttributeDecl, AttributeGroup, NodeIndexEntry } from "../../types/schema";
 import { useSelection } from "../../stores/selectionStore";
 import { resolveReference } from "../../lib/indexSchema";
+import { TapToReveal } from "../TapToReveal";
 
 interface AttributesTableProps {
   /** Attributes declared directly on the node. */
@@ -117,11 +118,8 @@ export function AttributesTable({ attributes, attributeGroupRefs }: AttributesTa
                 </td>
                 <td className="py-1.5 pr-3">{attr.use}</td>
                 <td className="py-1.5 pr-3 font-mono hidden md:table-cell">{defOrFix(attr)}</td>
-                <td
-                  className="py-1.5 pr-3 text-slate-600 dark:text-slate-400 text-xs truncate max-w-[260px] hidden md:table-cell"
-                  title={attr.annotation?.documentation?.[0]?.text ?? undefined}
-                >
-                  {doc || ""}
+                <td className="py-1.5 pr-3 text-slate-600 dark:text-slate-400 text-xs max-w-[260px] hidden md:table-cell">
+                  <TapToReveal summary={doc || ""} details={attr.annotation?.documentation?.[0]?.text} />
                 </td>
               </tr>
             );

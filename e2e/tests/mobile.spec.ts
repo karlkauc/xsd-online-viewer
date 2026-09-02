@@ -41,13 +41,15 @@ test.describe("phone", () => {
     const nav = page.getByRole("navigation", { name: "Panes" });
     await expect(nav).toBeVisible();
 
-    // Structure pane is the default; the diagram pane is hidden until a node is tapped.
+    // The View pane (diagram) shows first; the structure tree is one tap away.
+    await expect(page.locator(".react-flow")).toBeVisible();
+    await nav.getByRole("button", { name: "Structure" }).click();
     await expect(page.locator(".react-flow")).toBeHidden();
     const person = page.getByRole("treeitem").filter({ hasText: "Person" }).first();
     await expect(person).toBeVisible();
     await person.click();
 
-    // Selecting jumps to the View pane; the compact toolbar keeps export behind a menu.
+    // Selecting jumps back to the View pane; the compact toolbar keeps export behind a menu.
     await expect(page.locator(".react-flow")).toBeVisible();
     await expect(page.getByRole("button", { name: "Export SVG" })).toBeHidden();
     await page.getByRole("button", { name: "Export" }).click();

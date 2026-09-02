@@ -99,7 +99,7 @@ export default function App() {
   // Below `md` (phones): which single pane is visible. Between `md` and `lg`
   // (tablets): "details" means the details drawer is open, anything else means
   // closed. Unused from `lg` up, where all three panes show side by side.
-  const [mobilePane, setMobilePane] = useState<MobilePane>("structure");
+  const [mobilePane, setMobilePane] = useState<MobilePane>("view");
   const detailsOpen = mobilePane === "details";
   const atLeastMd = useMediaQuery(MD_QUERY);
   const wide = useMediaQuery(LG_QUERY);
@@ -147,6 +147,12 @@ export default function App() {
   useEffect(() => {
     writeHashSelection(selectedId);
   }, [selectedId]);
+
+  // A freshly loaded schema opens on the View pane (the diagram), matching
+  // the desktop default tab.
+  useEffect(() => {
+    if (schemaId) setMobilePane("view");
+  }, [schemaId]);
 
   // On phones, selecting a node jumps to the View pane so the user sees it.
   // Tablets show structure and view side by side, so leave the panes alone

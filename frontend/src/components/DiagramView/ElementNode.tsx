@@ -1,5 +1,6 @@
 import { Handle, Position } from "@xyflow/react";
 import clsx from "clsx";
+import { TapToReveal } from "../TapToReveal";
 
 interface ElementNodeData {
   schemaId: string;
@@ -19,11 +20,17 @@ interface ElementNodeData {
 export function ElementNode({ data }: { data: ElementNodeData }) {
   const attrs = data.attributes ?? [];
   const docLines = data.documentationLines ?? [];
+  // Only offer "tap for more" when the node actually hides documentation.
+  const docShown = docLines.join("\n").trim();
+  const docHidden =
+    data.documentationFull && data.documentationFull.trim() !== docShown
+      ? data.documentationFull
+      : null;
 
   return (
     <div
       className={clsx(
-        "rounded-md border bg-white dark:bg-slate-900 shadow-sm text-xs",
+        "relative rounded-md border bg-white dark:bg-slate-900 shadow-sm text-xs",
         data.selected
           ? "border-accent ring-2 ring-accent/50"
           : "border-slate-300 dark:border-slate-700",
@@ -38,6 +45,7 @@ export function ElementNode({ data }: { data: ElementNodeData }) {
             <span
               className="inline-flex items-center gap-0.5 px-1 rounded text-[9.5px] font-mono font-medium border bg-violet-50 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-200 dark:border-violet-800/60"
               title={`${data.alternativesCount} XSD 1.1 type alternative${data.alternativesCount === 1 ? "" : "s"}`}
+              aria-label={`${data.alternativesCount} XSD 1.1 type alternative${data.alternativesCount === 1 ? "" : "s"}`}
             >
               ≷ {data.alternativesCount}
             </span>
@@ -46,6 +54,7 @@ export function ElementNode({ data }: { data: ElementNodeData }) {
             <span
               className="inline-flex items-center gap-0.5 px-1 rounded text-[9.5px] font-mono font-medium border bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800/60"
               title={`${data.assertCount} XSD 1.1 assertion${data.assertCount === 1 ? "" : "s"}`}
+              aria-label={`${data.assertCount} XSD 1.1 assertion${data.assertCount === 1 ? "" : "s"}`}
             >
               ⚖ {data.assertCount}
             </span>
@@ -72,15 +81,20 @@ export function ElementNode({ data }: { data: ElementNodeData }) {
       )}
 
       {docLines.length > 0 && (
-        <div
-          className="border-t border-slate-200 dark:border-slate-800 px-2 py-1 text-[10px] italic text-slate-500 dark:text-slate-400 leading-snug"
-          title={data.documentationFull ?? undefined}
-        >
-          {docLines.map((line, i) => (
+        <div className="border-t border-slate-200 dark:border-slate-800 px-2 py-1 text-[10px] italic text-slate-500 dark:text-slate-400 leading-snug">
+          {docLines.slice(0, -1).map((line, i) => (
             <div key={i} className="truncate">
               {line}
             </div>
           ))}
+          {/* Last shown line doubles as the tap target for the full text
+              (a popover, so the node keeps its laid-out height). */}
+          {/* No `truncate` here: overflow-hidden would clip the popover. */}
+          <TapToReveal
+            summary={docLines[docLines.length - 1]}
+            details={docHidden}
+            mode="popover"
+          />
         </div>
       )}
 

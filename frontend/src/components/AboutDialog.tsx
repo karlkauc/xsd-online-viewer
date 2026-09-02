@@ -3,6 +3,8 @@ import { fetchHealth } from "../api/client";
 import { XML_VIEWER_URL } from "../lib/uploadErrors";
 import { openFeedback } from "./UploadError";
 import { API_DOCS_PATH } from "../lib/modeRoute";
+import { KindBadge } from "./TreeView/KindBadge";
+import type { SchemaNodeKind } from "../types/schema";
 
 export const GITHUB_REPO_URL = "https://github.com/karlkauc/xsd-online-viewer";
 
@@ -14,6 +16,15 @@ export function openAbout(): void {
  * Modal "About" dialog. Opened from anywhere via `openAbout()` — same
  * window-event mechanism as the feedback dialog and the search palette.
  */
+const LEGEND_KINDS: SchemaNodeKind[] = [
+  "element",
+  "attribute",
+  "complexType",
+  "simpleType",
+  "group",
+  "attributeGroup",
+];
+
 export function AboutDialog() {
   const [open, setOpen] = useState(false);
   const [version, setVersion] = useState<string | null>(null);
@@ -120,6 +131,18 @@ export function AboutDialog() {
             </a>
             {" · © 2026 Karl Kauc"}
           </li>
+        </ul>
+
+        <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          Kind badges
+        </p>
+        <ul aria-label="Kind badges" className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+          {LEGEND_KINDS.map((kind) => (
+            <li key={kind} className="flex items-center gap-2">
+              <KindBadge kind={kind} />
+              <span className="font-mono text-xs">{kind}</span>
+            </li>
+          ))}
         </ul>
 
         <p className="mt-4 text-[11px] text-slate-500 dark:text-slate-400">

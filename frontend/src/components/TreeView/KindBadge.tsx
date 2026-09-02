@@ -20,7 +20,7 @@ const LABELS: Record<SchemaNodeKind, string> = {
 
 export function KindBadge({ kind }: { kind: SchemaNodeKind }) {
   return (
-    <span className={`chip ${COLORS[kind]}`} title={kind}>
+    <span className={`chip ${COLORS[kind]}`} title={kind} aria-label={kind}>
       {LABELS[kind]}
     </span>
   );

@@ -37,6 +37,15 @@ describe("AboutDialog", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("explains the kind badges with a legend", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ status: "ok", version: "x" }) });
+    render(<AboutDialog />);
+    act(() => openAbout());
+    const legend = screen.getByRole("list", { name: "Kind badges" });
+    expect(legend).toHaveTextContent("complexType");
+    expect(legend).toHaveTextContent("attributeGroup");
+  });
+
   it("hands over to the feedback dialog", async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ status: "ok", version: "x" }) });
     const onFeedback = vi.fn();

@@ -206,7 +206,8 @@ with `MD_QUERY` / `LG_QUERY` in `src/lib/useMediaQuery.ts`:
 
 - **Phone (< md)** — one pane at a time. `App.tsx` keeps a `mobilePane`
   state (`structure` | `view` | `details`) that the bottom `MobileNav`
-  switches; selecting a node jumps to `view`. The breadcrumb gets its own row,
+  switches; a freshly loaded schema opens on `view` (the diagram) and
+  selecting a node jumps to `view`. The breadcrumb gets its own row,
   the header keeps only Load / Search / theme and folds the rest into a
   `HeaderActions` "More" menu, and `DiagramToolbar` renders icon buttons with
   export behind a menu. The minimap defaults to off
@@ -222,6 +223,13 @@ with `MD_QUERY` / `LG_QUERY` in `src/lib/useMediaQuery.ts`:
 Two custom screens in `tailwind.config.ts` cut across the tiers: `touch:`
 (`pointer: coarse`, larger tap targets for `.btn`, tree rows, nav) and
 `short:` (`max-height: 500px`, tighter header for landscape phones).
+Hover tooltips are unreachable on touch screens, so anything that only lived
+in a `title=` (truncated documentation in the children/attribute tables and
+diagram nodes, the collapsed deep-subtree row) renders through
+`components/TapToReveal.tsx`: the summary is a button that shows the full
+text on tap (inline in tables, as a popover on diagram nodes) without
+bubbling the click to the row or node. `KindBadge` carries the full kind as
+`aria-label`, and the About dialog lists a badge legend.
 `e2e/tests/mobile.spec.ts` runs under the `phone` and `tablet` Playwright
 projects and asserts the page never scrolls horizontally.
 
