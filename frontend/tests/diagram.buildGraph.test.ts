@@ -142,6 +142,58 @@ describe("buildDiagramGraph node metadata", () => {
   });
 });
 
+describe("buildDiagramGraph height budget", () => {
+  // Pixel heights measured from the rendered ElementNode in Chromium
+  // (container border 2, header 25, type row 24, attribute block
+  // 9 + 16/row + 2/gap, documentation block 9 + 14/line, expand hint 21).
+  // A budget below the rendered height stacks siblings into each other.
+  function attr(name: string) {
+    return {
+      id: `attribute:${name}`,
+      name,
+      qname: null,
+      ref: null,
+      type_name: "xs:string",
+      type_inline: null,
+      use: "optional" as const,
+      default: null,
+      fixed: null,
+      form: null,
+      target_namespace: null,
+      is_global: false,
+      annotation: null,
+      source_ref: null,
+    };
+  }
+  function docs(text: string) {
+    return { documentation: [{ lang: null, text, source: "documentation" as const }], appinfo: [], comments: [] };
+  }
+  function heightOf(model: SchemaModel, label: string): number {
+    const { nodes } = buildDiagramGraph(model, new Set([PERSON_ID]), null);
+    const node = nodes.find(
+      (n) => n.type === "element" && (n.data as { label: string }).label === label,
+    );
+    if (!node) throw new Error(`node ${label} missing`);
+    return nodeHeight(node);
+  }
+
+  it("matches the rendered height of every node section", () => {
+    const model = structuredClone(smallModel) as SchemaModel;
+    const children = model.complex_types[0].particle!.children;
+    const firstName = children[0].element!;
+    firstName.annotation = docs("Line one\nLine two");
+    const address = children[2].element!;
+    address.type_inline_complex!.attributes = ["a", "b", "c", "d", "e"].map(attr);
+    address.annotation = docs("Line one\nLine two\nLine three");
+
+    expect(heightOf(model, "LastName")).toBe(51); // plain leaf
+    expect(heightOf(model, "Person")).toBe(95); // one doc line + expand hint
+    expect(heightOf(model, "FirstName")).toBe(88); // two doc lines
+    expect(heightOf(model, "Address")).toBe(206); // 4 attrs + "more" row, 2 doc lines, hint
+    expect(heightOf(smallModel, "Address")).toBe(72); // expand hint only
+  });
+});
+
 describe("buildDiagramGraph element references", () => {
   it("expands a ref into the referenced global declaration", () => {
     const collapsed = buildDiagramGraph(refModel, new Set([DOCUMENT_ID]), null);

@@ -23,20 +23,26 @@ import type {
 import { computeRootElements } from "../../lib/rootElements";
 
 export const NODE_WIDTH = 220;
-export const NODE_HEIGHT = 56; // base height for a plain element node
 export const COMPOSITOR_WIDTH = 70;
 export const COMPOSITOR_HEIGHT = 40;
 
-// Pixel budget per body row. Matches the `text-[11px]` / `text-[10px]`
-// line heights in ElementNode.tsx; if you change the CSS, adjust these.
-const HEADER_H = 24;
-const TYPE_H = 20;
-const ROW_H = 14;
-const DOC_LINE_H = 16;
-const SECTION_PAD = 4;
-const EXPAND_HINT_H = 14;
+// Pixel budget per node section, measured from the rendered ElementNode in
+// Chromium (see the "height budget" test). The layout stacks siblings using
+// these numbers, so a budget below the real height overlaps neighbours; if
+// you change the CSS in ElementNode.tsx, re-measure and adjust.
+const BORDER_H = 2; // 1px top + bottom on the node container
+const HEADER_H = 25; // py-1 + 16px line + 1px border-b
+const TYPE_H = 24; // py-1 + 16px line
+const SECTION_PAD = 9; // 1px border-t + py-1
+const ATTR_ROW_H = 16; // text-[10px] inherits the 16px text-xs line height
+const ATTR_ROW_GAP = 2; // space-y-0.5
+const DOC_LINE_H = 14; // text-[10px] leading-snug
+const EXPAND_HINT_H = 21; // 1px border-t + py-0.5 + 16px line
 const MAX_INLINE_ATTRS = 4;
 const MAX_DOC_LINES = 2;
+
+// Height of a plain element node (header + type row, nothing else).
+export const NODE_HEIGHT = BORDER_H + HEADER_H + TYPE_H;
 
 const X_GAP = 60;
 const Y_GAP = 24;
@@ -159,12 +165,12 @@ function computeElementDisplay(
   const attrRows =
     Math.min(attrs.length, MAX_INLINE_ATTRS) + (attrs.length > MAX_INLINE_ATTRS ? 1 : 0);
 
-  let height = HEADER_H + TYPE_H;
-  if (attrRows) height += SECTION_PAD + attrRows * ROW_H;
+  let height = NODE_HEIGHT;
+  if (attrRows) {
+    height += SECTION_PAD + attrRows * ATTR_ROW_H + (attrRows - 1) * ATTR_ROW_GAP;
+  }
   if (docLines.length) height += SECTION_PAD + docLines.length * DOC_LINE_H;
   if (expandable) height += EXPAND_HINT_H;
-  // Ensure the expanded-case header/title always has room.
-  height = Math.max(height, NODE_HEIGHT);
 
   const data = {
     schemaId: element.id,

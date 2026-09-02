@@ -22,6 +22,16 @@ export function TapToReveal({ summary, details, mode = "inline", className = "" 
   const hasMore = full.length > 0 && full !== summary.trim();
 
   if (!hasMore) {
+    // Popover mode lives in diagram nodes whose height is fixed by the
+    // layout, so the summary must stay on one line; a long single-line doc
+    // would otherwise wrap and push the node over its neighbours.
+    if (mode === "popover") {
+      return (
+        <span className={"block truncate " + className} title={summary}>
+          {summary}
+        </span>
+      );
+    }
     return <span className={className}>{summary}</span>;
   }
 
