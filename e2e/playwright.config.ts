@@ -16,6 +16,20 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      testIgnore: /mobile\.spec\.ts/,
+    },
+    // Phone and tablet run only the responsive spec. Both use Chromium with
+    // the device's viewport/touch emulation so no extra browser download is
+    // needed; the layout under test is CSS-driven, not engine-specific.
+    {
+      name: "phone",
+      use: { ...devices["iPhone 13"], browserName: "chromium" },
+      testMatch: /mobile\.spec\.ts/,
+    },
+    {
+      name: "tablet",
+      use: { ...devices["iPad (gen 7)"], browserName: "chromium" },
+      testMatch: /mobile\.spec\.ts/,
     },
   ],
   // When E2E_EXTERNAL=1 we assume the user started the server manually

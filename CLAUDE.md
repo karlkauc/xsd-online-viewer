@@ -35,8 +35,11 @@ cd frontend && npm ci && npm run dev
 - Backend: `cd backend && pytest` (also `ruff check`).
 - Frontend: `cd frontend && npm run test` (Vitest) and `npm run build` for
   the TS typecheck via `tsc --noEmit`.
-- E2E: `cd e2e && npm ci && npx playwright test` — requires both backend and
-  the built frontend to be running.
+- E2E: `cd e2e && npm ci && npx playwright test` — boots the backend with
+  `STATIC_DIR=../frontend/dist`, so run `npm run build` in `frontend/` first.
+  Three projects: `chromium` (desktop, all specs) plus `phone` and `tablet`
+  (Chromium with iPhone/iPad emulation, only `tests/mobile.spec.ts`). If port
+  8080 is taken on your machine, set `E2E_PORT=8090`.
 
 ## Deployment (read before redeploying)
 

@@ -67,18 +67,19 @@ export function AttributesTable({ attributes, attributeGroupRefs }: AttributesTa
   };
 
   return (
-    <section className="px-6 py-4">
+    <section className="px-4 md:px-6 py-4">
       <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
         Attributes
       </h3>
-      <table className="w-full text-sm border-collapse">
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[20rem] md:min-w-0 text-sm border-collapse">
         <thead>
           <tr className="text-left text-[10.5px] uppercase tracking-wide text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
             <th className="py-1.5 pr-3 font-semibold">Name</th>
             <th className="py-1.5 pr-3 font-semibold">Type</th>
             <th className="py-1.5 pr-3 font-semibold">Use</th>
-            <th className="py-1.5 pr-3 font-semibold">Default / Fixed</th>
-            <th className="py-1.5 pr-3 font-semibold">Doc</th>
+            <th className="py-1.5 pr-3 font-semibold hidden md:table-cell">Default / Fixed</th>
+            <th className="py-1.5 pr-3 font-semibold hidden md:table-cell">Doc</th>
           </tr>
         </thead>
         <tbody>
@@ -115,9 +116,9 @@ export function AttributesTable({ attributes, attributeGroupRefs }: AttributesTa
                   )}
                 </td>
                 <td className="py-1.5 pr-3">{attr.use}</td>
-                <td className="py-1.5 pr-3 font-mono">{defOrFix(attr)}</td>
+                <td className="py-1.5 pr-3 font-mono hidden md:table-cell">{defOrFix(attr)}</td>
                 <td
-                  className="py-1.5 pr-3 text-slate-600 dark:text-slate-400 text-xs truncate max-w-[260px]"
+                  className="py-1.5 pr-3 text-slate-600 dark:text-slate-400 text-xs truncate max-w-[260px] hidden md:table-cell"
                   title={attr.annotation?.documentation?.[0]?.text ?? undefined}
                 >
                   {doc || ""}
@@ -127,6 +128,7 @@ export function AttributesTable({ attributes, attributeGroupRefs }: AttributesTa
           })}
         </tbody>
       </table>
+      </div>
     </section>
   );
 }

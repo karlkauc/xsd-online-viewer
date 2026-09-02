@@ -116,9 +116,9 @@ export function FundsXmlReleases({ onSelect, busy }: FundsXmlReleasesProps) {
             <thead className="sticky top-0 bg-white dark:bg-slate-900">
               <tr className="text-left text-[10.5px] uppercase tracking-wide text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800">
                 <th className="py-1.5 pr-3 font-semibold">Version</th>
-                <th className="py-1.5 pr-3 font-semibold">Published</th>
+                <th className="py-1.5 pr-3 font-semibold hidden sm:table-cell">Published</th>
                 <th className="py-1.5 pr-3 font-semibold">File</th>
-                <th className="py-1.5 pr-3 font-semibold text-right">Size</th>
+                <th className="py-1.5 pr-3 font-semibold text-right hidden sm:table-cell">Size</th>
               </tr>
             </thead>
             <tbody>
@@ -149,7 +149,7 @@ export function FundsXmlReleases({ onSelect, busy }: FundsXmlReleasesProps) {
                     >
                       {isFirst ? (
                         <td
-                          className="py-1.5 pr-3 font-mono align-top"
+                          className="py-1.5 pr-3 font-mono align-top whitespace-nowrap"
                           rowSpan={release.assets.length}
                         >
                           {release.tag_name}
@@ -162,14 +162,14 @@ export function FundsXmlReleases({ onSelect, busy }: FundsXmlReleasesProps) {
                       ) : null}
                       {isFirst ? (
                         <td
-                          className="py-1.5 pr-3 align-top text-slate-600 dark:text-slate-400"
+                          className="py-1.5 pr-3 align-top text-slate-600 dark:text-slate-400 hidden sm:table-cell"
                           rowSpan={release.assets.length}
                         >
                           {formatDate(release.published_at)}
                         </td>
                       ) : null}
-                      <td className="py-1.5 pr-3 font-mono">{asset.filename}</td>
-                      <td className="py-1.5 pr-3 text-right text-slate-600 dark:text-slate-400">
+                      <td className="py-1.5 touch:py-2.5 pr-3 font-mono break-all">{asset.filename}</td>
+                      <td className="py-1.5 pr-3 text-right text-slate-600 dark:text-slate-400 hidden sm:table-cell">
                         {formatBytes(asset.size)}
                       </td>
                     </tr>

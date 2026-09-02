@@ -9,6 +9,7 @@ import type {
   ValidationResponse,
 } from "../types/schema";
 import { buildIndex } from "../lib/indexSchema";
+import { MD_QUERY, matchesMediaQuery } from "../lib/useMediaQuery";
 
 export type ViewTab = "tree" | "diagram" | "text" | "validation";
 
@@ -48,6 +49,14 @@ interface SelectionState {
   setMinimapVisible: (visible: boolean) => void;
 }
 
+/** Minimap is on by default on tablets/desktops and off on phones, where it
+ *  would cover a quarter of the canvas. Environments without matchMedia (SSR,
+ *  jsdom without the stub) count as wide. */
+export function defaultMinimapVisible(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
+  return matchesMediaQuery(MD_QUERY);
+}
+
 const ALL_KINDS: SchemaNodeKind[] = [
   "element",
   "attribute",
@@ -74,7 +83,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
   searchQuery: "",
   validationResult: null,
   diagnosticsVisible: true,
-  minimapVisible: true,
+  minimapVisible: defaultMinimapVisible(),
 
   setSchema: (schemaId, model) => {
     const {
@@ -99,7 +108,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
       searchQuery: "",
       validationResult: null,
       diagnosticsVisible: true,
-      minimapVisible: true,
+      minimapVisible: defaultMinimapVisible(),
     });
   },
 

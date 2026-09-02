@@ -198,6 +198,33 @@ the upload-driven UX.
 load (`#id=<selectedId>`), renders the active tab (`tree` | `diagram` | `text`),
 and writes the selected id back to the hash so links are shareable.
 
+### Responsive layout (three tiers)
+
+Layout is Tailwind-only, with two JS hooks for the parts CSS cannot express.
+The tiers line up with Tailwind's `md` (768px) and `lg` (1024px) screens and
+with `MD_QUERY` / `LG_QUERY` in `src/lib/useMediaQuery.ts`:
+
+- **Phone (< md)** — one pane at a time. `App.tsx` keeps a `mobilePane`
+  state (`structure` | `view` | `details`) that the bottom `MobileNav`
+  switches; selecting a node jumps to `view`. The breadcrumb gets its own row,
+  the header keeps only Load / Search / theme and folds the rest into a
+  `HeaderActions` "More" menu, and `DiagramToolbar` renders icon buttons with
+  export behind a menu. The minimap defaults to off
+  (`defaultMinimapVisible()` in the store) and the first `fitView` centres on
+  the selected/root node at a readable zoom (`DiagramView/fitOptions.ts`).
+- **Tablet (md–lg)** — structure and view side by side (two-column grid);
+  the details panel is a right-hand slide-over drawer, opened by the
+  "Details" button in the tab strip and closed by its ✕ or the backdrop.
+  `mobilePane === "details"` doubles as the drawer's open flag.
+- **Desktop (≥ lg)** — the three-column grid; the structure column is
+  collapsible via the `«` toggle (persisted in `localStorage`).
+
+Two custom screens in `tailwind.config.ts` cut across the tiers: `touch:`
+(`pointer: coarse`, larger tap targets for `.btn`, tree rows, nav) and
+`short:` (`max-height: 500px`, tighter header for landscape phones).
+`e2e/tests/mobile.spec.ts` runs under the `phone` and `tablet` Playwright
+projects and asserts the page never scrolls horizontally.
+
 ### State: the selection store
 
 Everything view-related lives in a single Zustand store at

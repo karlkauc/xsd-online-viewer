@@ -57,7 +57,7 @@ export function SearchPalette() {
 
   return (
     <div
-      className="fixed inset-0 bg-black/30 flex items-start justify-center pt-[10vh] z-50"
+      className="fixed inset-0 bg-black/30 flex items-start justify-center px-4 pt-4 md:pt-[10vh] z-50"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) setOpen(false);
       }}
@@ -87,7 +87,7 @@ export function SearchPalette() {
             }
           }}
         />
-        <ul className="max-h-[50vh] overflow-auto py-1">
+        <ul className="max-h-[60dvh] md:max-h-[50vh] overflow-auto py-1">
           {results.length === 0 && (
             <li className="px-4 py-2 text-sm text-slate-500">No matches.</li>
           )}
@@ -95,7 +95,7 @@ export function SearchPalette() {
             <li
               key={hit.id}
               className={
-                "px-4 py-2 text-sm flex items-center gap-2 cursor-pointer " +
+                "px-4 py-2 touch:py-3 text-sm flex items-center gap-2 cursor-pointer " +
                 (i === cursor ? "bg-blue-50 dark:bg-blue-900/30" : "")
               }
               onMouseEnter={() => setCursor(i)}

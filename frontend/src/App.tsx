@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Uploader } from "./components/Uploader";
 import { TreeView } from "./components/TreeView/TreeView";
 import { DetailPanel } from "./components/DetailPanel";
@@ -16,6 +16,8 @@ import { Diagnostics } from "./components/Diagnostics";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { XML_VIEWER_URL } from "./lib/uploadErrors";
 import { MobileNav, type MobilePane } from "./components/MobileNav";
+import { HeaderActions, type HeaderAction } from "./components/HeaderActions";
+import { LG_QUERY, MD_QUERY, useMediaQuery } from "./lib/useMediaQuery";
 import { useSelection, type ViewTab } from "./stores/selectionStore";
 import { exportHtmlUrl } from "./api/client";
 import { readHashSelection, writeHashSelection } from "./lib/deepLink";
@@ -94,9 +96,13 @@ export default function App() {
     return window.localStorage.getItem("xsdv:structureCollapsed") === "1";
   });
 
-  // Mobile-only: which single pane is visible below the `md` breakpoint.
-  // Unused on desktop, where all three panes show side by side.
+  // Below `md` (phones): which single pane is visible. Between `md` and `lg`
+  // (tablets): "details" means the details drawer is open, anything else means
+  // closed. Unused from `lg` up, where all three panes show side by side.
   const [mobilePane, setMobilePane] = useState<MobilePane>("structure");
+  const detailsOpen = mobilePane === "details";
+  const atLeastMd = useMediaQuery(MD_QUERY);
+  const wide = useMediaQuery(LG_QUERY);
 
   useEffect(() => {
     window.localStorage.setItem("xsdv:structureCollapsed", structureCollapsed ? "1" : "0");
@@ -142,10 +148,70 @@ export default function App() {
     writeHashSelection(selectedId);
   }, [selectedId]);
 
-  // On mobile, selecting a node jumps to the View pane so the user sees it.
+  // On phones, selecting a node jumps to the View pane so the user sees it.
+  // Tablets show structure and view side by side, so leave the panes alone
+  // there (closing the drawer on every selection would fight the user).
   useEffect(() => {
-    if (selectedId) setMobilePane("view");
-  }, [selectedId]);
+    if (selectedId && !atLeastMd) setMobilePane("view");
+  }, [selectedId, atLeastMd]);
+
+  // Secondary header actions: inline buttons on wide screens, a "More" menu
+  // below `lg` so the header can never overflow the viewport.
+  const secondaryActions = useMemo<HeaderAction[]>(
+    () => [
+      ...(schemaId
+        ? [
+            {
+              key: "export-html",
+              label: "Export HTML",
+              title: "Export the schema as a standalone HTML page",
+              href: exportHtmlUrl(schemaId),
+              external: true,
+            },
+          ]
+        : []),
+      {
+        key: "feedback",
+        label: "💬 Feedback",
+        title: "Send feedback",
+        ariaLabel: "Send feedback",
+        onClick: () => openFeedback(),
+      },
+      {
+        key: "xml-viewer",
+        label: "XML Viewer ↗",
+        title: "Have an XML document instead? Open our sister tool XML Viewer",
+        ariaLabel: "Open XML Viewer (sister tool for XML documents)",
+        href: XML_VIEWER_URL,
+        external: true,
+      },
+      {
+        key: "api",
+        label: docsRoute ? "← Viewer" : "API",
+        title: docsRoute
+          ? "Back to the viewer"
+          : "Validate XML against an XSD from the command line (curl, PowerShell, Python)",
+        ariaLabel: docsRoute ? "Back to the viewer" : "API documentation",
+        href: docsRoute ? "/" : API_DOCS_PATH,
+      },
+      {
+        key: "github",
+        label: "GitHub",
+        title: "Source code on GitHub",
+        ariaLabel: "Source code on GitHub",
+        href: GITHUB_REPO_URL,
+        external: true,
+      },
+      {
+        key: "about",
+        label: "ℹ️ About",
+        title: "About this app",
+        ariaLabel: "About this app",
+        onClick: () => openAbout(),
+      },
+    ],
+    [schemaId, docsRoute],
+  );
 
   const onSwitchTab = useCallback(
     (tab: ViewTab) => {
@@ -157,16 +223,16 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold">Online XSD Viewer</h1>
+      <header className="flex items-center justify-between gap-2 md:gap-3 px-3 md:px-4 py-2 md:py-3 short:py-1 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
+        <div className="flex items-center gap-3 min-w-0">
+          <h1 className="text-base md:text-lg font-semibold shrink-0">Online XSD Viewer</h1>
           {model?.target_namespace && (
-            <span className="hidden md:inline text-sm font-mono text-slate-500 dark:text-slate-400">
+            <span className="hidden lg:inline min-w-0 text-sm font-mono text-slate-500 dark:text-slate-400 truncate">
               {model.target_namespace}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
           {model && (
             <button
               type="button"
@@ -175,7 +241,8 @@ export default function App() {
               title="Drop the current schema and load a different file"
               aria-label="Load a different schema file"
             >
-              📂 Load new…
+              <span aria-hidden="true">📂</span>
+              <span className="hidden sm:inline">Load new…</span>
             </button>
           )}
           {diagnosticsCount > 0 && !diagnosticsVisible && (
@@ -186,7 +253,8 @@ export default function App() {
               title="Show diagnostics"
               aria-label="Show diagnostics"
             >
-              ⚠️ {diagnosticsCount} diagnostic{diagnosticsCount === 1 ? "" : "s"}
+              ⚠️ {diagnosticsCount}
+              <span className="hidden sm:inline"> diagnostic{diagnosticsCount === 1 ? "" : "s"}</span>
             </button>
           )}
           <button
@@ -195,54 +263,12 @@ export default function App() {
             onClick={() => window.dispatchEvent(new CustomEvent("xsdv:open-search"))}
             disabled={!model}
             title="Search (Ctrl/Cmd-K)"
+            aria-label="Search"
           >
-            🔍 Search
+            <span aria-hidden="true">🔍</span>
+            <span className="hidden sm:inline">Search</span>
           </button>
-          {schemaId && (
-            <a className="btn" href={exportHtmlUrl(schemaId)} target="_blank" rel="noopener noreferrer">
-              Export HTML
-            </a>
-          )}
-          <button
-            type="button"
-            className="btn"
-            onClick={() => openFeedback()}
-            title="Send feedback"
-            aria-label="Send feedback"
-          >
-            💬 Feedback
-          </button>
-          <a
-            className="btn"
-            href={XML_VIEWER_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Have an XML document instead? Open our sister tool XML Viewer"
-            aria-label="Open XML Viewer (sister tool for XML documents)"
-          >
-            XML Viewer ↗
-          </a>
-          <a
-            className="btn"
-            href={docsRoute ? "/" : API_DOCS_PATH}
-            title={docsRoute ? "Back to the viewer" : "Validate XML against an XSD from the command line (curl, PowerShell, Python)"}
-            aria-label={docsRoute ? "Back to the viewer" : "API documentation"}
-          >
-            {docsRoute ? "← Viewer" : "API"}
-          </a>
-          <a
-            className="btn"
-            href={GITHUB_REPO_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Source code on GitHub"
-            aria-label="Source code on GitHub"
-          >
-            GitHub
-          </a>
-          <button type="button" className="btn" onClick={() => openAbout()} title="About this app" aria-label="About this app">
-            ℹ️ About
-          </button>
+          <HeaderActions actions={secondaryActions} inline={wide} />
           <ThemeToggle />
         </div>
       </header>
@@ -257,10 +283,10 @@ export default function App() {
         </main>
       ) : (
         <main className="flex-1 flex flex-col min-h-0">
-          <div className="flex items-center gap-3 px-4 pt-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 overflow-x-auto md:overflow-visible">
+          <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-3 px-3 md:px-4 pt-2 short:pt-1 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
             <button
               type="button"
-              className="hidden md:inline-flex shrink-0 mb-1.5 items-center justify-center w-7 h-7 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800"
+              className="hidden md:inline-flex shrink-0 mb-1.5 items-center justify-center w-7 h-7 touch:w-9 touch:h-9 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800"
               onClick={() => setStructureCollapsed((v) => !v)}
               title={structureCollapsed ? "Show structure" : "Hide structure"}
               aria-label={structureCollapsed ? "Show structure panel" : "Hide structure panel"}
@@ -270,13 +296,13 @@ export default function App() {
                 {structureCollapsed ? "»" : "«"}
               </span>
             </button>
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-1 shrink-0 overflow-x-auto">
               {(Object.keys(TAB_LABELS) as ViewTab[]).map((tab) => (
                 <button
                   key={tab}
                   type="button"
                   className={
-                    "px-3 py-1.5 text-sm font-medium rounded-t-md border-b-2 " +
+                    "px-3 py-1.5 touch:py-2 short:py-0.5 text-sm font-medium rounded-t-md border-b-2 whitespace-nowrap " +
                     (activeTab === tab
                       ? "border-accent text-accent"
                       : "border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200")
@@ -287,8 +313,21 @@ export default function App() {
                 </button>
               ))}
             </div>
-            <div className="min-w-0 flex-1">
-              <Breadcrumb />
+            <div className="min-w-0 flex-1 flex items-center gap-2 pb-1.5 md:pb-0">
+              <div className="min-w-0 flex-1">
+                <Breadcrumb />
+              </div>
+              {/* Tablet only: the details pane lives in a drawer. */}
+              <button
+                type="button"
+                className="hidden md:inline-flex lg:hidden btn mb-1.5"
+                onClick={() => setMobilePane(detailsOpen ? "view" : "details")}
+                aria-label="Show details"
+                aria-pressed={detailsOpen}
+                title={detailsOpen ? "Hide the details panel" : "Show the details panel"}
+              >
+                📋 Details
+              </button>
             </div>
           </div>
 
@@ -296,10 +335,12 @@ export default function App() {
 
           <section
             className={
+              // Phone: one pane at a time. Tablet (md): structure + view, details
+              // in a drawer. Desktop (lg): all three columns.
               "flex-1 min-h-0 flex flex-col md:grid md:gap-0 " +
               (structureCollapsed
-                ? "md:grid-cols-[1fr_minmax(300px,26%)]"
-                : "md:grid-cols-[minmax(260px,22%)_1fr_minmax(300px,26%)]")
+                ? "md:grid-cols-[1fr] lg:grid-cols-[1fr_minmax(300px,26%)]"
+                : "md:grid-cols-[minmax(240px,32%)_1fr] lg:grid-cols-[minmax(260px,22%)_1fr_minmax(300px,26%)]")
             }
           >
             {/* LEFT — collapsible structure sidebar (desktop); one of three
@@ -331,14 +372,41 @@ export default function App() {
               </div>
             </section>
 
-            {/* RIGHT — always-visible details panel (desktop); swappable pane on mobile. */}
+            {/* RIGHT — details: swappable pane on phones, slide-over drawer on
+                tablets, always-visible third column on desktop. */}
+            {detailsOpen && (
+              <div
+                className="hidden md:block lg:hidden fixed inset-0 z-20 bg-black/30"
+                aria-hidden="true"
+                onClick={() => setMobilePane("view")}
+              />
+            )}
             <aside
               className={
-                "min-h-0 overflow-hidden border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 md:block " +
-                (mobilePane === "details" ? "flex-1" : "hidden")
+                "min-h-0 overflow-hidden flex-col bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 " +
+                (detailsOpen
+                  ? "flex flex-1 md:flex-none md:fixed md:inset-y-0 md:right-0 md:z-30 md:w-[400px] md:max-w-[90vw] md:border-l md:shadow-2xl "
+                  : "hidden ") +
+                "lg:flex lg:static lg:inset-auto lg:z-auto lg:w-auto lg:max-w-none lg:shadow-none lg:border-l"
               }
             >
-              <DetailPanel />
+              <div className="hidden md:flex lg:hidden items-center justify-between px-3 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Details
+                </span>
+                <button
+                  type="button"
+                  className="btn px-2.5"
+                  onClick={() => setMobilePane("view")}
+                  aria-label="Close details"
+                  title="Close details"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <DetailPanel />
+              </div>
             </aside>
           </section>
 

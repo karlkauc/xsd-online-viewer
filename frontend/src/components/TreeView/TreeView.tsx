@@ -4,6 +4,8 @@ import { useSelection } from "../../stores/selectionStore";
 import type { SchemaNodeKind } from "../../types/schema";
 import { buildTreeRows, type TreeRow } from "./treeRows";
 import { KindBadge } from "./KindBadge";
+import { treeIndentPx } from "./treeIndent";
+import { SM_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 
 const ALL_KINDS: SchemaNodeKind[] = [
   "element",
@@ -57,6 +59,7 @@ export function TreeView() {
   }, [model, expandedIds, filterKinds, indexById]);
 
   const totalNodes = indexById.size;
+  const compact = !useMediaQuery(SM_QUERY);
 
   const toggleKind = (kind: SchemaNodeKind) => {
     const next = new Set(filterKinds);
@@ -76,7 +79,7 @@ export function TreeView() {
         </span>
       </div>
       <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-800">
-        <div className="flex flex-wrap gap-1">
+        <div className="flex gap-1 overflow-x-auto sm:flex-wrap">
           {ALL_KINDS.map((kind) => {
             const active = filterKinds.has(kind);
             return (
@@ -84,7 +87,7 @@ export function TreeView() {
                 key={kind}
                 type="button"
                 className={
-                  "chip border inline-flex items-center gap-1 cursor-pointer transition-opacity " +
+                  "chip border inline-flex items-center gap-1 cursor-pointer transition-opacity shrink-0 touch:py-1 " +
                   KIND_CHIP_CLASS[kind] +
                   (active ? "" : " opacity-40 line-through")
                 }
@@ -107,13 +110,13 @@ export function TreeView() {
             return (
               <div
                 className={
-                  "flex items-center gap-1 cursor-pointer select-none text-sm " +
+                  "flex items-center gap-1 cursor-pointer select-none text-sm touch:py-1 " +
                   "border-l-2 " +
                   (active
                     ? "bg-blue-50 dark:bg-blue-900/30 border-accent"
                     : "border-transparent hover:bg-slate-50 dark:hover:bg-slate-900")
                 }
-                style={{ paddingLeft: `${row.depth * 14 + 6}px`, paddingRight: 8 }}
+                style={{ paddingLeft: `${treeIndentPx(row.depth, compact)}px`, paddingRight: 8 }}
                 role="treeitem"
                 aria-selected={active}
                 aria-expanded={row.hasChildren ? expandedIds.has(row.id) : undefined}
@@ -123,7 +126,7 @@ export function TreeView() {
                   <button
                     type="button"
                     aria-label={expandedIds.has(row.id) ? "Collapse" : "Expand"}
-                    className="px-1 text-slate-500"
+                    className="px-1 touch:px-2 touch:py-1 text-slate-500"
                     onClick={(event) => {
                       event.stopPropagation();
                       toggleExpanded(row.id);
@@ -148,7 +151,7 @@ export function TreeView() {
                   </span>
                 )}
                 {row.typeHint && (
-                  <span className="ml-1 text-xs font-mono text-slate-500 dark:text-slate-400 truncate">
+                  <span className="hidden sm:inline ml-1 text-xs font-mono text-slate-500 dark:text-slate-400 truncate">
                     : {row.typeHint}
                   </span>
                 )}

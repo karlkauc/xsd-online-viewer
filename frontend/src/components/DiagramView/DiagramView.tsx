@@ -24,6 +24,9 @@ import { CompositorNode } from "./CompositorNode";
 import { exportFlowAsPng, exportFlowAsSvg } from "./exportImage";
 import { collectExpandableElementIds } from "../../lib/expandAll";
 import { computeAnchoredViewport } from "./anchorViewport";
+import { DiagramToolbar } from "./DiagramToolbar";
+import { initialFitOptions } from "./fitOptions";
+import { MD_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 
 const NODE_TYPES = {
   element: ElementNode as unknown as React.ComponentType<NodeProps>,
@@ -87,6 +90,11 @@ function DiagramInner() {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const isDark = useIsDarkTheme();
   const minimapColors = isDark ? MINIMAP_DARK : MINIMAP_LIGHT;
+  const compact = !useMediaQuery(MD_QUERY);
+
+  // Latest fit options without re-running the fit effects on every render.
+  const fitOptionsRef = useRef(initialFitOptions(nodes, selectedId, compact));
+  fitOptionsRef.current = initialFitOptions(nodes, selectedId, compact);
 
   // Remembers where the clicked node sat in world-space before a
   // toggle-driven re-layout, so we can translate the viewport afterwards
@@ -99,9 +107,7 @@ function DiagramInner() {
   // jitters the viewport and loses the user's pan/zoom state.
   useEffect(() => {
     if (nodes.length > 0) {
-      requestAnimationFrame(() =>
-        flow.fitView({ padding: 0.2, duration: 250, maxZoom: 1.2 }),
-      );
+      requestAnimationFrame(() => flow.fitView(fitOptionsRef.current));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model?.schema_id]);
@@ -116,9 +122,7 @@ function DiagramInner() {
     const observer = new ResizeObserver(() => {
       const hasSize = el.clientWidth > 0 && el.clientHeight > 0;
       if (!hadSize && hasSize && nodes.length > 0) {
-        requestAnimationFrame(() =>
-          flow.fitView({ padding: 0.2, duration: 250, maxZoom: 1.2 }),
-        );
+        requestAnimationFrame(() => flow.fitView(fitOptionsRef.current));
       }
       hadSize = hasSize;
     });
@@ -191,47 +195,23 @@ function DiagramInner() {
 
   return (
     <div ref={wrapperRef} className="relative h-full w-full">
-      <div className="absolute top-2 right-2 z-10 flex flex-wrap justify-end gap-1 max-w-[60%] md:max-w-none">
-        <button
-          type="button"
-          className="btn"
-          onClick={onExpandAll}
-          disabled={!model}
-          title="Expand every element that has child content"
-        >
-          Expand all
-        </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={onCollapseAll}
-          disabled={expandedIds.size === 0}
-          title="Collapse every expanded element"
-        >
-          Collapse all
-        </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => setMinimapVisible(!minimapVisible)}
-          title={minimapVisible ? "Hide minimap" : "Show minimap"}
-          aria-pressed={minimapVisible}
-        >
-          {minimapVisible ? "🗺️ Hide minimap" : "🗺️ Show minimap"}
-        </button>
-        <button type="button" className="btn" onClick={() => onExport("svg")}>
-          Export SVG
-        </button>
-        <button type="button" className="btn" onClick={() => onExport("png")}>
-          Export PNG
-        </button>
-      </div>
+      <DiagramToolbar
+        compact={compact}
+        minimapVisible={minimapVisible}
+        canExpand={!!model}
+        canCollapse={expandedIds.size > 0}
+        onExpandAll={onExpandAll}
+        onCollapseAll={onCollapseAll}
+        onToggleMinimap={() => setMinimapVisible(!minimapVisible)}
+        onExport={onExport}
+      />
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={NODE_TYPES}
         onNodeClick={onNodeClick}
         fitView
+        minZoom={0.2}
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={16} />

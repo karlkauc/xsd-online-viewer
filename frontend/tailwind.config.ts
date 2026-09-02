@@ -5,6 +5,12 @@ export default {
   darkMode: "class",
   theme: {
     extend: {
+      screens: {
+        // Coarse pointer = finger; used to enlarge tap targets regardless of width.
+        touch: { raw: "(pointer: coarse)" },
+        // Landscape phones: trade header chrome for content height.
+        short: { raw: "(max-height: 500px)" },
+      },
       fontFamily: {
         mono: [
           "JetBrains Mono",

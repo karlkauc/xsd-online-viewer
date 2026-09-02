@@ -25,7 +25,7 @@
   }
 
   .btn {
-    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 touch:py-2.5 rounded-md text-sm font-medium whitespace-nowrap
            border border-slate-300 dark:border-slate-700
            bg-white dark:bg-slate-800
            hover:bg-slate-50 dark:hover:bg-slate-700
@@ -47,6 +47,21 @@
 /* React Flow subtle tweaks */
 .react-flow__node {
   font-family: var(--font-mono, ui-monospace, monospace);
+}
+/* Canvas pan must win over page scroll on touch screens. */
+.react-flow__pane {
+  touch-action: none;
+}
+/* Stock controls are 26px squares; grow them to a comfortable tap size. */
+@media (pointer: coarse) {
+  .react-flow__controls-button {
+    width: 40px;
+    height: 40px;
+  }
+  .react-flow__controls-button svg {
+    max-width: 18px;
+    max-height: 18px;
+  }
 }
 
 /* CodeMirror: full-line highlight for the "View in source" target line.

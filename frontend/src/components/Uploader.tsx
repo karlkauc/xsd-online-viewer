@@ -11,6 +11,7 @@ import { readModeFromPath, writeModePath, type Mode } from "../lib/modeRoute";
 import { FundsXmlReleases } from "./FundsXmlReleases";
 import { UploadError } from "./UploadError";
 import { looksLikeSchema, shouldSniff, XML_VIEWER_URL } from "../lib/uploadErrors";
+import { COARSE_POINTER_QUERY, useMediaQuery } from "../lib/useMediaQuery";
 
 const MODE_LABELS: Record<Mode, string> = {
   file: "File / ZIP",
@@ -34,6 +35,8 @@ export function Uploader() {
   const [mainFilename, setMainFilename] = useState("");
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  // Finger input has no drag-and-drop; say so instead of inviting a drop.
+  const coarsePointer = useMediaQuery(COARSE_POINTER_QUERY);
 
   const handleFile = useCallback(
     async (file: File, { force = false }: { force?: boolean } = {}) => {
@@ -202,7 +205,9 @@ export function Uploader() {
             }}
           />
           <p className="mb-4 text-slate-700 dark:text-slate-300">
-            Drop a file here, or click the button to choose one.
+            {coarsePointer
+              ? "Choose a file to load."
+              : "Drop a file here, or click the button to choose one."}
           </p>
           <button
             type="button"
@@ -213,11 +218,13 @@ export function Uploader() {
             Choose file…
           </button>
           <label className="block mt-4 text-xs text-slate-500 dark:text-slate-400">
-            For ZIP uploads, optionally specify which file is the main schema:
+            <span className="block mb-1 sm:inline sm:mb-0">
+              For ZIP uploads, optionally specify which file is the main schema:
+            </span>
             <input
               type="text"
               placeholder="main.xsd"
-              className="ml-2 px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+              className="w-full max-w-xs sm:w-auto sm:ml-2 px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
               value={mainFilename}
               onChange={(e) => setMainFilename(e.target.value)}
             />
