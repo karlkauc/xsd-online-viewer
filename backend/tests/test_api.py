@@ -150,3 +150,40 @@ class TestMultiFileUpload:
         detail = response.json()["detail"]
         assert detail.startswith("main schema 'library.xsd' is not among the uploaded files")
         assert "schemas/library.xsd" in detail and "schemas/types.xsd" in detail
+
+
+class TestSampleXml:
+    def test_sample_for_root_element(self, client: TestClient, simple_xsd_bytes: bytes) -> None:
+        upload = client.post(
+            "/api/schema/upload",
+            files={"file": ("simple.xsd", simple_xsd_bytes, "application/xml")},
+        )
+        schema_id = upload.json()["schema_id"]
+        response = client.get(
+            f"/api/schema/{schema_id}/sample",
+            params={"element": "element:{http://example.com/simple}Person"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"].startswith("application/xml")
+        assert 'filename="Person-sample.xml"' in response.headers["content-disposition"]
+        body = response.text
+        assert "<tns:FirstName>string</tns:FirstName>" in body
+        assert 'xmlns:tns="http://example.com/simple"' in body
+        assert "<tns:Age>" not in body
+
+        with_optional = client.get(
+            f"/api/schema/{schema_id}/sample",
+            params={"element": "element:{http://example.com/simple}Person", "optional": "true"},
+        )
+        assert "<tns:Age>0</tns:Age>" in with_optional.text
+
+    def test_unknown_element_or_schema_404(self, client: TestClient, simple_xsd_bytes: bytes) -> None:
+        upload = client.post(
+            "/api/schema/upload",
+            files={"file": ("simple.xsd", simple_xsd_bytes, "application/xml")},
+        )
+        schema_id = upload.json()["schema_id"]
+        missing = client.get(f"/api/schema/{schema_id}/sample", params={"element": "element:Nope"})
+        assert missing.status_code == 404
+        expired = client.get("/api/schema/expired/sample", params={"element": "x"})
+        assert expired.status_code == 404

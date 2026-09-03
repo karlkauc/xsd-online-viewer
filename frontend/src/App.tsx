@@ -5,6 +5,7 @@ import { DetailPanel } from "./components/DetailPanel";
 import { SearchPalette } from "./components/SearchPalette";
 import { AboutDialog, GITHUB_REPO_URL, openAbout } from "./components/AboutDialog";
 import { FeedbackDialog } from "./components/FeedbackDialog";
+import { SampleXmlDialog } from "./components/SampleXmlDialog";
 import { openFeedback } from "./components/UploadError";
 import { DiagramView } from "./components/DiagramView/DiagramView";
 import { TextView } from "./components/TextView/TextView";
@@ -423,6 +424,7 @@ export default function App() {
       <SearchPalette />
       <FeedbackDialog />
       <AboutDialog />
+      <SampleXmlDialog />
     </div>
   );
 }

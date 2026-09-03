@@ -19,6 +19,7 @@ import { KindBadge } from "./TreeView/KindBadge";
 import { FacetGroups } from "./FacetGroups";
 import { AssertionsList } from "./AssertionsList";
 import { AlternativesList } from "./AlternativesList";
+import { openSampleXml } from "./SampleXmlDialog";
 
 // Kind-scoped accent colors — mirror KindBadge so the header's left bar and
 // in-row dots read as "same thing as the E/A/CT/ST/G/AG badge".
@@ -299,10 +300,21 @@ function renderElement(element: ElementDecl, index: NodeIndexEntry[], setSelecte
     ? (complexEntry.node as ComplexType)
     : undefined;
 
+  const sampleName = declaration.name ?? element.name ?? element.ref ?? "element";
+
   return (
     <section>
       <SectionHead title="Element" />
       <div className="space-y-3">
+        <DataRow label="Sample">
+          <button
+            type="button"
+            className="btn text-xs"
+            onClick={() => openSampleXml({ elementId: element.id, name: sampleName })}
+          >
+            Generate sample XML
+          </button>
+        </DataRow>
         {element.ref && (
           <DataRow label="References">
             {refEntry ? (

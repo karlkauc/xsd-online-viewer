@@ -170,6 +170,34 @@ export async function validateXmlUrl(
   return handleJson<ValidationResponse>(response);
 }
 
+export interface SampleXmlOptions {
+  includeOptional?: boolean;
+  repeat?: number;
+}
+
+/** Skeleton instance document rooted at `elementId`, as pretty-printed XML text. */
+export async function fetchSampleXml(
+  schemaId: string,
+  elementId: string,
+  options: SampleXmlOptions = {},
+): Promise<string> {
+  const params = new URLSearchParams({ element: elementId });
+  if (options.includeOptional) params.set("optional", "true");
+  if (options.repeat && options.repeat > 1) params.set("repeat", String(options.repeat));
+  const response = await fetch(`${API_BASE}/schema/${schemaId}/sample?${params.toString()}`);
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // ignore parse errors; fall back to status
+    }
+    throw new ApiError(detail, response.status);
+  }
+  return response.text();
+}
+
 export function exportHtmlUrl(schemaId: string): string {
   return `${API_BASE}/schema/${schemaId}/export/html`;
 }

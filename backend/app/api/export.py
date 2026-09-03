@@ -12,7 +12,7 @@ import html
 import logging
 from io import BytesIO
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from lxml import etree
 
@@ -25,6 +25,7 @@ from app.parser.model import (
     SchemaModel,
     SimpleType,
 )
+from app.parser.sample import SampleOptions, find_element, generate_sample
 from app.usage.context import emit
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,35 @@ async def export_html(schema_id: str) -> Response:
         content=document,
         media_type="text/html; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="schema-{schema_id}.html"'},
+    )
+
+
+@router.get("/schema/{schema_id}/sample", response_class=Response)
+async def export_sample_xml(
+    schema_id: str,
+    element: str = Query(..., description="id of the element to use as document root"),
+    optional: bool = Query(False, description="also emit optional elements and attributes"),
+    repeat: int = Query(1, ge=1, le=5, description="occurrences for repeatable particles"),
+    depth: int = Query(12, ge=1, le=30, description="maximum nesting depth"),
+) -> Response:
+    """A skeleton XML instance document for one element of the schema."""
+    model = schema_cache.get(schema_id)
+    if model is None:
+        emit("export", source="sample", status="rejected", status_code=404)
+        raise HTTPException(status_code=404, detail="schema not found or expired")
+    declaration = find_element(model, element)
+    if declaration is None:
+        emit("export", source="sample", status="rejected", status_code=404)
+        raise HTTPException(status_code=404, detail="element not found in schema")
+    document = generate_sample(
+        model, declaration, SampleOptions(include_optional=optional, repeat=repeat, max_depth=depth)
+    )
+    emit("export", source="sample", status="ok", status_code=200, file_count=len(model.files))
+    name = (declaration.name or "sample").replace("/", "_")
+    return Response(
+        content=document,
+        media_type="application/xml; charset=utf-8",
+        headers={"Content-Disposition": f'inline; filename="{name}-sample.xml"'},
     )
 
 

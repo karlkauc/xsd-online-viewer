@@ -42,6 +42,10 @@ side by side, all linked to the same selection.
   [`/url`](https://www.xsd-viewer.online/url) and
   [`/fundsxml`](https://www.xsd-viewer.online/fundsxml). Browser back/forward
   switches between them.
+- **Sample XML.** Pick any element and generate a skeleton instance
+  document — required content, first choice branch, first enumeration
+  value, placeholders for the built-in types — with an option to include
+  everything optional. Copy it, download it, or open it in the XML Viewer.
 - **Export.** Diagram as PNG or SVG, the whole schema as standalone HTML
   documentation, or pretty-printed XML.
 - **Light, Dark, Desktop, Tablet, Mobile.** The UI follows
