@@ -12,6 +12,7 @@ import { FundsXmlReleases } from "./FundsXmlReleases";
 import { UploadError } from "./UploadError";
 import { looksLikeSchema, shouldSniff, XML_VIEWER_URL } from "../lib/uploadErrors";
 import { listZipEntries, pickMainXsd, xsdEntries } from "../lib/zipEntries";
+import { sourceFromLocation, writeSourcePath, type SchemaSource } from "../lib/schemaSource";
 import { COARSE_POINTER_QUERY, useMediaQuery } from "../lib/useMediaQuery";
 
 /** Files chosen but not yet uploaded because the main schema needs confirming. */
@@ -72,7 +73,7 @@ export function Uploader() {
         }
         const response = await uploadSchemaFiles(files, mainFilename);
         setStaged(null);
-        setSchema(response.schema_id, response.model);
+        setSchema(response.schema_id, response.model, { kind: "upload", files, mainFilename });
       } catch (err) {
         setError(err instanceof ApiError ? err.message : String(err));
       } finally {
@@ -129,7 +130,7 @@ export function Uploader() {
     setBusy(true);
     try {
       const response = await uploadSchemaText(text);
-      setSchema(response.schema_id, response.model);
+      setSchema(response.schema_id, response.model, { kind: "text", content: text });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
     } finally {
@@ -146,7 +147,9 @@ export function Uploader() {
       setBusy(true);
       try {
         const response = await loadSchemaFromUrl(target);
-        setSchema(response.schema_id, response.model);
+        const source: SchemaSource = { kind: "url", url: target };
+        writeSourcePath(source);
+        setSchema(response.schema_id, response.model, source);
       } catch (err) {
         setError(err instanceof ApiError ? err.message : String(err));
       } finally {
@@ -169,7 +172,9 @@ export function Uploader() {
       setBusy(true);
       try {
         const response = await loadSchemaFromRelease(tagName, filename);
-        setSchema(response.schema_id, response.model);
+        const source: SchemaSource = { kind: "release", tag: tagName, filename };
+        writeSourcePath(source);
+        setSchema(response.schema_id, response.model, source);
       } catch (err) {
         setError(err instanceof ApiError ? err.message : String(err));
       } finally {
@@ -187,6 +192,22 @@ export function Uploader() {
     },
     [stageFiles],
   );
+
+  // A shared link (`/url?src=…`, `/fundsxml?release=…&file=…`) loads its
+  // source straight away; the tab switch below keeps the query intact.
+  const autoLoaded = useRef(false);
+  useEffect(() => {
+    if (autoLoaded.current) return;
+    autoLoaded.current = true;
+    const source = sourceFromLocation();
+    if (!source) return;
+    if (source.kind === "url") {
+      setUrl(source.url);
+      void loadFromUrl(source.url);
+    } else if (source.kind === "release") {
+      void loadFromRelease(source.tag, source.filename);
+    }
+  }, [loadFromUrl, loadFromRelease]);
 
   // Reflect the selected tab in the URL path so each option is shareable.
   useEffect(() => {

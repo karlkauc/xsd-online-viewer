@@ -4,6 +4,8 @@ import { xml } from "@codemirror/lang-xml";
 import { StateEffect, StateField } from "@codemirror/state";
 import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 import { useSelection } from "../../stores/selectionStore";
+import { exportFormattedFileUrl } from "../../api/client";
+import { downloadSchemaExport } from "../../lib/schemaSession";
 import { XsdVersionPill } from "../DetailPanel";
 
 const isDark = () => document.documentElement.classList.contains("dark");
@@ -123,12 +125,18 @@ export function TextView() {
           <XsdVersionPill version={model.xsd_version ?? "unknown"} />
         </span>
         {schemaId && activeFile.content && (
-          <a
+          <button
+            type="button"
             className="btn ml-auto text-xs"
-            href={`/api/schema/${schemaId}/file/${activeFile.id}/formatted`}
+            onClick={() =>
+              void downloadSchemaExport(
+                (id) => exportFormattedFileUrl(id, activeFile.id),
+                activeFile.filename.split("/").pop() || "schema.xsd",
+              ).catch((err) => window.alert(err instanceof Error ? err.message : String(err)))
+            }
           >
             Download formatted
-          </a>
+          </button>
         )}
       </div>
       <div className="flex-1 min-h-0">

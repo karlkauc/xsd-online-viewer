@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useSelection } from "../stores/selectionStore";
 import { computeXPath, type XPathSegment } from "../lib/xpath";
+import { CopyButton } from "./CopyButton";
 
 // Collects all IDs that must be expanded in the tree so that navigating to
 // `targetIdx` reveals its row. Each XPath segment is the id of an element
@@ -78,6 +79,11 @@ export function XPathBar() {
           </span>
         );
       })}
+      <CopyButton
+        className="ml-1 shrink-0"
+        label="Copy XPath"
+        text={() => "/" + segments.map((seg) => seg.label).join("/")}
+      />
     </nav>
   );
 }

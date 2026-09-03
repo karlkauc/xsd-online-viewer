@@ -35,6 +35,11 @@ side by side, all linked to the same selection.
   including documentation.
 - **Navigate like an IDE.** Breadcrumbs, *Find Usages*, deep-linkable URLs
   (every node has its own hash), and a type-filter to narrow the tree.
+- **Share what you see.** The **🔗 Share** button copies a link to the
+  current selection. For schemas loaded from a URL or a FundsXML release the
+  link carries the source (`/url?src=…`, `/fundsxml?release=…&file=…`), so
+  it opens the same schema and node for anyone. XPath and qualified names
+  have their own copy buttons.
 - **Open straight to an input.** Each way of loading a schema has its own
   address, so you can bookmark or link the one you want:
   [`/`](https://www.xsd-viewer.online/) (File / ZIP),

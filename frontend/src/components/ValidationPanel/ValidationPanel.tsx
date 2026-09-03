@@ -6,6 +6,7 @@ import {
   validateXmlUrl,
 } from "../../api/client";
 import { useSelection } from "../../stores/selectionStore";
+import { withSchemaRetry } from "../../lib/schemaSession";
 import type { ValidationErrorItem } from "../../types/schema";
 
 type Mode = "file" | "text" | "url";
@@ -145,7 +146,7 @@ export function ValidationPanel() {
     (file: File) => {
       if (!schemaId) return;
       void run(async () => {
-        setResult(await validateXmlFile(schemaId, file));
+        setResult(await withSchemaRetry((id) => validateXmlFile(id, file)));
       });
     },
     [schemaId, run, setResult],
@@ -154,14 +155,14 @@ export function ValidationPanel() {
   const onText = useCallback(() => {
     if (!schemaId) return;
     void run(async () => {
-      setResult(await validateXmlText(schemaId, text));
+      setResult(await withSchemaRetry((id) => validateXmlText(id, text)));
     });
   }, [schemaId, text, run, setResult]);
 
   const onUrl = useCallback(() => {
     if (!schemaId) return;
     void run(async () => {
-      setResult(await validateXmlUrl(schemaId, url.trim()));
+      setResult(await withSchemaRetry((id) => validateXmlUrl(id, url.trim())));
     });
   }, [schemaId, url, run, setResult]);
 

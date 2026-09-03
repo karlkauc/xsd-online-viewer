@@ -9,6 +9,7 @@ import type {
   ValidationResponse,
 } from "../types/schema";
 import { buildIndex } from "../lib/indexSchema";
+import type { SchemaSource } from "../lib/schemaSource";
 import { MD_QUERY, matchesMediaQuery } from "../lib/useMediaQuery";
 
 export type ViewTab = "tree" | "diagram" | "text" | "validation";
@@ -16,6 +17,8 @@ export type ViewTab = "tree" | "diagram" | "text" | "validation";
 interface SelectionState {
   schemaId: string | null;
   model: SchemaModel | null;
+  /** How the schema was loaded; drives share links and cache-expiry recovery. */
+  source: SchemaSource | null;
   index: NodeIndexEntry[];
   indexById: Map<string, NodeIndexEntry>;
   usagesByTarget: Map<string, NodeIndexEntry[]>;
@@ -35,7 +38,9 @@ interface SelectionState {
   diagnosticsVisible: boolean;
   minimapVisible: boolean;
 
-  setSchema: (schemaId: string, model: SchemaModel) => void;
+  setSchema: (schemaId: string, model: SchemaModel, source?: SchemaSource | null) => void;
+  /** Rebind to a renewed server-side id without touching the view state. */
+  setSchemaId: (schemaId: string) => void;
   clearSchema: () => void;
   setActiveTab: (tab: ViewTab) => void;
   setSelected: (id: string | null) => void;
@@ -69,6 +74,7 @@ const ALL_KINDS: SchemaNodeKind[] = [
 export const useSelection = create<SelectionState>((set, get) => ({
   schemaId: null,
   model: null,
+  source: null,
   index: [],
   indexById: new Map(),
   usagesByTarget: new Map(),
@@ -85,7 +91,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
   diagnosticsVisible: true,
   minimapVisible: defaultMinimapVisible(),
 
-  setSchema: (schemaId, model) => {
+  setSchema: (schemaId, model, source = null) => {
     const {
       index,
       indexById,
@@ -97,6 +103,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
     set({
       schemaId,
       model,
+      source,
       index,
       indexById,
       usagesByTarget,
@@ -112,10 +119,13 @@ export const useSelection = create<SelectionState>((set, get) => ({
     });
   },
 
+  setSchemaId: (schemaId) => set({ schemaId }),
+
   clearSchema: () =>
     set({
       schemaId: null,
       model: null,
+      source: null,
       index: [],
       indexById: new Map(),
       usagesByTarget: new Map(),

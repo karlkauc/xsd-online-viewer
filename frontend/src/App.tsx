@@ -21,6 +21,9 @@ import { HeaderActions, type HeaderAction } from "./components/HeaderActions";
 import { LG_QUERY, MD_QUERY, useMediaQuery } from "./lib/useMediaQuery";
 import { useSelection, type ViewTab } from "./stores/selectionStore";
 import { exportHtmlUrl } from "./api/client";
+import { downloadSchemaExport } from "./lib/schemaSession";
+import { isShareable, shareLink } from "./lib/schemaSource";
+import { useCopy } from "./lib/useCopy";
 import { readHashSelection, writeHashSelection } from "./lib/deepLink";
 import { API_DOCS_DESCRIPTION, API_DOCS_PATH, API_DOCS_TITLE, isApiDocsRoute } from "./lib/modeRoute";
 import { ApiDocsPage } from "./components/ApiDocsPage";
@@ -164,16 +167,33 @@ export default function App() {
 
   // Secondary header actions: inline buttons on wide screens, a "More" menu
   // below `lg` so the header can never overflow the viewport.
+  const source = useSelection((s) => s.source);
+  const { copied: linkCopied, copy: copyLink } = useCopy(2500);
   const secondaryActions = useMemo<HeaderAction[]>(
     () => [
       ...(schemaId
         ? [
             {
+              key: "share",
+              label: linkCopied
+                ? isShareable(source)
+                  ? "Link copied ✓"
+                  : "Copied — recipients need the file"
+                : "🔗 Share",
+              title: isShareable(source)
+                ? "Copy a link that loads this schema and selection"
+                : "Copy a link to this selection (the recipient must load the same file first)",
+              ariaLabel: "Copy share link",
+              onClick: () => void copyLink(shareLink(source)),
+            },
+            {
               key: "export-html",
               label: "Export HTML",
               title: "Export the schema as a standalone HTML page",
-              href: exportHtmlUrl(schemaId),
-              external: true,
+              onClick: () =>
+                void downloadSchemaExport(exportHtmlUrl, `schema-${schemaId}.html`).catch((err) =>
+                  window.alert(err instanceof Error ? err.message : String(err)),
+                ),
             },
           ]
         : []),
@@ -217,7 +237,7 @@ export default function App() {
         onClick: () => openAbout(),
       },
     ],
-    [schemaId, docsRoute],
+    [schemaId, docsRoute, source, linkCopied, copyLink],
   );
 
   const onSwitchTab = useCallback(

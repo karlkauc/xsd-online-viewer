@@ -20,6 +20,7 @@ import { FacetGroups } from "./FacetGroups";
 import { AssertionsList } from "./AssertionsList";
 import { AlternativesList } from "./AlternativesList";
 import { openSampleXml } from "./SampleXmlDialog";
+import { CopyButton } from "./CopyButton";
 
 // Kind-scoped accent colors — mirror KindBadge so the header's left bar and
 // in-row dots read as "same thing as the E/A/CT/ST/G/AG badge".
@@ -218,9 +219,12 @@ function Header({
             )}
         </div>
         {entry.qname && (
-          <code className="block text-[11px] font-mono text-slate-500 dark:text-slate-400 break-all leading-snug">
-            {entry.qname}
-          </code>
+          <div className="flex items-start gap-1">
+            <code className="block text-[11px] font-mono text-slate-500 dark:text-slate-400 break-all leading-snug">
+              {entry.qname}
+            </code>
+            <CopyButton label="Copy qualified name" text={entry.qname} className="-mt-0.5 shrink-0" />
+          </div>
         )}
         {entry.source_ref && (
           <button

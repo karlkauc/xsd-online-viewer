@@ -41,5 +41,7 @@ export function readModeFromPath(): Mode {
 export function writeModePath(mode: Mode): void {
   const next = MODE_TO_PATH[mode];
   if (next === window.location.pathname) return;
-  history.pushState(null, "", `${next}${window.location.search}${window.location.hash}`);
+  // A `?src=`/`?release=` query belongs to the tab it was written for; it
+  // would auto-load the wrong thing on another one.
+  history.pushState(null, "", `${next}${window.location.hash}`);
 }

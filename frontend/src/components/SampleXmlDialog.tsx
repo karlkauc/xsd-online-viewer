@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, fetchSampleXml } from "../api/client";
+import { fetchSampleXml } from "../api/client";
 import { useSelection } from "../stores/selectionStore";
+import { withSchemaRetry } from "../lib/schemaSession";
 import { openInXmlViewer } from "../lib/xmlViewerHandoff";
 
 export interface SampleRequest {
@@ -42,12 +43,12 @@ export function SampleXmlDialog() {
     let cancelled = false;
     setXml(null);
     setError(null);
-    fetchSampleXml(schemaId, request.elementId, { includeOptional })
+    withSchemaRetry((id) => fetchSampleXml(id, request.elementId, { includeOptional }))
       .then((text) => {
         if (!cancelled) setXml(text);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof ApiError ? err.message : String(err));
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       });
     return () => {
       cancelled = true;

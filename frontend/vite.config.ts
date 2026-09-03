@@ -24,6 +24,9 @@ const config: UserConfig & { test?: Record<string, unknown> } = {
     chunkSizeWarningLimit: 1000,
   },
   test: {
+    // `tsc -b` leaves compiled .js twins next to the sources (gitignored);
+    // only the TypeScript originals are tests.
+    include: ["tests/**/*.test.{ts,tsx}"],
     environment: "jsdom",
     globals: true,
     setupFiles: ["./tests/setup.ts"],
