@@ -25,6 +25,13 @@ describe("classifyUploadError", () => {
       ).kind,
     ).toBe("schema-namespace");
   });
+  it("flags URLs that served an HTML page", () => {
+    expect(
+      classifyUploadError(
+        "https://github.com/x/y/blob/main/a.xsd returned a web page (HTML), not an XML file. Use the direct link to the file's raw content — on GitHub or GitLab that is the 'Raw' button.",
+      ).kind,
+    ).toBe("html-page");
+  });
   it("maps the other backend messages", () => {
     expect(classifyUploadError("dim.xsd: not an XML file (it starts with b'name;value')").kind).toBe("not-xml");
     expect(classifyUploadError("p.xsd: not an XML file — it looks like a PDF document, i.e. binary data, not text").kind).toBe(

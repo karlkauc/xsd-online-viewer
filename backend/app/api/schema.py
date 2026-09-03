@@ -15,6 +15,7 @@ from app.cache import schema_cache
 from app.config import settings
 from app.parser.model import SchemaModel
 from app.parser.security import SecurityError, fetch_schema_url
+from app.parser.urls import html_response_message, looks_like_html
 from app.parser.validation import (
     ValidationResponse,
     ValidationSetupError,
@@ -190,6 +191,14 @@ async def load_schema_from_url(request: Request, payload: UrlPayload) -> SchemaR
         raise reject(
             "schema_load", "url", 400, str(exc), schema_name=schema_display_name("url", payload.url)
         ) from exc
+    if looks_like_html(fetched.content, fetched.content_type):
+        raise reject(
+            "schema_load",
+            "url",
+            400,
+            html_response_message(fetched.url),
+            schema_name=schema_display_name("url", fetched.url),
+        )
 
     return ingest_schema(
         source="url",

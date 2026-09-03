@@ -9,6 +9,7 @@ export type UploadErrorKind =
   | "not-xml"
   | "zip-no-xsd"
   | "dtd"
+  | "html-page"
   | "too-large"
   | "rate-limit"
   | "unknown";
@@ -20,6 +21,8 @@ export interface ClassifiedError {
 }
 
 const RULES: Array<[RegExp, UploadErrorKind, string]> = [
+  // Must precede the not-xml rule: the message goes on to say "not an XML file".
+  [/returned a web page/i, "html-page", "The URL returned a web page, not a schema"],
   // Must precede the xml-document rule: this root *is* a schema, only its xmlns is off.
   [/the root element <schema>/i, "schema-namespace", "The schema's XML namespace is missing or wrong"],
   [/not <xs:schema>|looks like an XML document|root element is not xs:schema/i, "xml-document", "This is an XML document, not an XML Schema"],

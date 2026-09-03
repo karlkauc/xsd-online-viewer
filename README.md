@@ -25,7 +25,9 @@ side by side, all linked to the same selection.
   main schema plus its `xs:import` / `xs:include` / `xs:redefine` targets —
   the viewer resolves them and treats the bundle as one model.
 - **Load from a URL.** Paste any public `http(s)` link to an XSD and the
-  viewer fetches it (with private-IP and SSRF protections enabled).
+  viewer fetches it (with private-IP and SSRF protections enabled). GitHub,
+  GitLab and Bitbucket *browse* links (`…/blob/…`) are rewritten to the raw
+  file automatically.
 - **Fast search.** Press <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd> and
   start typing — full-text across element, type and attribute names,
   including documentation.

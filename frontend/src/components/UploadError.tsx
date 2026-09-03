@@ -134,6 +134,14 @@ export function UploadError({ message, onUploadAnyway, schemaName, file }: Props
             Remove the DOCTYPE block and write the entity values inline, then upload again.
           </p>
         )}
+        {kind === "html-page" && (
+          <p>
+            That address serves an HTML page around the file. Paste the direct link to the file's
+            raw content instead — on GitHub, GitLab and Bitbucket that is the <strong>Raw</strong>{" "}
+            button. Links to <code>github.com/…/blob/…</code> are rewritten automatically, so the page
+            you pasted probably has no raw counterpart at that path.
+          </p>
+        )}
         {kind === "too-large" && <p>Split the schema into a ZIP of smaller files, or load it from a URL.</p>}
         {kind === "rate-limit" && <p>Please wait a minute and try again.</p>}
         {kind === "unknown" && (

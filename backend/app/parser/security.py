@@ -23,6 +23,7 @@ import httpx
 from lxml import etree
 
 from app.config import settings
+from app.parser.urls import normalize_schema_url
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,12 @@ def _verify_url(url: str) -> None:
 
 
 def fetch_schema_url(url: str) -> FetchedResource:
-    """Fetch a schema document by URL, enforcing all SSRF mitigations."""
+    """Fetch a schema document by URL, enforcing all SSRF mitigations.
+
+    GitHub/GitLab/Bitbucket *browse* URLs are rewritten to their raw-content
+    form first (see ``urls.normalize_schema_url``).
+    """
+    url = normalize_schema_url(url)
     _verify_url(url)
     remaining_redirects = settings.fetch_max_redirects
     current = url
