@@ -22,18 +22,27 @@ async function handle(response: Response): Promise<SchemaResponse> {
   return (await response.json()) as SchemaResponse;
 }
 
-export async function uploadSchemaFile(
-  file: File,
+/**
+ * Upload one `.xsd`/`.zip`, or several loose schema files that include or
+ * import each other by file name. `mainFilename` names the root schema (a
+ * ZIP entry path or one of the file names); omitted, the backend guesses.
+ */
+export async function uploadSchemaFiles(
+  files: File[],
   mainFilename?: string,
 ): Promise<SchemaResponse> {
   const form = new FormData();
-  form.append("file", file);
+  for (const file of files) form.append("file", file);
   if (mainFilename) form.append("main_filename", mainFilename);
   const response = await fetch(`${API_BASE}/schema/upload`, {
     method: "POST",
     body: form,
   });
   return handle(response);
+}
+
+export function uploadSchemaFile(file: File, mainFilename?: string): Promise<SchemaResponse> {
+  return uploadSchemaFiles([file], mainFilename);
 }
 
 export async function uploadSchemaText(

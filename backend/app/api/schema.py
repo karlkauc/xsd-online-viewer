@@ -21,7 +21,7 @@ from app.parser.validation import (
     ValidationSetupError,
     validate_xml,
 )
-from app.parser.xsd_parser import parse_with_url_fallback
+from app.parser.xsd_parser import parse_files_map, parse_with_url_fallback, pick_main_xsd
 from app.rate_limit import WRITE_LIMIT, limiter
 from app.usage.context import emit
 from app.usage.events import schema_display_name, truncate
@@ -157,13 +157,43 @@ def finalize_schema_response(model: SchemaModel) -> SchemaResponse:
 @limiter.limit(WRITE_LIMIT)
 async def upload_schema(
     request: Request,
-    file: UploadFile,
+    file: list[UploadFile],
     main_filename: Annotated[str | None, Form()] = None,
 ) -> SchemaResponse:
-    """Accept a single .xsd file or a .zip archive."""
-    content = await _read_upload(file)
-    name = file.filename or "schema.xsd"
-    if name.lower().endswith(".zip") or (file.content_type or "").endswith("zip"):
+    """Accept a single .xsd file, a .zip archive, or several loose files.
+
+    Several ``file`` parts are treated like the entries of one ZIP: they
+    resolve each other's ``xs:include`` / ``xs:import`` by file name, and
+    ``main_filename`` (or the usual shallowest/shortest heuristic) picks
+    the root schema.
+    """
+    if len(file) > 1:
+        files: dict[str, bytes] = {}
+        total = 0
+        for part in file:
+            content = await _read_upload(part)
+            total += len(content)
+            if total > settings.max_upload_bytes:
+                raise reject(
+                    "schema_load",
+                    "upload",
+                    413,
+                    f"uploads together exceed {settings.max_upload_mb} MB limit",
+                    schema_name=schema_display_name("upload", main_filename),
+                )
+            files[part.filename or f"file{len(files) + 1}.xsd"] = content
+        main = main_filename or pick_main_xsd(files) or next(iter(files))
+        return ingest_schema(
+            source="upload",
+            schema_name=main,
+            input_bytes=total,
+            parse=lambda: parse_files_map(files, main),
+        )
+
+    single = file[0]
+    content = await _read_upload(single)
+    name = single.filename or "schema.xsd"
+    if name.lower().endswith(".zip") or (single.content_type or "").endswith("zip"):
         return ingest_schema(
             source="upload",
             schema_name=main_filename or name,

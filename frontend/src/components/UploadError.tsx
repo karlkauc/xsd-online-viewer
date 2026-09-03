@@ -125,7 +125,8 @@ export function UploadError({ message, onUploadAnyway, schemaName, file }: Props
         {kind === "zip-no-xsd" && (
           <p>
             A ZIP upload must contain the main <code>.xsd</code> plus the files it imports or
-            includes. If there are several schemas, name the main one in the field below.
+            includes. You can also drop the loose <code>.xsd</code> files together instead of
+            zipping them.
           </p>
         )}
         {kind === "dtd" && (

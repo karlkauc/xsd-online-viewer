@@ -11,7 +11,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import posixpath
+import re
 import zipfile
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Literal
@@ -1205,6 +1207,54 @@ def parse_single(content: bytes, filename: str = "schema.xsd") -> SchemaModel:
     return parser.parse()
 
 
+_SCHEMA_LOCATION_RE = re.compile(rb"""schemaLocation\s*=\s*["']([^"']+)["']""")
+
+
+def _referenced_locations(name: str, content: bytes) -> set[str]:
+    """Paths (relative to the archive root) that ``content`` includes/imports."""
+    base = posixpath.dirname(name)
+    found: set[str] = set()
+    for raw in _SCHEMA_LOCATION_RE.findall(content[:512_000]):
+        location = raw.decode("utf-8", "replace").strip()
+        if not location or "://" in location:
+            continue
+        found.add(posixpath.normpath(posixpath.join(base, location)))
+        found.add(posixpath.basename(location))
+    return found
+
+
+def pick_main_xsd(names: Iterable[str] | Mapping[str, bytes]) -> str | None:
+    """Guess the main schema among a set of files.
+
+    With file contents available, prefer an ``.xsd`` that no other file
+    includes or imports (the root of the reference graph); ties and the
+    names-only case fall back to the shallowest, then shortest path. The
+    frontend mirrors this in ``frontend/src/lib/zipEntries.ts`` to
+    pre-select the main file — keep the two in step.
+    """
+    candidates = [n for n in names if n.lower().endswith(".xsd")]
+    if not candidates:
+        return None
+    if isinstance(names, Mapping):
+        referenced: set[str] = set()
+        for name in candidates:
+            referenced |= _referenced_locations(name, names[name])
+        roots = [
+            n for n in candidates if n not in referenced and posixpath.basename(n) not in referenced
+        ]
+        if roots:
+            candidates = roots
+    return min(candidates, key=lambda n: (n.count("/"), len(n)))
+
+
+def main_not_found_message(main_filename: str, names: Iterable[str]) -> str:
+    """Explain that ``main_filename`` matches none of the uploaded files."""
+    listed = sorted(n for n in names if n.lower().endswith(".xsd"))
+    shown = ", ".join(listed[:8]) + (", …" if len(listed) > 8 else "")
+    hint = f" — the upload contains: {shown}" if listed else " — the upload contains no .xsd file"
+    return f"main schema {main_filename!r} is not among the uploaded files{hint}"
+
+
 def parse_zip(zip_bytes: bytes, main_filename: str | None = None) -> SchemaModel:
     """Parse a ZIP archive containing an XSD plus its referenced files."""
     with zipfile.ZipFile(BytesIO(zip_bytes)) as archive:
@@ -1212,12 +1262,11 @@ def parse_zip(zip_bytes: bytes, main_filename: str | None = None) -> SchemaModel
     if not files:
         raise ValueError("ZIP archive contains no files")
     if main_filename is None:
-        xsd_candidates = [n for n in files if n.lower().endswith(".xsd")]
-        if not xsd_candidates:
+        main_filename = pick_main_xsd(files)
+        if main_filename is None:
             raise ValueError(no_xsd_in_zip_message(list(files)))
-        main_filename = min(xsd_candidates, key=lambda n: (n.count("/"), len(n)))
     if main_filename not in files:
-        raise ValueError(f"{main_filename!r} not found in archive")
+        raise ValueError(main_not_found_message(main_filename, files))
     resolver = ZipResolver(files=files)
     parser = XsdParser(
         XsdParseInput(
@@ -1238,7 +1287,7 @@ def parse_files_map(files: dict[str, bytes], main_filename: str) -> SchemaModel:
     filename-based ZIP-style resolution.
     """
     if main_filename not in files:
-        raise ValueError(f"{main_filename!r} not present")
+        raise ValueError(main_not_found_message(main_filename, files))
     resolver = ZipResolver(files=files)
     parser = XsdParser(
         XsdParseInput(
@@ -1285,12 +1334,11 @@ def parse_with_url_fallback(
         files.setdefault(main_filename, main_bytes)
 
     if main_filename is None:
-        xsd_candidates = [n for n in files if n.lower().endswith(".xsd")]
-        if not xsd_candidates:
+        main_filename = pick_main_xsd(files)
+        if main_filename is None:
             raise ValueError(no_xsd_in_zip_message(list(files)))
-        main_filename = min(xsd_candidates, key=lambda n: (n.count("/"), len(n)))
     if main_filename not in files:
-        raise ValueError(f"{main_filename!r} not present")
+        raise ValueError(main_not_found_message(main_filename, files))
 
     zip_resolver = ZipResolver(files=files)
     resolvers: list[SchemaResolver] = [zip_resolver]

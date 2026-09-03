@@ -586,3 +586,29 @@ class TestElementRefResolution:
         body = next(p.element for p in self._particles(model) if p.element.name == "Body")
         assert body.ref_id is None
         assert _find_element(model, "Footer").ref_id is None
+
+
+class TestPickMainXsd:
+    def test_names_only_prefers_shallow_then_short(self) -> None:
+        from app.parser.xsd_parser import pick_main_xsd
+
+        assert pick_main_xsd(["x/deep.xsd", "main-schema.xsd", "a.xsd", "readme.txt"]) == "a.xsd"
+        assert pick_main_xsd(["readme.txt"]) is None
+
+    def test_contents_prefer_the_unreferenced_root(self) -> None:
+        from app.parser.xsd_parser import pick_main_xsd
+
+        files = {
+            "types.xsd": b"<xs:schema/>",
+            "library.xsd": b'<xs:schema><xs:include schemaLocation="types.xsd"/></xs:schema>',
+        }
+        assert pick_main_xsd(files) == "library.xsd"
+
+    def test_contents_resolve_relative_locations(self) -> None:
+        from app.parser.xsd_parser import pick_main_xsd
+
+        files = {
+            "schemas/common/types.xsd": b"<xs:schema/>",
+            "schemas/main.xsd": b'<xs:schema><xs:import schemaLocation="./common/types.xsd"/></xs:schema>',
+        }
+        assert pick_main_xsd(files) == "schemas/main.xsd"

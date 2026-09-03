@@ -21,9 +21,11 @@ side by side, all linked to the same selection.
   complex types, facets, restrictions, `xs:annotation` / `xs:documentation`,
   `xs:appinfo`, XML comments, and the original source file and line number
   for every declaration.
-- **Multi-file schemas.** Drop a single `.xsd`, or a `.zip` containing the
-  main schema plus its `xs:import` / `xs:include` / `xs:redefine` targets —
-  the viewer resolves them and treats the bundle as one model.
+- **Multi-file schemas.** Drop a single `.xsd`, several `.xsd` files at
+  once, or a `.zip` containing the main schema plus its `xs:import` /
+  `xs:include` / `xs:redefine` targets — the viewer resolves them and treats
+  the bundle as one model. When more than one schema could be the root, a
+  picker lists them with the most likely main file pre-selected.
 - **Load from a URL.** Paste any public `http(s)` link to an XSD and the
   viewer fetches it (with private-IP and SSRF protections enabled). GitHub,
   GitLab and Bitbucket *browse* links (`…/blob/…`) are rewritten to the raw

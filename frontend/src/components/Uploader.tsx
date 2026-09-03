@@ -3,7 +3,7 @@ import {
   ApiError,
   loadSchemaFromRelease,
   loadSchemaFromUrl,
-  uploadSchemaFile,
+  uploadSchemaFiles,
   uploadSchemaText,
 } from "../api/client";
 import { useSelection } from "../stores/selectionStore";
@@ -11,7 +11,21 @@ import { readModeFromPath, writeModePath, type Mode } from "../lib/modeRoute";
 import { FundsXmlReleases } from "./FundsXmlReleases";
 import { UploadError } from "./UploadError";
 import { looksLikeSchema, shouldSniff, XML_VIEWER_URL } from "../lib/uploadErrors";
+import { listZipEntries, pickMainXsd, xsdEntries } from "../lib/zipEntries";
 import { COARSE_POINTER_QUERY, useMediaQuery } from "../lib/useMediaQuery";
+
+/** Files chosen but not yet uploaded because the main schema needs confirming. */
+interface Staged {
+  files: File[];
+  /** `.xsd` entry paths (ZIP) or file names (loose files) to choose from. */
+  candidates: string[];
+  main: string;
+  kind: "zip" | "files";
+}
+
+function isZip(file: File): boolean {
+  return file.name.toLowerCase().endsWith(".zip") || file.type.endsWith("zip");
+}
 
 const MODE_LABELS: Record<Mode, string> = {
   file: "File / ZIP",
@@ -32,21 +46,22 @@ export function Uploader() {
   const [lastFile, setLastFile] = useState<File | null>(null);
   const [text, setText] = useState("");
   const [url, setUrl] = useState("");
-  const [mainFilename, setMainFilename] = useState("");
+  const [staged, setStaged] = useState<Staged | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
   // Finger input has no drag-and-drop; say so instead of inviting a drop.
   const coarsePointer = useMediaQuery(COARSE_POINTER_QUERY);
 
-  const handleFile = useCallback(
-    async (file: File, { force = false }: { force?: boolean } = {}) => {
+  const upload = useCallback(
+    async (files: File[], mainFilename?: string, { force = false }: { force?: boolean } = {}) => {
+      const file = files[0];
       setError(null);
-      setErrorFile(file.name);
+      setErrorFile(mainFilename ?? file.name);
       setPendingFile(null);
-      setLastFile(file);
+      setLastFile(files.length === 1 ? file : null);
       setBusy(true);
       try {
-        if (!force && shouldSniff(file.name)) {
+        if (!force && files.length === 1 && shouldSniff(file.name)) {
           // Avoid shipping a multi-MB XML document only to get a 400 back.
           const head = await file.slice(0, 2048).text();
           if (!looksLikeSchema(head)) {
@@ -55,7 +70,8 @@ export function Uploader() {
             return;
           }
         }
-        const response = await uploadSchemaFile(file, mainFilename.trim() || undefined);
+        const response = await uploadSchemaFiles(files, mainFilename);
+        setStaged(null);
         setSchema(response.schema_id, response.model);
       } catch (err) {
         setError(err instanceof ApiError ? err.message : String(err));
@@ -63,7 +79,46 @@ export function Uploader() {
         setBusy(false);
       }
     },
-    [mainFilename, setSchema],
+    [setSchema],
+  );
+
+  /**
+   * Decide what to do with the chosen files: a single schema uploads right
+   * away; a ZIP with several `.xsd` entries or a set of loose files first
+   * shows a picker for the main schema, pre-selected by the same heuristic
+   * the backend uses.
+   */
+  const stageFiles = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0) return;
+      setError(null);
+      setPendingFile(null);
+      setStaged(null);
+      if (files.length === 1) {
+        const file = files[0];
+        if (!isZip(file)) return upload(files);
+        const entries = await listZipEntries(file).catch(() => [] as string[]);
+        const candidates = xsdEntries(entries);
+        if (candidates.length <= 1) return upload(files);
+        setStaged({ files, candidates, main: pickMainXsd(entries) ?? candidates[0], kind: "zip" });
+        return;
+      }
+      const names = files.map((f) => f.name);
+      const candidates = xsdEntries(names);
+      if (candidates.length === 0) {
+        setErrorFile(names[0]);
+        setError(`none of the ${files.length} files is an .xsd schema (${names.slice(0, 5).join(", ")})`);
+        return;
+      }
+      const contents = new Map<string, string>();
+      await Promise.all(
+        files
+          .filter((f) => candidates.includes(f.name))
+          .map(async (f) => contents.set(f.name, await f.slice(0, 512_000).text())),
+      );
+      setStaged({ files, candidates, main: pickMainXsd(names, contents) ?? candidates[0], kind: "files" });
+    },
+    [upload],
   );
 
   const handleText = useCallback(async () => {
@@ -128,10 +183,9 @@ export function Uploader() {
     (event: React.DragEvent) => {
       event.preventDefault();
       setDragOver(false);
-      const file = event.dataTransfer.files?.[0];
-      if (file) void handleFile(file);
+      void stageFiles(Array.from(event.dataTransfer.files ?? []));
     },
-    [handleFile],
+    [stageFiles],
   );
 
   // Reflect the selected tab in the URL path so each option is shareable.
@@ -198,10 +252,11 @@ export function Uploader() {
             ref={fileInput}
             type="file"
             accept=".xsd,.xml,.zip,application/zip,application/xml,text/xml"
+            multiple
             className="hidden"
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void handleFile(file);
+              void stageFiles(Array.from(e.target.files ?? []));
+              e.target.value = "";
             }}
           />
           <p className="mb-4 text-slate-700 dark:text-slate-300">
@@ -215,20 +270,49 @@ export function Uploader() {
             onClick={() => fileInput.current?.click()}
             disabled={busy}
           >
-            Choose file…
+            Choose files…
           </button>
-          <label className="block mt-4 text-xs text-slate-500 dark:text-slate-400">
-            <span className="block mb-1 sm:inline sm:mb-0">
-              For ZIP uploads, optionally specify which file is the main schema:
-            </span>
-            <input
-              type="text"
-              placeholder="main.xsd"
-              className="w-full max-w-xs sm:w-auto sm:ml-2 px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-              value={mainFilename}
-              onChange={(e) => setMainFilename(e.target.value)}
-            />
-          </label>
+          <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
+            Multi-file schemas: drop the <code>.xsd</code> files together, or a ZIP containing
+            them. You will be asked which one is the main schema.
+          </p>
+          {staged && (
+            <div className="mt-4 text-left panel rounded-md p-3 border border-slate-200 dark:border-slate-700">
+              <p className="text-sm text-slate-700 dark:text-slate-300 mb-2">
+                {staged.kind === "zip"
+                  ? `${staged.files[0].name} contains ${staged.candidates.length} schemas.`
+                  : `${staged.files.length} files chosen, ${staged.candidates.length} of them schemas.`}{" "}
+                Which one is the main schema?
+              </p>
+              <label className="block text-xs text-slate-500 dark:text-slate-400">
+                Main schema
+                <select
+                  className="block w-full mt-1 px-2 py-1.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-slate-100"
+                  value={staged.main}
+                  onChange={(e) => setStaged({ ...staged, main: e.target.value })}
+                >
+                  {staged.candidates.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy}
+                  onClick={() => void upload(staged.files, staged.main)}
+                >
+                  Load
+                </button>
+                <button type="button" className="btn" disabled={busy} onClick={() => setStaged(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -291,7 +375,7 @@ export function Uploader() {
           message={error}
           schemaName={errorFile}
           file={lastFile ?? undefined}
-          onUploadAnyway={pendingFile ? () => void handleFile(pendingFile, { force: true }) : undefined}
+          onUploadAnyway={pendingFile ? () => void upload([pendingFile], undefined, { force: true }) : undefined}
         />
       )}
     </div>

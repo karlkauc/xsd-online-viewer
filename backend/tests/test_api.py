@@ -107,3 +107,46 @@ class TestExport:
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("application/xml")
         assert "<?xml" in response.text
+
+
+class TestMultiFileUpload:
+    def test_two_loose_files_resolve_each_other(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/schema/upload",
+            files=[
+                ("file", ("types.xsd", (FIXTURES / "types.xsd").read_bytes(), "application/xml")),
+                ("file", ("library.xsd", (FIXTURES / "library.xsd").read_bytes(), "application/xml")),
+            ],
+        )
+        assert response.status_code == 200, response.text
+        model = response.json()["model"]
+        assert {f["filename"] for f in model["files"]} == {"library.xsd", "types.xsd"}
+        assert not [d for d in model["diagnostics"] if d["severity"] == "error"]
+
+    def test_explicit_main_wins(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/schema/upload",
+            files=[
+                ("file", ("a.xsd", (FIXTURES / "types.xsd").read_bytes(), "application/xml")),
+                ("file", ("library.xsd", (FIXTURES / "library.xsd").read_bytes(), "application/xml")),
+            ],
+            data={"main_filename": "library.xsd"},
+        )
+        assert response.status_code == 200, response.text
+        main = [f for f in response.json()["model"]["files"] if f["relationship"] == "main"]
+        assert [f["filename"] for f in main] == ["library.xsd"]
+
+    def test_wrong_main_lists_the_candidates(self, client: TestClient) -> None:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.write(FIXTURES / "library.xsd", "schemas/library.xsd")
+            archive.write(FIXTURES / "types.xsd", "schemas/types.xsd")
+        response = client.post(
+            "/api/schema/upload",
+            files={"file": ("bundle.zip", buffer.getvalue(), "application/zip")},
+            data={"main_filename": "library.xsd"},
+        )
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert detail.startswith("main schema 'library.xsd' is not among the uploaded files")
+        assert "schemas/library.xsd" in detail and "schemas/types.xsd" in detail
