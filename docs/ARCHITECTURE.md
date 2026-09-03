@@ -134,16 +134,21 @@ and opened from anywhere via window events (`xsdv:open-search`,
 
 ### Endpoints
 
-| Method | Path                                            | Purpose                              |
-| ------ | ----------------------------------------------- | ------------------------------------ |
-| POST   | `/api/schema/upload`                            | Upload `.xsd` or `.zip`              |
-| POST   | `/api/schema/text`                              | Paste raw XSD text                   |
-| POST   | `/api/schema/url`                               | Fetch XSD from URL (SSRF-guarded)    |
-| GET    | `/api/schema/{schema_id}`                       | Retrieve cached schema               |
-| POST   | `/api/schema/{schema_id}/export/html`           | Standalone HTML export               |
-| GET    | `/api/schema/{schema_id}/file/{file_id}/formatted` | Syntax-highlighted source         |
-| GET    | `/api/health`                                   | Liveness (used by Docker healthcheck)|
-| GET    | `/api/docs`                                     | Auto-generated OpenAPI UI            |
+| Method | Path                                                | Purpose                                         |
+| ------ | --------------------------------------------------- | ----------------------------------------------- |
+| POST   | `/api/schema/upload`                                | Upload one `.xsd`/`.zip`, or several `file` parts |
+| POST   | `/api/schema/text`                                  | Paste raw XSD text                              |
+| POST   | `/api/schema/url`                                   | Fetch XSD from URL (SSRF-guarded, browse-link rewrite, HTML rejected) |
+| GET    | `/api/schema/{schema_id}`                           | Retrieve cached schema                          |
+| POST   | `/api/schema/{schema_id}/validate/{upload,text,url}` | Validate an XML document against the schema   |
+| GET    | `/api/schema/{schema_id}/sample?element=<id>`       | Sample XML instance for one element             |
+| GET    | `/api/schema/{schema_id}/export/html`               | Standalone HTML export                          |
+| GET    | `/api/schema/{schema_id}/file/{file_id}/formatted`  | Pretty-printed source of one file               |
+| GET    | `/api/fundsxml/releases`                            | FundsXML releases from GitHub (cached)          |
+| POST   | `/api/fundsxml/releases/{tag}/load`                 | Load one release as a schema                    |
+| POST   | `/api/feedback`                                     | Store a feedback message                        |
+| GET    | `/api/health`                                       | Liveness (used by Docker healthcheck)           |
+| GET    | `/api/docs`                                         | Auto-generated OpenAPI UI                       |
 
 All ingest endpoints share one pipeline in `backend/app/api/schema.py`: read
 bytes (size-capped), call `parse_with_url_fallback(...)`, hash the serialized
@@ -175,7 +180,7 @@ a `source_ref = { file_id, line }` pointing back to the original XSD location.
 - `target_namespace`, `namespaces` (prefix → URI), form defaults
 - `elements`, `attributes`, `simple_types`, `complex_types`, `groups`,
   `attribute_groups` — flat lists of declarations
-- `files` — every file that fed the parse (id, name, content, checksum)
+- `files` — every file that fed the parse (id, name, relationship, content)
 - `diagnostics` — non-fatal warnings and errors surfaced in the UI
 
 The Pydantic models are JSON-serialized as the API response; the frontend
