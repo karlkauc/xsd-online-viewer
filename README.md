@@ -31,8 +31,9 @@ side by side, all linked to the same selection.
   GitLab and Bitbucket *browse* links (`…/blob/…`) are rewritten to the raw
   file automatically.
 - **Fast search.** Press <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>K</kbd> and
-  start typing — full-text across element, type and attribute names,
-  including documentation.
+  start typing — full-text across element, type and attribute names, their
+  `xs:documentation` and comments, and enumeration values. Documentation
+  hits show the matching excerpt.
 - **Navigate like an IDE.** Breadcrumbs, *Find Usages*, deep-linkable URLs
   (every node has its own hash), and a type-filter to narrow the tree.
 - **Share what you see.** The **🔗 Share** button copies a link to the
