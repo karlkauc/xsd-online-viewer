@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { handoffUrl, openInXmlViewer } from "../src/lib/xmlViewerHandoff";
+import { handoffSupported, handoffUrl, openInXmlViewer } from "../src/lib/xmlViewerHandoff";
 
 const TARGET = "https://www.xml-viewer.online/?from=xsd-viewer";
 
@@ -67,5 +67,14 @@ describe("openInXmlViewer", () => {
   it("returns false when the popup is blocked", async () => {
     vi.spyOn(window, "open").mockReturnValue(null);
     await expect(openInXmlViewer(new File(["x"], "a.xml"), { target: TARGET })).resolves.toBe(false);
+  });
+});
+
+describe("handoffSupported", () => {
+  it("accepts the public site, the self-hosted instance and dev hosts only", () => {
+    expect(handoffSupported("https://www.xsd-viewer.online")).toBe(true);
+    expect(handoffSupported("https://viewer.status20.net")).toBe(true);
+    expect(handoffSupported("http://127.0.0.1:8180")).toBe(import.meta.env.DEV);
+    expect(handoffSupported("https://example.com")).toBe(false);
   });
 });

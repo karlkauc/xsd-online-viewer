@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { classifyUploadError, XML_VIEWER_URL } from "../lib/uploadErrors";
-import { openInXmlViewer } from "../lib/xmlViewerHandoff";
+import { HANDOFF_UNSUPPORTED_HINT, handoffSupported, openInXmlViewer } from "../lib/xmlViewerHandoff";
 
 interface Props {
   message: string;
@@ -17,10 +17,14 @@ export function openFeedback(detail: { errorDetail?: string; schemaName?: string
 
 export function UploadError({ message, onUploadAnyway, schemaName, file }: Props) {
   const { kind, title } = classifyUploadError(message);
-  const [handoff, setHandoff] = useState<"idle" | "sending" | "sent" | "failed">("idle");
+  const [handoff, setHandoff] = useState<"idle" | "sending" | "sent" | "failed" | "unsupported">("idle");
 
   const sendToXmlViewer = () => {
     if (!file) return;
+    if (!handoffSupported()) {
+      setHandoff("unsupported");
+      return;
+    }
     setHandoff("sending");
     void openInXmlViewer(file).then((ok) => setHandoff(ok ? "sent" : "failed"));
   };
@@ -60,9 +64,12 @@ export function UploadError({ message, onUploadAnyway, schemaName, file }: Props
                     <code>{file.name}</code> was sent to the XML Viewer tab.
                   </p>
                 )}
+                {handoff === "unsupported" && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{HANDOFF_UNSUPPORTED_HINT}</p>
+                )}
                 {handoff === "failed" && (
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Could not send the file automatically (popup blocked?). Open{" "}
+                    The XML Viewer did not pick up the file (popup blocked, or the tab was closed). Open{" "}
                     <a href={XML_VIEWER_URL} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
                       the XML Viewer
                     </a>{" "}

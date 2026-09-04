@@ -5,7 +5,7 @@ import { EditorView } from "@codemirror/view";
 import { fetchSampleXml, validateXmlText } from "../api/client";
 import { useSelection } from "../stores/selectionStore";
 import { withSchemaRetry } from "../lib/schemaSession";
-import { openInXmlViewer } from "../lib/xmlViewerHandoff";
+import { HANDOFF_UNSUPPORTED_HINT, handoffSupported, openInXmlViewer } from "../lib/xmlViewerHandoff";
 import type { ValidationResponse } from "../types/schema";
 
 type Validation =
@@ -46,7 +46,7 @@ export function SampleXmlDialog() {
   const [xml, setXml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [handoff, setHandoff] = useState<"idle" | "sending" | "sent" | "failed">("idle");
+  const [handoff, setHandoff] = useState<"idle" | "sending" | "sent" | "failed" | "unsupported">("idle");
 
   useEffect(() => {
     const onOpen = (event: Event) => {
@@ -154,6 +154,10 @@ export function SampleXmlDialog() {
 
   const sendToXmlViewer = useCallback(() => {
     if (!xml || !request) return;
+    if (!handoffSupported()) {
+      setHandoff("unsupported");
+      return;
+    }
     setHandoff("sending");
     const file = new File([xml], `${request.name}-sample.xml`, { type: "application/xml" });
     void openInXmlViewer(file).then((ok) => setHandoff(ok ? "sent" : "failed"));
@@ -299,9 +303,12 @@ export function SampleXmlDialog() {
           )}
           {handoff === "failed" && (
             <p className="px-4 pb-3 text-xs text-slate-500 dark:text-slate-400">
-              Could not send the sample automatically (popup blocked?). Download it and upload the
-              file in the XML Viewer instead.
+              The XML Viewer did not pick up the sample (popup blocked, or the tab was closed).
+              Download it and upload the file in the XML Viewer instead.
             </p>
+          )}
+          {handoff === "unsupported" && (
+            <p className="px-4 pb-3 text-xs text-slate-500 dark:text-slate-400">{HANDOFF_UNSUPPORTED_HINT}</p>
           )}
           {handoff === "sent" && (
             <p className="px-4 pb-3 text-xs text-slate-500 dark:text-slate-400">

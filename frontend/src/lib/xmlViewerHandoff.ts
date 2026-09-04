@@ -13,6 +13,26 @@ import { XML_VIEWER_URL } from "./uploadErrors";
 export const XML_VIEWER_ORIGINS = ["https://www.xml-viewer.online", "https://xml-viewer.online"];
 export const HANDOFF_TIMEOUT_MS = 15_000;
 
+/**
+ * Origins the XML viewer accepts a hand-off from (its `SENDER_ORIGINS` in
+ * lib/handoff.ts). It posts its ready message only to these, so from any
+ * other host the hand-off can never complete — better to say so up front.
+ */
+export const HANDOFF_SENDER_ORIGINS = [
+  "https://www.xsd-viewer.online",
+  "https://xsd-viewer.online",
+  "https://viewer.status20.net",
+];
+
+export function handoffSupported(origin: string = window.location.origin): boolean {
+  if (HANDOFF_SENDER_ORIGINS.includes(origin)) return true;
+  return import.meta.env.DEV && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
+
+export const HANDOFF_UNSUPPORTED_HINT =
+  "Automatic hand-off only works from www.xsd-viewer.online and viewer.status20.net. " +
+  "Download the file and upload it in the XML Viewer instead.";
+
 export function handoffUrl(base: string = XML_VIEWER_URL): string {
   const url = new URL(base);
   url.searchParams.set("from", "xsd-viewer");
