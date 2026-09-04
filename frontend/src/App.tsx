@@ -240,6 +240,8 @@ export default function App() {
         ariaLabel: "FreeXmlToolkit desktop app",
         href: FREEXMLTOOLKIT_GO,
         external: true,
+        // The wide header is full; the landing card and the About dialog carry the promotion there.
+        menuOnly: true,
       },
       {
         key: "api",

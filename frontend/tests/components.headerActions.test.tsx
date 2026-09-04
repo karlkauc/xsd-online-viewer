@@ -48,3 +48,25 @@ describe("HeaderActions", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 });
+
+describe("HeaderActions menu-only entries", () => {
+  it("keeps menuOnly actions in a More menu even when inline", async () => {
+    const { render, screen, cleanup } = await import("@testing-library/react");
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const { HeaderActions } = await import("../src/components/HeaderActions");
+    render(
+      <HeaderActions
+        inline
+        actions={[
+          { key: "a", label: "Inline one", title: "Inline one", href: "/a" },
+          { key: "b", label: "Menu only", title: "Menu only", href: "/b", menuOnly: true },
+        ]}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "Inline one" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Menu only" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: "Menu only" })).toHaveAttribute("href", "/b");
+    cleanup();
+  });
+});

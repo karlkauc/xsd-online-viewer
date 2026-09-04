@@ -31,7 +31,7 @@ export function DesktopAppCard(props: CardProps | InlineProps) {
           "flex items-start gap-2 text-xs text-slate-500 dark:text-slate-400 " + (props.className ?? "")
         }
       >
-        <img src={LOGO} alt="" width={16} height={16} className="mt-px shrink-0" aria-hidden="true" />
+        <img src={LOGO} alt="" width={16} height={16} className="mt-px w-4 h-4 shrink-0 self-start" aria-hidden="true" />
         <span>
           {props.children}{" "}
           <a className="text-accent hover:underline whitespace-nowrap" href={FREEXMLTOOLKIT_GO} {...EXTERNAL}>
@@ -50,7 +50,7 @@ export function DesktopAppCard(props: CardProps | InlineProps) {
         (props.className ?? "")
       }
     >
-      <img src={LOGO} alt="" width={48} height={48} className="shrink-0 mt-0.5" aria-hidden="true" />
+      <img src={LOGO} alt="" width={48} height={48} className="w-12 h-12 shrink-0 self-start mt-0.5" aria-hidden="true" />
       <div className="min-w-0 text-left">
         <h3 id="desktop-app-title" className="text-sm font-semibold text-slate-900 dark:text-slate-100">
           Need more than a viewer? Try FreeXmlToolkit

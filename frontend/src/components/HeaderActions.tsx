@@ -10,6 +10,8 @@ export interface HeaderAction {
   href?: string;
   external?: boolean;
   onClick?: () => void;
+  /** Never render as an inline button; stays in the "More" menu on wide screens too. */
+  menuOnly?: boolean;
 }
 
 const MENU_ITEM_CLASS =
@@ -100,11 +102,14 @@ function HeaderMenu({ actions }: { actions: HeaderAction[] }) {
  */
 export function HeaderActions({ actions, inline }: { actions: HeaderAction[]; inline: boolean }) {
   if (inline) {
+    const buttons = actions.filter((a) => !a.menuOnly);
+    const overflow = actions.filter((a) => a.menuOnly);
     return (
       <>
-        {actions.map((action) => (
+        {buttons.map((action) => (
           <ActionControl key={action.key} action={action} className="btn" />
         ))}
+        {overflow.length > 0 && <HeaderMenu actions={overflow} />}
       </>
     );
   }
