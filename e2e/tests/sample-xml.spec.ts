@@ -17,6 +17,7 @@ test("generate a sample XML document for the selected element", async ({ page })
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".cm-content")).toContainText("<tns:FirstName>string</tns:FirstName>");
   await expect(dialog.locator(".cm-content")).not.toContainText("<tns:Age>");
+  await expect(dialog.getByRole("status")).toContainText("Schema-valid");
 
   await dialog.getByRole("checkbox", { name: /Include optional/ }).check();
   await expect(dialog.locator(".cm-content")).toContainText("<tns:Age>0</tns:Age>");

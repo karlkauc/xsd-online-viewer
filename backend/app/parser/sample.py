@@ -111,7 +111,9 @@ _STRING_TYPES = {"string", "normalizedString", "token", "Name", "NCName", "NMTOK
 @dataclass
 class SampleOptions:
     include_optional: bool = False
-    max_depth: int = 12
+    # Real-world schemas (FundsXML, ISO 20022) nest 20+ levels deep; the
+    # recursion guard, not this limit, is what keeps output finite.
+    max_depth: int = 40
     # Occurrences to emit for repeatable particles when optional content is on.
     repeat: int = 1
 
@@ -132,6 +134,9 @@ class _Context:
     global_attribute_by_key: dict[Key, AttributeDecl] = field(default_factory=dict)
     id_counter: int = 0
     nsmap: dict[str, str] = field(default_factory=dict)
+    # Number of elements left empty by the recursion/depth guards so far. An
+    # optional subtree that raised it is dropped again (see _emit_element_particle).
+    cuts: int = 0
 
     # -- lookups ---------------------------------------------------------
 
@@ -186,6 +191,30 @@ class _Context:
         prefix = f"ns{len(self.nsmap) + 1}"
         self.nsmap[prefix] = namespace
         return prefix
+
+
+def _resolve_type(
+    ctx: _Context, type_name: str
+) -> tuple[str, str] | tuple[str, SimpleType] | tuple[str, ComplexType] | None:
+    """Classify a type reference: ("builtin", local) | ("simple", st) | ("complex", ct).
+
+    An unprefixed name (``type="ID"`` in a schema whose default namespace is
+    the XSD namespace) is tried against the schema's own types first and
+    falls back to the built-in type of that name, because the merged
+    prefix map cannot tell per-file default namespaces apart.
+    """
+    ns, local = ctx.split_qname(type_name)
+    if ns == XSD_NS:
+        return ("builtin", local)
+    simple = ctx.lookup(ctx.simple_by_key, type_name)
+    if simple is not None:
+        return ("simple", simple)
+    complex_type = ctx.lookup(ctx.complex_by_key, type_name)
+    if complex_type is not None:
+        return ("complex", complex_type)
+    if ":" not in type_name and not type_name.startswith("{") and local in _BUILTIN_VALUES:
+        return ("builtin", local)
+    return None
 
 
 def _build_context(model: SchemaModel, options: SampleOptions) -> _Context:
@@ -307,24 +336,21 @@ def _fill_element(
         if element.default is not None:
             node.text = element.default
         return
-    ns, local = ctx.split_qname(element.type_name)
-    if ns == XSD_NS:
-        node.text = element.default if element.default is not None else _builtin_value(ctx, local, [])
+    resolved = _resolve_type(ctx, element.type_name)
+    if resolved is None:
+        node.append(etree.Comment(f" type {element.type_name} not found in schema "))
         return
-    simple = ctx.lookup(ctx.simple_by_key, element.type_name)
-    if simple is not None:
-        node.text = element.default if element.default is not None else _simple_value(ctx, simple, ())
-        return
-    complex_type = ctx.lookup(ctx.complex_by_key, element.type_name)
-    if complex_type is not None:
-        if complex_type.id in type_stack:
+    kind, target = resolved
+    if kind == "builtin":
+        node.text = element.default if element.default is not None else _builtin_value(ctx, target, [])
+    elif kind == "simple":
+        node.text = element.default if element.default is not None else _simple_value(ctx, target, ())
+    else:
+        if target.id in type_stack:
             node.append(etree.Comment(f" recursive {element.type_name} omitted "))
+            ctx.cuts += 1
             return
-        _fill_complex(
-            ctx, node, complex_type, depth=depth, type_stack=type_stack + (complex_type.id,)
-        )
-        return
-    node.append(etree.Comment(f" type {element.type_name} not found in schema "))
+        _fill_complex(ctx, node, target, depth=depth, type_stack=type_stack + (target.id,))
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +403,7 @@ def _fill_complex(
             return
     if depth >= ctx.options.max_depth:
         node.append(etree.Comment(" depth limit reached "))
+        ctx.cuts += 1
         return
     # Content: bases first (extension appends), then the type's own particle.
     for member in reversed(chain):
@@ -456,7 +483,14 @@ def _emit_particle(
     count = _occurrences(ctx, particle)
     for _ in range(count):
         if particle.kind == "element" and particle.element is not None:
-            _emit_element_particle(ctx, parent, particle.element, depth=depth, type_stack=type_stack)
+            _emit_element_particle(
+                ctx,
+                parent,
+                particle.element,
+                depth=depth,
+                type_stack=type_stack,
+                optional=particle.min_occurs == 0,
+            )
         elif particle.kind in ("sequence", "all"):
             for child_particle in particle.children:
                 _emit_particle(ctx, parent, child_particle, depth=depth, type_stack=type_stack)
@@ -484,6 +518,7 @@ def _emit_element_particle(
     *,
     depth: int,
     type_stack: tuple[str, ...],
+    optional: bool = False,
 ) -> None:
     declaration = _deref_element(ctx, element)
     if declaration is None:
@@ -504,7 +539,15 @@ def _emit_element_particle(
     if declaration.nillable and _is_empty_decl(declaration):
         child.set(f"{{{XSI_NS}}}nil", "true")
         return
+    cuts_before = ctx.cuts
     _fill_element(ctx, child, declaration, depth=depth, type_stack=type_stack)
+    if optional and ctx.cuts > cuts_before:
+        # Somewhere below, a required element hit the recursion or depth
+        # guard and stayed empty; that would make the document invalid.
+        # This occurrence is optional, so leave it out instead.
+        parent.remove(child)
+        parent.append(etree.Comment(f" optional {declaration.name} omitted (recursive or too deep) "))
+        ctx.cuts = cuts_before
 
 
 def _pick_choice(children: list[Particle]) -> Particle | None:
@@ -541,16 +584,17 @@ def _substitution_member(ctx: _Context, head: ElementDecl) -> ElementDecl | None
 def _value_for_type_name(ctx: _Context, type_name: str | None, extra_facets: list[Facet]) -> str:
     if type_name is None:
         return _builtin_value(ctx, "string", extra_facets)
-    ns, local = ctx.split_qname(type_name)
-    if ns == XSD_NS:
-        return _builtin_value(ctx, local, extra_facets)
-    simple = ctx.lookup(ctx.simple_by_key, type_name)
-    if simple is not None:
-        return _simple_value(ctx, simple, (), extra_facets)
-    complex_type = ctx.lookup(ctx.complex_by_key, type_name)
-    if complex_type is not None and complex_type.simple_content_base:
+    resolved = _resolve_type(ctx, type_name)
+    if resolved is None:
+        return _builtin_value(ctx, "string", extra_facets)
+    kind, target = resolved
+    if kind == "builtin":
+        return _builtin_value(ctx, target, extra_facets)
+    if kind == "simple":
+        return _simple_value(ctx, target, (), extra_facets)
+    if target.simple_content_base:
         return _value_for_type_name(
-            ctx, complex_type.simple_content_base, extra_facets + complex_type.simple_content_facets
+            ctx, target.simple_content_base, extra_facets + target.simple_content_facets
         )
     return _builtin_value(ctx, "string", extra_facets)
 
@@ -577,12 +621,11 @@ def _simple_value(
         return "text"
     # restriction / atomic: walk to the base, accumulating facets.
     if simple.base:
-        ns, local = ctx.split_qname(simple.base)
-        if ns == XSD_NS:
-            return _builtin_value(ctx, local, facets)
-        base = ctx.lookup(ctx.simple_by_key, simple.base)
-        if base is not None:
-            return _simple_value(ctx, base, stack, facets)
+        resolved = _resolve_type(ctx, simple.base)
+        if resolved is not None and resolved[0] == "builtin":
+            return _builtin_value(ctx, resolved[1], facets)
+        if resolved is not None and resolved[0] == "simple":
+            return _simple_value(ctx, resolved[1], stack, facets)
     return _builtin_value(ctx, "string", facets)
 
 
@@ -593,8 +636,34 @@ def _facet(facets: list[Facet], kind: str) -> str | None:
     return None
 
 
+def _enumeration_value(local: str, facets: list[Facet]) -> str | None:
+    """First enumeration value; for numbers, the first one inside the range facets."""
+    values = [f.value for f in facets if f.kind == "enumeration"]
+    if not values:
+        return None
+    if local not in _INTEGER_TYPES and local not in _DECIMAL_TYPES:
+        return values[0]
+    bounds = {k: _facet(facets, k) for k in ("minInclusive", "minExclusive", "maxInclusive", "maxExclusive")}
+
+    def in_range(raw: str) -> bool:
+        try:
+            v = float(raw)
+            lo_i, lo_e = bounds["minInclusive"], bounds["minExclusive"]
+            hi_i, hi_e = bounds["maxInclusive"], bounds["maxExclusive"]
+            return (
+                (lo_i is None or v >= float(lo_i))
+                and (lo_e is None or v > float(lo_e))
+                and (hi_i is None or v <= float(hi_i))
+                and (hi_e is None or v < float(hi_e))
+            )
+        except ValueError:
+            return True
+
+    return next((v for v in values if in_range(v)), values[0])
+
+
 def _builtin_value(ctx: _Context, local: str, facets: list[Facet]) -> str:
-    enum = _facet(facets, "enumeration")
+    enum = _enumeration_value(local, facets)
     if enum is not None:
         return enum
     if local == "ID":

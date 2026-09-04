@@ -2,10 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { xml } from "@codemirror/lang-xml";
 import { EditorView } from "@codemirror/view";
-import { fetchSampleXml } from "../api/client";
+import { fetchSampleXml, validateXmlText } from "../api/client";
 import { useSelection } from "../stores/selectionStore";
 import { withSchemaRetry } from "../lib/schemaSession";
 import { openInXmlViewer } from "../lib/xmlViewerHandoff";
+import type { ValidationResponse } from "../types/schema";
+
+type Validation =
+  | { status: "checking" }
+  | { status: "done"; result: ValidationResponse }
+  | { status: "failed"; error: string };
 
 export interface SampleTarget {
   elementId: string;
@@ -32,7 +38,10 @@ export function openSampleXml(request: SampleRequest): void {
  */
 export function SampleXmlDialog() {
   const schemaId = useSelection((s) => s.schemaId);
+  const setValidationResult = useSelection((s) => s.setValidationResult);
+  const setActiveTab = useSelection((s) => s.setActiveTab);
   const [request, setRequest] = useState<SampleRequest | null>(null);
+  const [validation, setValidation] = useState<Validation | null>(null);
   const [includeOptional, setIncludeOptional] = useState(false);
   const [xml, setXml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +75,36 @@ export function SampleXmlDialog() {
     };
   }, [request, schemaId, includeOptional]);
 
+  // Check the generated document against the schema right away, so the user
+  // sees whether it can be used as-is or which placeholders need attention.
+  useEffect(() => {
+    if (!request || xml === null) {
+      setValidation(null);
+      return;
+    }
+    let cancelled = false;
+    setValidation({ status: "checking" });
+    const filename = `${request.name}-sample.xml`;
+    withSchemaRetry((id) => validateXmlText(id, xml, filename))
+      .then((result) => {
+        if (!cancelled) setValidation({ status: "done", result });
+      })
+      .catch((err) => {
+        if (!cancelled) setValidation({ status: "failed", error: err instanceof Error ? err.message : String(err) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [request, xml]);
+
   const close = useCallback(() => setRequest(null), []);
+
+  const showInValidationTab = useCallback(() => {
+    if (validation?.status !== "done") return;
+    setValidationResult(validation.result);
+    setActiveTab("validation");
+    setRequest(null);
+  }, [validation, setValidationResult, setActiveTab]);
 
   const candidates = request?.candidates ?? [];
   const pickCandidate = useCallback(
@@ -198,6 +236,47 @@ export function SampleXmlDialog() {
             </button>
           </div>
         </div>
+
+        {validation && (
+          <div
+            role="status"
+            className={
+              "px-4 py-2 border-b text-sm flex flex-wrap items-center gap-x-3 gap-y-1 " +
+              (validation.status === "done" && validation.result.is_valid
+                ? "border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-200"
+                : validation.status === "done"
+                  ? "border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/30 text-red-800 dark:text-red-200"
+                  : "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-300")
+            }
+          >
+            {validation.status === "checking" && <span>Validating against the schema…</span>}
+            {validation.status === "failed" && <span>Could not validate: {validation.error}</span>}
+            {validation.status === "done" && validation.result.is_valid && (
+              <span className="font-medium">✓ Schema-valid — the document validates against the loaded XSD.</span>
+            )}
+            {validation.status === "done" && !validation.result.is_valid && (
+              <>
+                <span className="font-medium">
+                  ✗ Not schema-valid: {validation.result.errors.length} validation error
+                  {validation.result.errors.length === 1 ? "" : "s"}
+                </span>
+                <button type="button" className="btn text-xs" onClick={showInValidationTab}>
+                  Show in Validation tab
+                </button>
+                <ul className="basis-full text-xs font-mono space-y-0.5 mt-1">
+                  {validation.result.errors.slice(0, 3).map((e, i) => (
+                    <li key={i} className="truncate">
+                      line {e.line}: {e.message}
+                    </li>
+                  ))}
+                  {validation.result.errors.length > 3 && (
+                    <li className="opacity-70">… {validation.result.errors.length - 3} more</li>
+                  )}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
 
         <div className="flex-1 min-h-0 overflow-auto">
           {error && (

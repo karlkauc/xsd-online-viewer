@@ -75,7 +75,7 @@ def test_imported_namespace_uses_its_own_prefix(xmldsig_bytes: bytes) -> None:
         archive.write(FIXTURES / "imports-dsig.xsd", "imports-dsig.xsd")
         archive.writestr("xmldsig-core-schema.xsd", xmldsig_bytes)
     model = parse_zip(buffer.getvalue(), "imports-dsig.xsd")
-    xml = generate_sample(model, model.elements[0], SampleOptions(include_optional=True, max_depth=4))
+    xml = generate_sample(model, model.elements[0], SampleOptions(include_optional=True))
     root = etree.fromstring(xml.encode("utf-8"))
     dsig = "http://www.w3.org/2000/09/xmldsig#"
     assert any(el.tag.startswith(f"{{{dsig}}}") for el in root.iter(etree.Element))
@@ -151,3 +151,60 @@ def test_builtin_placeholders(type_name: str, expected: str) -> None:
     model = parse_single(xsd, "v.xsd")
     _, root = _sample(model, "element:V")
     assert root.text == expected
+
+
+def test_unprefixed_builtin_types_from_default_namespace_schema() -> None:
+    xsd = b"""<?xml version="1.0"?>
+<schema xmlns="http://www.w3.org/2001/XMLSchema" xmlns:t="urn:t" targetNamespace="urn:t"
+        elementFormDefault="qualified">
+  <simpleType name="Crypto"><restriction base="base64Binary"/></simpleType>
+  <element name="Sig">
+    <complexType>
+      <sequence><element name="Digest" type="t:Crypto"/><element name="Len" type="integer"/></sequence>
+      <attribute name="Id" type="ID" use="required"/>
+    </complexType>
+  </element>
+</schema>"""
+    model = parse_single(xsd, "dsig.xsd")
+    xml, root = _sample(model, "element:{urn:t}Sig")
+    ns = "{urn:t}"
+    assert root.get("Id") == "id1"
+    assert root.find(f"{ns}Digest").text == "AA=="
+    assert root.find(f"{ns}Len").text == "1"
+    assert validate_xml(model, xml.encode("utf-8")).is_valid
+
+
+def test_enumeration_respects_range_facets() -> None:
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="PIK">
+    <xs:simpleType>
+      <xs:restriction base="xs:int">
+        <xs:minInclusive value="1"/><xs:maxInclusive value="2"/>
+        <xs:enumeration value="0"/><xs:enumeration value="1"/><xs:enumeration value="2"/>
+      </xs:restriction>
+    </xs:simpleType>
+  </xs:element>
+</xs:schema>"""
+    model = parse_single(xsd, "pik.xsd")
+    xml, root = _sample(model, "element:PIK")
+    assert root.text == "1"
+    assert validate_xml(model, xml.encode("utf-8")).is_valid
+
+
+def test_optional_recursive_elements_are_left_out() -> None:
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="Company" type="CompanyType"/>
+  <xs:complexType name="CompanyType">
+    <xs:sequence>
+      <xs:element name="Name" type="xs:string"/>
+      <xs:element name="Parent" type="CompanyType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>"""
+    model = parse_single(xsd, "company.xsd")
+    xml, root = _sample(model, "element:Company", include_optional=True)
+    assert root.find("Name") is not None
+    assert root.find("Parent") is None  # would have been empty, hence invalid
+    assert validate_xml(model, xml.encode("utf-8")).is_valid

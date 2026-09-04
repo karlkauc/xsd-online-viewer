@@ -55,7 +55,7 @@ async def export_sample_xml(
     element: str = Query(..., description="id of the element to use as document root"),
     optional: bool = Query(False, description="also emit optional elements and attributes"),
     repeat: int = Query(1, ge=1, le=5, description="occurrences for repeatable particles"),
-    depth: int = Query(12, ge=1, le=30, description="maximum nesting depth"),
+    depth: int = Query(40, ge=1, le=100, description="maximum nesting depth"),
 ) -> Response:
     """A skeleton XML instance document for one element of the schema."""
     model = schema_cache.get(schema_id)

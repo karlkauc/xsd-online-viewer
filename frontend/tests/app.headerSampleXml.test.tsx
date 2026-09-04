@@ -17,7 +17,11 @@ describe('App "Sample XML" header button', () => {
   });
 
   it("is absent without a schema and opens the dialog for the document root", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => "<Root/>" });
+    const fetchMock = vi.fn().mockImplementation(async (url: string) =>
+      String(url).includes("/validate/")
+        ? { ok: true, status: 200, json: async () => ({ is_valid: true, errors: [], reformatted_xml: "" }) }
+        : { ok: true, status: 200, text: async () => "<Root/>" },
+    );
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
     expect(screen.queryByRole("button", { name: "Generate sample XML for the root element" })).not.toBeInTheDocument();
@@ -30,7 +34,7 @@ describe('App "Sample XML" header button', () => {
     expect(
       screen.getByRole("dialog", { name: `Sample XML for <${roots[0].name}>` }),
     ).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(decodeURIComponent(String(fetchMock.mock.calls[0][0]))).toContain(`element=${roots[0].id}`);
+    const sampleCall = fetchMock.mock.calls.find((c) => String(c[0]).includes("/sample?"));
+    expect(decodeURIComponent(String(sampleCall?.[0]))).toContain(`element=${roots[0].id}`);
   });
 });
