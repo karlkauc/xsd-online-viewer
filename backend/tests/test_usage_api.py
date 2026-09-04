@@ -103,6 +103,15 @@ def test_sample_xml_is_recorded(
     assert sample_missing.error_detail == "element not found: element:Nope"
 
 
+def test_outbound_click_is_recorded_as_page_view(client: TestClient, recorder: ListRecorder) -> None:
+    r = client.get("/go/freexmltoolkit", params={"to": "releases"}, follow_redirects=False)
+    assert r.status_code == 302
+    (ev,) = recorder.events
+    assert (ev.event_type, ev.path, ev.source, ev.status_code) == (
+        "page_view", "/go/freexmltoolkit", "freexmltoolkit", 302,
+    )
+
+
 def test_url_rejected(client: TestClient, recorder: ListRecorder) -> None:
     r = client.post("/api/schema/url", json={"url": "http://127.0.0.1/x.xsd?secret=1"})
     assert r.status_code == 400

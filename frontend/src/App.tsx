@@ -16,7 +16,8 @@ import { Breadcrumb } from "./components/Breadcrumb";
 import { XPathBar } from "./components/XPathBar";
 import { Diagnostics } from "./components/Diagnostics";
 import { ThemeToggle } from "./components/ThemeToggle";
-import { XML_VIEWER_URL } from "./lib/uploadErrors";
+import { FREEXMLTOOLKIT_GO, XML_VIEWER_URL } from "./lib/links";
+import { DesktopAppCard } from "./components/DesktopAppCard";
 import { MobileNav, type MobilePane } from "./components/MobileNav";
 import { HeaderActions, type HeaderAction } from "./components/HeaderActions";
 import { LG_QUERY, MD_QUERY, useMediaQuery } from "./lib/useMediaQuery";
@@ -78,6 +79,10 @@ function EmptyOverview() {
           </kbd>{" "}
           to search.
         </p>
+        <DesktopAppCard variant="inline" className="mt-4">
+          Want richer HTML documentation of this schema, with diagrams and search? The free desktop app
+          generates it offline:
+        </DesktopAppCard>
       </div>
     </div>
   );
@@ -226,6 +231,14 @@ export default function App() {
         title: "Have an XML document instead? Open our sister tool XML Viewer",
         ariaLabel: "Open XML Viewer (sister tool for XML documents)",
         href: XML_VIEWER_URL,
+        external: true,
+      },
+      {
+        key: "freexmltoolkit",
+        label: "Desktop app ↗",
+        title: "FreeXmlToolkit — free desktop XML workstation by the same author (Windows, macOS, Linux)",
+        ariaLabel: "FreeXmlToolkit desktop app",
+        href: FREEXMLTOOLKIT_GO,
         external: true,
       },
       {

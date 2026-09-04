@@ -37,6 +37,13 @@ describe("AboutDialog", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("links to the FreeXmlToolkit desktop app", () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ status: "ok", version: "x" }) });
+    render(<AboutDialog />);
+    act(() => openAbout());
+    expect(screen.getByRole("link", { name: "FreeXmlToolkit" })).toHaveAttribute("href", "/go/freexmltoolkit");
+  });
+
   it("explains the kind badges with a legend", async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ status: "ok", version: "x" }) });
     render(<AboutDialog />);

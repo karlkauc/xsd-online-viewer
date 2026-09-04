@@ -123,7 +123,7 @@ makes those messages human ("root element is `<games>`, not `<xs:schema>`",
 "not an XML file"), and the frontend's `lib/uploadErrors.ts` classifies them
 to show a matching hint (`components/UploadError.tsx`) — e.g. a link to the
 sister project xml-viewer.online for XML documents. That link
-(`XML_VIEWER_URL` in `lib/uploadErrors.ts`) is also in the header and the
+(`XML_VIEWER_URL` (now in `lib/links.ts`, re-exported from `lib/uploadErrors.ts`) in `lib/uploadErrors.ts`) is also in the header and the
 About dialog; the GitHub repo URL lives in `components/AboutDialog.tsx`
 (`GITHUB_REPO_URL`).
 

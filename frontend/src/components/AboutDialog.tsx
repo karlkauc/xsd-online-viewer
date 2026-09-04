@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchHealth } from "../api/client";
-import { XML_VIEWER_URL } from "../lib/uploadErrors";
+import { FREEXMLTOOLKIT_GO, GITHUB_REPO_URL, XML_VIEWER_URL } from "../lib/links";
 import { openFeedback } from "./UploadError";
 import { API_DOCS_PATH } from "../lib/modeRoute";
 import { KindBadge } from "./TreeView/KindBadge";
 import type { SchemaNodeKind } from "../types/schema";
 
-export const GITHUB_REPO_URL = "https://github.com/karlkauc/xsd-online-viewer";
+export { GITHUB_REPO_URL } from "../lib/links";
 
 export function openAbout(): void {
   window.dispatchEvent(new CustomEvent("xsdv:open-about"));
@@ -124,6 +124,12 @@ export function AboutDialog() {
               XML Viewer
             </a>
             {" — sister tool for viewing and validating XML documents"}
+          </li>
+          <li>
+            <a className={linkClass} href={FREEXMLTOOLKIT_GO} target="_blank" rel="noopener noreferrer">
+              FreeXmlToolkit
+            </a>
+            {" — free desktop XML workstation by the same author: schema-aware editor, XSLT, Schematron, signatures"}
           </li>
           <li>
             <a className={linkClass} href={`${GITHUB_REPO_URL}/blob/master/LICENSE`} target="_blank" rel="noopener noreferrer">

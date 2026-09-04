@@ -1,6 +1,6 @@
 /** Classify backend parse errors so the UI can show an actionable hint. */
 
-export const XML_VIEWER_URL = "https://www.xml-viewer.online/";
+export { XML_VIEWER_URL } from "./links";
 
 export type UploadErrorKind =
   | "xml-document"

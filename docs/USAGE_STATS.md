@@ -19,7 +19,7 @@ One row per event in table `usage_event` (DDL: `backend/sql/usage_stats.sql`):
 | `country_code` | ISO-3166-1 alpha-2 derived server-side via MaxMind GeoLite2; NULL if unknown |
 | `user_agent`, `device` | UA string (≤255) and a cheap classification `desktop`/`mobile`/`bot`/`unknown` |
 | `referrer` | `scheme://host/path` of the `Referer` header, query dropped |
-| `path` | page_view only — SPA path (`/`, `/paste`, `/url`, `/fundsxml`); unknown paths get a 404 and are not recorded |
+| `path` | page_view only — SPA path (`/`, `/paste`, `/url`, `/fundsxml`); unknown paths get a 404 and are not recorded. `/go/freexmltoolkit` with `source=freexmltoolkit` and `status_code=302` is an outbound click on a FreeXmlToolkit link (counted redirect, see `app/api/go.py`) |
 | `source` | `upload`/`text`/`url`/`release` (loads, validations); `html`/`formatted`/`sample` (exports — `sample` is a generated sample XML instance; `input_bytes` then holds the size of the generated document) |
 | `schema_name` | upload/text: file **basename**; url: URL without query string; release: `tag/file`; sample export: main file of the loaded schema |
 | `target_namespace` | of the main schema |

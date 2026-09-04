@@ -14,6 +14,7 @@ import { looksLikeSchema, shouldSniff, XML_VIEWER_URL } from "../lib/uploadError
 import { listZipEntries, pickMainXsd, xsdEntries } from "../lib/zipEntries";
 import { sourceFromLocation, writeSourcePath, type SchemaSource } from "../lib/schemaSource";
 import { COARSE_POINTER_QUERY, useMediaQuery } from "../lib/useMediaQuery";
+import { DesktopAppCard } from "./DesktopAppCard";
 
 /** Files chosen but not yet uploaded because the main schema needs confirming. */
 interface Staged {
@@ -399,6 +400,15 @@ export function Uploader() {
           onUploadAnyway={pendingFile ? () => void upload([pendingFile], undefined, { force: true }) : undefined}
         />
       )}
+
+      <DesktopAppCard
+        className="mt-10"
+        bullets={[
+          "Edit XML with schema-aware IntelliSense, grid view and instant validation",
+          "Generate HTML documentation and profiled sample data from your XSDs",
+          "Schematron rules, XSLT and XProc, XML signatures, PDF — all offline",
+        ]}
+      />
     </div>
   );
 }

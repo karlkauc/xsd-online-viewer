@@ -7,6 +7,7 @@ import { useSelection } from "../stores/selectionStore";
 import { withSchemaRetry } from "../lib/schemaSession";
 import { HANDOFF_UNSUPPORTED_HINT, handoffSupported, openInXmlViewer } from "../lib/xmlViewerHandoff";
 import { fetchSchemaBundle } from "../lib/schemaBundle";
+import { DesktopAppCard } from "./DesktopAppCard";
 import type { ValidationResponse } from "../types/schema";
 
 type Validation =
@@ -317,6 +318,12 @@ export function SampleXmlDialog() {
               The sample and the schema were sent to the XML Viewer tab.
             </p>
           )}
+        </div>
+        <div className="px-4 py-2 border-t border-slate-200 dark:border-slate-800">
+          <DesktopAppCard variant="inline">
+            Need realistic values, several files at once, or reusable generation profiles? Profiled
+            XML generation from this schema is built into the free desktop app:
+          </DesktopAppCard>
         </div>
       </div>
     </div>

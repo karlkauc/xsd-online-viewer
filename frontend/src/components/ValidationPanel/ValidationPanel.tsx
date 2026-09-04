@@ -7,6 +7,7 @@ import {
 } from "../../api/client";
 import { useSelection } from "../../stores/selectionStore";
 import { withSchemaRetry } from "../../lib/schemaSession";
+import { DesktopAppCard } from "../DesktopAppCard";
 import type { ValidationErrorItem } from "../../types/schema";
 
 type Mode = "file" | "text" | "url";
@@ -309,6 +310,12 @@ export function ValidationPanel() {
               </ul>
             )}
           </div>
+        )}
+        {result && !busy && (
+          <DesktopAppCard variant="inline" className="mt-6">
+            Validate whole folders, add Schematron business rules, or fix the document in a schema-aware
+            editor with the free desktop app:
+          </DesktopAppCard>
         )}
       </div>
     </div>

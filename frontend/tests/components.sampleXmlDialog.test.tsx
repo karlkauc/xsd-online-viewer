@@ -42,6 +42,7 @@ describe("SampleXmlDialog", () => {
     await waitForSample("<FirstName>string</FirstName>");
     expect(sampleCalls()[0][0]).toBe("/api/schema/abc/sample?element=element%3A%7Bns%7DPerson");
     expect(await screen.findByRole("status")).toHaveTextContent("Schema-valid");
+    expect(screen.getByRole("link", { name: "FreeXmlToolkit ↗" })).toHaveAttribute("href", "/go/freexmltoolkit");
   });
 
   it("reports validation errors and hands them to the Validation tab", async () => {

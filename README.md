@@ -111,6 +111,16 @@ diagram and validates it against any XSD. It is linked from the header
 (**XML Viewer ↗**), the upload page and the About dialog; if you upload an
 XML document by mistake, the error message points there as well.
 
+## Need more than a viewer? FreeXmlToolkit
+
+[FreeXmlToolkit](https://karlkauc.github.io/FreeXmlToolkit/) is the free
+desktop XML workstation by the same author (Apache 2.0; Windows, macOS,
+Linux): a schema-aware XML editor with IntelliSense and grid view, XSD
+documentation and profiled sample-data generation, Schematron business
+rules, XSLT and XProc, XML signatures and PDF output — all offline. The
+viewer links to it where the browser reaches its limits (sample XML,
+validation, documentation).
+
 ## Technical details, self-hosting & development
 
 Configuration, hardening, env vars, Cloud Run deployment, the architecture
