@@ -39,7 +39,7 @@ test("search palette opens with Ctrl-K", async ({ page }) => {
   const fileInput = page.locator('input[type="file"]');
   await fileInput.setInputFiles(SIMPLE_XSD);
   await page.keyboard.press("Control+k");
-  const searchInput = page.getByPlaceholder("Search elements, types, attributes…");
+  const searchInput = page.getByPlaceholder("Search names, documentation, enumeration values…");
   await expect(searchInput).toBeVisible();
   await searchInput.fill("Age");
   await expect(page.getByText("AgeType").first()).toBeVisible();

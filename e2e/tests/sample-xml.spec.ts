@@ -32,6 +32,7 @@ test("the header button opens the sample for the document root", async ({ page }
   const dialog = page.getByRole("dialog", { name: "Sample XML for <Person>" });
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".cm-content")).toContainText("<tns:Person");
-  // Highlighted, not a plain <pre>: CodeMirror tags tag names.
-  await expect(dialog.locator(".cm-content .ͼ1, .cm-content [class*='ͼ']").first()).toBeVisible();
+  // Highlighted, not a plain <pre>: CodeMirror wraps tokens in styled spans.
+  await expect(dialog.locator(".cm-content .cm-line span").first()).toBeVisible();
+  await expect(dialog.locator(".cm-gutter.cm-lineNumbers")).toBeVisible();
 });
