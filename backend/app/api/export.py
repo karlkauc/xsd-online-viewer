@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import html
 import logging
+import posixpath
 import time
+import zipfile
 from io import BytesIO
 
 from fastapi import APIRouter, HTTPException, Query
@@ -108,6 +110,57 @@ async def export_sample_xml(
         content=document,
         media_type="application/xml; charset=utf-8",
         headers={"Content-Disposition": f'inline; filename="{name}-sample.xml"'},
+    )
+
+
+@router.get("/schema/{schema_id}/export/bundle", response_class=Response)
+async def export_bundle(schema_id: str) -> Response:
+    """The loaded schema as one file: the .xsd itself, or a ZIP of all files.
+
+    Used to hand the schema over to the XML viewer alongside a document, and
+    handy as a plain download of a URL- or release-sourced schema. The main
+    file's name travels in ``X-Main-Filename`` so a ZIP consumer need not
+    guess.
+    """
+    model = schema_cache.get(schema_id)
+    if model is None:
+        emit("export", source="bundle", status="rejected", status_code=404)
+        raise HTTPException(status_code=404, detail="schema not found or expired")
+    files = [f for f in model.files if f.content is not None]
+    main = next((f for f in files if f.relationship == "main"), files[0] if files else None)
+    if main is None:
+        raise HTTPException(status_code=404, detail="schema has no source files")
+    main_base = posixpath.basename(main.filename) or "schema.xsd"
+    if len(files) == 1:
+        body = (main.content or "").encode("utf-8")
+        media_type = "application/xml; charset=utf-8"
+        filename = main_base
+    else:
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for source in files:
+                archive.writestr(source.filename, (source.content or "").encode("utf-8"))
+        body = buffer.getvalue()
+        media_type = "application/zip"
+        filename = f"{main_base.rsplit('.', 1)[0]}-bundle.zip"
+    emit(
+        "export",
+        source="bundle",
+        status="ok",
+        status_code=200,
+        schema_name=main.filename,
+        target_namespace=model.target_namespace,
+        file_count=len(files),
+        input_bytes=len(body),
+    )
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Main-Filename": main.filename,
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Main-Filename",
+        },
     )
 
 

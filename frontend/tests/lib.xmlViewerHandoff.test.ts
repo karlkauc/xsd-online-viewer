@@ -53,6 +53,38 @@ describe("openInXmlViewer", () => {
     expect(transfer).toEqual([msg.content]);
   });
 
+  it("attaches the schema when a loader is given and transfers both buffers", async () => {
+    const popup = fakePopup();
+    const open = vi.spyOn(window, "open").mockReturnValue(popup);
+    const schemaContent = new TextEncoder().encode("<xs:schema/>").buffer;
+    const schema = vi.fn().mockResolvedValue({ name: "simple.xsd", content: schemaContent });
+
+    const result = openInXmlViewer(new File(["<a/>"], "doc.xml"), { target: TARGET, timeoutMs: 1000, schema });
+    await vi.waitFor(() => expect(open).toHaveBeenCalled());
+    expect(schema).toHaveBeenCalledTimes(1);
+    ready(popup, "https://www.xml-viewer.online");
+
+    await expect(result).resolves.toBe(true);
+    const [msg, , transfer] = (popup.postMessage as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(msg.schema).toEqual({ name: "simple.xsd", content: schemaContent });
+    expect(transfer).toEqual([msg.content, schemaContent]);
+  });
+
+  it("still sends the document when the schema loader fails", async () => {
+    const popup = fakePopup();
+    const open = vi.spyOn(window, "open").mockReturnValue(popup);
+    const result = openInXmlViewer(new File(["<a/>"], "doc.xml"), {
+      target: TARGET,
+      timeoutMs: 1000,
+      schema: () => Promise.reject(new Error("expired")),
+    });
+    await vi.waitFor(() => expect(open).toHaveBeenCalled());
+    ready(popup, "https://www.xml-viewer.online");
+    await expect(result).resolves.toBe(true);
+    const [msg] = (popup.postMessage as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(msg.schema).toBeUndefined();
+  });
+
   it("ignores ready messages from foreign origins or other windows", async () => {
     const popup = fakePopup();
     const open = vi.spyOn(window, "open").mockReturnValue(popup);

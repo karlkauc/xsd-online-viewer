@@ -187,3 +187,40 @@ class TestSampleXml:
         assert missing.status_code == 404
         expired = client.get("/api/schema/expired/sample", params={"element": "x"})
         assert expired.status_code == 404
+
+
+class TestBundleExport:
+    def test_single_file_comes_back_as_xsd(self, client: TestClient, simple_xsd_bytes: bytes) -> None:
+        upload = client.post(
+            "/api/schema/upload", files={"file": ("simple.xsd", simple_xsd_bytes, "application/xml")}
+        )
+        schema_id = upload.json()["schema_id"]
+        response = client.get(f"/api/schema/{schema_id}/export/bundle")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/xml")
+        assert 'filename="simple.xsd"' in response.headers["content-disposition"]
+        assert response.headers["x-main-filename"] == "simple.xsd"
+        assert response.content == simple_xsd_bytes
+
+    def test_multi_file_comes_back_as_zip(self, client: TestClient) -> None:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.write(FIXTURES / "library.xsd", "schemas/library.xsd")
+            archive.write(FIXTURES / "types.xsd", "schemas/types.xsd")
+        upload = client.post(
+            "/api/schema/upload",
+            files={"file": ("bundle.zip", buffer.getvalue(), "application/zip")},
+            data={"main_filename": "schemas/library.xsd"},
+        )
+        schema_id = upload.json()["schema_id"]
+        response = client.get(f"/api/schema/{schema_id}/export/bundle")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/zip"
+        assert 'filename="library-bundle.zip"' in response.headers["content-disposition"]
+        assert response.headers["x-main-filename"] == "schemas/library.xsd"
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            assert sorted(archive.namelist()) == ["schemas/library.xsd", "schemas/types.xsd"]
+            assert archive.read("schemas/types.xsd") == (FIXTURES / "types.xsd").read_bytes()
+
+    def test_expired_schema_404(self, client: TestClient) -> None:
+        assert client.get("/api/schema/nope/export/bundle").status_code == 404

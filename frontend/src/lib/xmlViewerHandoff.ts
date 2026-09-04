@@ -44,9 +44,22 @@ function isAllowedOrigin(origin: string): boolean {
   return import.meta.env.DEV && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 }
 
+/** The loaded schema as one file: a `.xsd`, or a ZIP of every file it pulls in. */
+export interface HandoffSchema {
+  name: string;
+  content: ArrayBuffer;
+  /** Entry inside the ZIP that is the root schema (absent for a single .xsd). */
+  mainFilename?: string;
+}
+
 export interface HandoffOptions {
   target?: string;
   timeoutMs?: number;
+  /**
+   * Called right after the popup opens; its result is attached to the file
+   * message. A rejection just means the document travels alone.
+   */
+  schema?: () => Promise<HandoffSchema>;
 }
 
 /**
@@ -63,20 +76,33 @@ export async function openInXmlViewer(file: File, opts: HandoffOptions = {}): Pr
   const popup = window.open(target, "_blank");
   if (!popup) return false;
   const targetOrigin = new URL(target).origin;
+  // Fetch the schema while the popup is still loading; a failure must not
+  // hold the document back.
+  const schemaPromise: Promise<HandoffSchema | undefined> = opts.schema
+    ? opts.schema().catch(() => undefined)
+    : Promise.resolve(undefined);
 
   return new Promise<boolean>((resolve) => {
     let timer = 0;
+    let answered = false;
     const finish = (ok: boolean) => {
       window.removeEventListener("message", onMessage);
       window.clearTimeout(timer);
       resolve(ok);
     };
     const onMessage = (event: MessageEvent) => {
-      if (event.source !== popup || !isAllowedOrigin(event.origin)) return;
+      if (answered || event.source !== popup || !isAllowedOrigin(event.origin)) return;
       const data = event.data as { type?: unknown } | null;
       if (!data || data.type !== "xml-viewer:ready") return;
-      popup.postMessage({ type: "xml-viewer:file", name: file.name, content }, targetOrigin, [content]);
-      finish(true);
+      answered = true;
+      void schemaPromise.then((schema) => {
+        const message = schema
+          ? { type: "xml-viewer:file", name: file.name, content, schema }
+          : { type: "xml-viewer:file", name: file.name, content };
+        const transfer = schema ? [content, schema.content] : [content];
+        popup.postMessage(message, targetOrigin, transfer);
+        finish(true);
+      });
     };
     window.addEventListener("message", onMessage);
     timer = window.setTimeout(() => finish(false), timeoutMs);

@@ -6,6 +6,7 @@ import { fetchSampleXml, validateXmlText } from "../api/client";
 import { useSelection } from "../stores/selectionStore";
 import { withSchemaRetry } from "../lib/schemaSession";
 import { HANDOFF_UNSUPPORTED_HINT, handoffSupported, openInXmlViewer } from "../lib/xmlViewerHandoff";
+import { fetchSchemaBundle } from "../lib/schemaBundle";
 import type { ValidationResponse } from "../types/schema";
 
 type Validation =
@@ -160,7 +161,8 @@ export function SampleXmlDialog() {
     }
     setHandoff("sending");
     const file = new File([xml], `${request.name}-sample.xml`, { type: "application/xml" });
-    void openInXmlViewer(file).then((ok) => setHandoff(ok ? "sent" : "failed"));
+    // The schema goes along so the XML viewer can validate the sample at once.
+    void openInXmlViewer(file, { schema: fetchSchemaBundle }).then((ok) => setHandoff(ok ? "sent" : "failed"));
   }, [xml, request]);
 
   if (!request) return null;
@@ -312,7 +314,7 @@ export function SampleXmlDialog() {
           )}
           {handoff === "sent" && (
             <p className="px-4 pb-3 text-xs text-slate-500 dark:text-slate-400">
-              The sample was sent to the XML Viewer tab.
+              The sample and the schema were sent to the XML Viewer tab.
             </p>
           )}
         </div>
