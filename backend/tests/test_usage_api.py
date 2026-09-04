@@ -82,6 +82,27 @@ def test_text_and_validate_and_export(
     assert recorder.events[1].error_count and recorder.events[1].error_count > 0
 
 
+def test_sample_xml_is_recorded(
+    client: TestClient, recorder: ListRecorder, simple_xsd_bytes: bytes
+) -> None:
+    r = client.post("/api/schema/text", json={"filename": "s.xsd", "content": simple_xsd_bytes.decode()})
+    schema_id = r.json()["schema_id"]
+    ok = client.get(
+        f"/api/schema/{schema_id}/sample",
+        params={"element": "element:{http://example.com/simple}Person", "optional": "true"},
+    )
+    assert ok.status_code == 200
+    client.get(f"/api/schema/{schema_id}/sample", params={"element": "element:Nope"})
+    _, sample_ok, sample_missing = recorder.events
+    assert (sample_ok.event_type, sample_ok.source, sample_ok.status) == ("export", "sample", "ok")
+    assert sample_ok.schema_name == "s.xsd"
+    assert sample_ok.target_namespace == "http://example.com/simple"
+    assert sample_ok.input_bytes == len(ok.content)
+    assert sample_ok.duration_ms is not None
+    assert (sample_missing.status, sample_missing.status_code) == ("rejected", 404)
+    assert sample_missing.error_detail == "element not found: element:Nope"
+
+
 def test_url_rejected(client: TestClient, recorder: ListRecorder) -> None:
     r = client.post("/api/schema/url", json={"url": "http://127.0.0.1/x.xsd?secret=1"})
     assert r.status_code == 400

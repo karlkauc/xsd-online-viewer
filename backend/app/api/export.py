@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import html
 import logging
+import time
 from io import BytesIO
 
 from fastapi import APIRouter, HTTPException, Query
@@ -61,14 +62,47 @@ async def export_sample_xml(
     if model is None:
         emit("export", source="sample", status="rejected", status_code=404)
         raise HTTPException(status_code=404, detail="schema not found or expired")
+    main_file = next((f.filename for f in model.files if f.relationship == "main"), None)
     declaration = find_element(model, element)
     if declaration is None:
-        emit("export", source="sample", status="rejected", status_code=404)
+        emit(
+            "export",
+            source="sample",
+            status="rejected",
+            status_code=404,
+            schema_name=main_file,
+            target_namespace=model.target_namespace,
+            error_detail=f"element not found: {element[:200]}",
+        )
         raise HTTPException(status_code=404, detail="element not found in schema")
+    started = time.perf_counter()
     document = generate_sample(
         model, declaration, SampleOptions(include_optional=optional, repeat=repeat, max_depth=depth)
     )
-    emit("export", source="sample", status="ok", status_code=200, file_count=len(model.files))
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    logger.info(
+        "sample xml generated",
+        extra={
+            "ctx_schema_id": schema_id,
+            "ctx_element": declaration.id,
+            "ctx_optional": optional,
+            "ctx_repeat": repeat,
+            "ctx_depth": depth,
+            "ctx_size_bytes": len(document),
+            "ctx_duration_ms": duration_ms,
+        },
+    )
+    emit(
+        "export",
+        source="sample",
+        status="ok",
+        status_code=200,
+        schema_name=main_file,
+        target_namespace=model.target_namespace,
+        file_count=len(model.files),
+        input_bytes=len(document),
+        duration_ms=duration_ms,
+    )
     name = (declaration.name or "sample").replace("/", "_")
     return Response(
         content=document,

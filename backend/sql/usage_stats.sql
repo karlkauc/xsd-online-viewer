@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS usage_event (
   app_version      text,
   path             text,                 -- page_view: SPA path served
   referrer         text,                 -- scheme://host/path, no query
-  source           text,                 -- schema_load/validate: upload|text|url|release ; export: html|formatted
+  source           text,                 -- schema_load/validate: upload|text|url|release ; export: html|formatted|sample
   schema_name      text,                 -- basename / URL without query / release tag+file (never content)
   target_namespace text,
   input_bytes      int,

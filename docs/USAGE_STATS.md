@@ -20,8 +20,8 @@ One row per event in table `usage_event` (DDL: `backend/sql/usage_stats.sql`):
 | `user_agent`, `device` | UA string (≤255) and a cheap classification `desktop`/`mobile`/`bot`/`unknown` |
 | `referrer` | `scheme://host/path` of the `Referer` header, query dropped |
 | `path` | page_view only — SPA path (`/`, `/paste`, `/url`, `/fundsxml`); unknown paths get a 404 and are not recorded |
-| `source` | `upload`/`text`/`url`/`release` (loads, validations); `html`/`formatted` (exports) |
-| `schema_name` | upload/text: file **basename**; url: URL without query string; release: `tag/file` |
+| `source` | `upload`/`text`/`url`/`release` (loads, validations); `html`/`formatted`/`sample` (exports — `sample` is a generated sample XML instance; `input_bytes` then holds the size of the generated document) |
+| `schema_name` | upload/text: file **basename**; url: URL without query string; release: `tag/file`; sample export: main file of the loaded schema |
 | `target_namespace` | of the main schema |
 | `input_bytes`, `file_count`, `element_count`, `type_count`, `diagnostic_count` | sizes and counts |
 | `error_count` | validate: number of validation errors |

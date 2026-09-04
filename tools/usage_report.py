@@ -91,6 +91,10 @@ def main() -> None:
             SELECT source, status, count(*) n, round(avg(duration_ms)) avg_ms,
                    round(avg(input_bytes)/1024) avg_kb
             FROM usage_event WHERE event_type='schema_load' {and_} GROUP BY 1,2 ORDER BY 1,3 DESC;"""),
+        ("Exports by source & status (html, formatted, sample)", f"""
+            SELECT source, status, count(*) n, count(DISTINCT visitor_hash) visitors,
+                   round(avg(input_bytes)/1024, 1) avg_kb
+            FROM usage_event WHERE event_type='export' {and_} GROUP BY 1,2 ORDER BY 1,3 DESC;"""),
         ("Parse duration percentiles (ok loads)", f"""
             SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms) p50,
                    percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) p95,
