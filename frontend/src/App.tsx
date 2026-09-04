@@ -5,7 +5,8 @@ import { DetailPanel } from "./components/DetailPanel";
 import { SearchPalette } from "./components/SearchPalette";
 import { AboutDialog, GITHUB_REPO_URL, openAbout } from "./components/AboutDialog";
 import { FeedbackDialog } from "./components/FeedbackDialog";
-import { SampleXmlDialog } from "./components/SampleXmlDialog";
+import { SampleXmlDialog, openSampleXml } from "./components/SampleXmlDialog";
+import { computeRootElements } from "./lib/rootElements";
 import { openFeedback } from "./components/UploadError";
 import { DiagramView } from "./components/DiagramView/DiagramView";
 import { TextView } from "./components/TextView/TextView";
@@ -169,6 +170,21 @@ export default function App() {
   // below `lg` so the header can never overflow the viewport.
   const source = useSelection((s) => s.source);
   const { copied: linkCopied, copy: copyLink } = useCopy(2500);
+
+  // Document roots of the main file, offered by the header's sample button.
+  const sampleRoots = useMemo(
+    () =>
+      model
+        ? computeRootElements(model)
+            .filter((el) => el.name)
+            .map((el) => ({ elementId: el.id, name: el.name as string }))
+        : [],
+    [model],
+  );
+  const openRootSample = useCallback(() => {
+    if (sampleRoots.length === 0) return;
+    openSampleXml({ ...sampleRoots[0], candidates: sampleRoots });
+  }, [sampleRoots]);
   const secondaryActions = useMemo<HeaderAction[]>(
     () => [
       ...(schemaId
@@ -295,6 +311,19 @@ export default function App() {
             <span aria-hidden="true">🔍</span>
             <span className="hidden sm:inline">Search</span>
           </button>
+          {model && (
+            <button
+              type="button"
+              className="btn"
+              onClick={openRootSample}
+              disabled={sampleRoots.length === 0}
+              title="Generate a sample XML document for the schema's root element"
+              aria-label="Generate sample XML for the root element"
+            >
+              <span aria-hidden="true">🧪</span>
+              <span className="hidden sm:inline">Sample XML</span>
+            </button>
+          )}
           <HeaderActions actions={secondaryActions} inline={wide} />
           <ThemeToggle />
         </div>

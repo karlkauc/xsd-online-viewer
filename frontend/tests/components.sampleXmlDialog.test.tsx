@@ -16,6 +16,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const sampleText = () => document.querySelector('[data-testid="sample-xml"] .cm-content')?.textContent ?? "";
+const waitForSample = (fragment: string) => waitFor(() => expect(sampleText()).toContain(fragment));
+
 function respondWith(text: string) {
   fetchMock.mockResolvedValue({ ok: true, status: 200, text: async () => text });
 }
@@ -28,7 +31,7 @@ describe("SampleXmlDialog", () => {
 
     act(() => openSampleXml({ elementId: "element:{ns}Person", name: "Person" }));
     expect(screen.getByRole("dialog", { name: "Sample XML for <Person>" })).toBeInTheDocument();
-    expect(await screen.findByText(/<FirstName>string<\/FirstName>/)).toBeInTheDocument();
+    await waitForSample("<FirstName>string</FirstName>");
     expect(fetchMock.mock.calls[0][0]).toBe("/api/schema/abc/sample?element=element%3A%7Bns%7DPerson");
   });
 
@@ -36,7 +39,7 @@ describe("SampleXmlDialog", () => {
     respondWith("<Person/>");
     render(<SampleXmlDialog />);
     act(() => openSampleXml({ elementId: "element:Person", name: "Person" }));
-    await screen.findByText("<Person/>");
+    await waitForSample("<Person/>");
     await userEvent.click(screen.getByRole("checkbox", { name: /Include optional/ }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(fetchMock.mock.calls[1][0]).toContain("optional=true");
@@ -48,10 +51,30 @@ describe("SampleXmlDialog", () => {
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
     render(<SampleXmlDialog />);
     act(() => openSampleXml({ elementId: "element:Person", name: "Person" }));
-    await screen.findByText("<Person/>");
+    await waitForSample("<Person/>");
     await userEvent.click(screen.getByRole("button", { name: "Copy" }));
     expect(writeText).toHaveBeenCalledWith("<Person/>");
     expect(await screen.findByText("Copied ✓")).toBeInTheDocument();
+  });
+
+  it("lets the user switch between candidate roots", async () => {
+    respondWith("<X/>");
+    render(<SampleXmlDialog />);
+    act(() =>
+      openSampleXml({
+        elementId: "element:A",
+        name: "A",
+        candidates: [
+          { elementId: "element:A", name: "A" },
+          { elementId: "element:B", name: "B" },
+        ],
+      }),
+    );
+    await waitForSample("<X/>");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: /Root element/ }), "element:B");
+    expect(screen.getByRole("dialog", { name: "Sample XML for <B>" })).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[1][0]).toContain("element=element%3AB");
   });
 
   it("shows the backend error and closes on Escape", async () => {

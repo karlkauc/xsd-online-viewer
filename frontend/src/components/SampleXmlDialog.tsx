@@ -1,14 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
+import CodeMirror from "@uiw/react-codemirror";
+import { xml } from "@codemirror/lang-xml";
+import { EditorView } from "@codemirror/view";
 import { fetchSampleXml } from "../api/client";
 import { useSelection } from "../stores/selectionStore";
 import { withSchemaRetry } from "../lib/schemaSession";
 import { openInXmlViewer } from "../lib/xmlViewerHandoff";
 
-export interface SampleRequest {
+export interface SampleTarget {
   elementId: string;
   /** Element name, used for the download file name and the title. */
   name: string;
 }
+
+export interface SampleRequest extends SampleTarget {
+  /** Other elements the user may switch to (e.g. all document roots). */
+  candidates?: SampleTarget[];
+}
+
+const EXTENSIONS = [xml(), EditorView.lineWrapping];
+const isDark = () => document.documentElement.classList.contains("dark");
 
 export function openSampleXml(request: SampleRequest): void {
   window.dispatchEvent(new CustomEvent<SampleRequest>("xsdv:open-sample", { detail: request }));
@@ -56,6 +67,19 @@ export function SampleXmlDialog() {
   }, [request, schemaId, includeOptional]);
 
   const close = useCallback(() => setRequest(null), []);
+
+  const candidates = request?.candidates ?? [];
+  const pickCandidate = useCallback(
+    (elementId: string) => {
+      setRequest((current) => {
+        const next = current?.candidates?.find((c) => c.elementId === elementId);
+        return current && next ? { ...current, ...next } : current;
+      });
+      setCopied(false);
+      setHandoff("idle");
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!request) return;
@@ -133,6 +157,22 @@ export function SampleXmlDialog() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-slate-200 dark:border-slate-800 text-sm">
+          {candidates.length > 1 && (
+            <label className="inline-flex items-center gap-2">
+              Root element
+              <select
+                className="px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
+                value={request.elementId}
+                onChange={(e) => pickCandidate(e.target.value)}
+              >
+                {candidates.map((c) => (
+                  <option key={c.elementId} value={c.elementId}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="inline-flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -159,26 +199,33 @@ export function SampleXmlDialog() {
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-auto p-4">
+        <div className="flex-1 min-h-0 overflow-auto">
           {error && (
-            <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+            <p role="alert" className="p-4 text-sm text-red-700 dark:text-red-300">
               Could not generate a sample: {error}
             </p>
           )}
-          {!error && xml === null && <p className="text-sm text-slate-500">Generating…</p>}
+          {!error && xml === null && <p className="p-4 text-sm text-slate-500">Generating…</p>}
           {xml !== null && (
-            <pre className="font-mono text-xs leading-relaxed whitespace-pre text-slate-800 dark:text-slate-100">
-              {xml}
-            </pre>
+            <div data-testid="sample-xml" className="text-xs">
+              <CodeMirror
+                value={xml}
+                extensions={EXTENSIONS}
+                editable={false}
+                readOnly
+                theme={isDark() ? "dark" : "light"}
+                basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: false }}
+              />
+            </div>
           )}
           {handoff === "failed" && (
-            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            <p className="px-4 pb-3 text-xs text-slate-500 dark:text-slate-400">
               Could not send the sample automatically (popup blocked?). Download it and upload the
               file in the XML Viewer instead.
             </p>
           )}
           {handoff === "sent" && (
-            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            <p className="px-4 pb-3 text-xs text-slate-500 dark:text-slate-400">
               The sample was sent to the XML Viewer tab.
             </p>
           )}
