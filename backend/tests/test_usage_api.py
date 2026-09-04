@@ -108,7 +108,7 @@ def test_outbound_click_is_recorded_as_page_view(client: TestClient, recorder: L
     assert r.status_code == 302
     (ev,) = recorder.events
     assert (ev.event_type, ev.path, ev.source, ev.status_code) == (
-        "page_view", "/go/freexmltoolkit", "freexmltoolkit", 302,
+        "page_view", "/go/freexmltoolkit/releases", "freexmltoolkit", 302,
     )
 
 
