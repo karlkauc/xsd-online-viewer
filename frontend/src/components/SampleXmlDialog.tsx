@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { xml } from "@codemirror/lang-xml";
 import { EditorView } from "@codemirror/view";
@@ -7,6 +7,7 @@ import { useSelection } from "../stores/selectionStore";
 import { withSchemaRetry } from "../lib/schemaSession";
 import { HANDOFF_UNSUPPORTED_HINT, handoffSupported, openInXmlViewer } from "../lib/xmlViewerHandoff";
 import { fetchSchemaBundle } from "../lib/schemaBundle";
+import { computeRootElements } from "../lib/rootElements";
 import { DesktopAppCard } from "./DesktopAppCard";
 import type { ValidationResponse } from "../types/schema";
 
@@ -40,6 +41,7 @@ export function openSampleXml(request: SampleRequest): void {
  */
 export function SampleXmlDialog() {
   const schemaId = useSelection((s) => s.schemaId);
+  const model = useSelection((s) => s.model);
   const setValidationResult = useSelection((s) => s.setValidationResult);
   const setActiveTab = useSelection((s) => s.setActiveTab);
   const [request, setRequest] = useState<SampleRequest | null>(null);
@@ -77,10 +79,18 @@ export function SampleXmlDialog() {
     };
   }, [request, schemaId, includeOptional]);
 
+  // Only a document root yields a complete instance document. A sample for a
+  // nested element is a fragment and can never validate, so checking it would
+  // only produce misleading errors.
+  const isDocumentRoot = useMemo(
+    () => !!request && !!model && computeRootElements(model).some((el) => el.id === request.elementId),
+    [request, model],
+  );
+
   // Check the generated document against the schema right away, so the user
   // sees whether it can be used as-is or which placeholders need attention.
   useEffect(() => {
-    if (!request || xml === null) {
+    if (!request || xml === null || !isDocumentRoot) {
       setValidation(null);
       return;
     }
@@ -97,7 +107,7 @@ export function SampleXmlDialog() {
     return () => {
       cancelled = true;
     };
-  }, [request, xml]);
+  }, [request, xml, isDocumentRoot]);
 
   const close = useCallback(() => setRequest(null), []);
 
@@ -243,6 +253,17 @@ export function SampleXmlDialog() {
             </button>
           </div>
         </div>
+
+        {!isDocumentRoot && xml !== null && (
+          <div
+            role="status"
+            data-testid="sample-fragment-note"
+            className="px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-sm text-slate-600 dark:text-slate-300"
+          >
+            Fragment only — &lt;{request.name}&gt; is not a document root, so the sample is not validated
+            against the schema.
+          </div>
+        )}
 
         {validation && (
           <div
