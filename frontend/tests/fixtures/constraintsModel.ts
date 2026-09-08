@@ -1,5 +1,6 @@
 import type {
   AttributeDecl,
+  AttributeGroup,
   ComplexType,
   ElementDecl,
   Group,
@@ -13,9 +14,9 @@ import type {
 // selector/field steps). Namespace/prefix/ids follow the Clark-form scheme
 // the backend emits (see backend/tests/test_parser.py::TestIdentityConstraints).
 
-const NS = "http://example.com/keys";
+export const NS = "http://example.com/keys";
 
-function elementParticle(element: ElementDecl): Particle {
+export function elementParticle(element: ElementDecl): Particle {
   return {
     kind: "element",
     min_occurs: element.min_occurs,
@@ -30,7 +31,7 @@ function elementParticle(element: ElementDecl): Particle {
   };
 }
 
-function groupRefParticle(ref: string): Particle {
+export function groupRefParticle(ref: string): Particle {
   return {
     kind: "group-ref",
     min_occurs: 1,
@@ -45,7 +46,7 @@ function groupRefParticle(ref: string): Particle {
   };
 }
 
-function sequence(children: Particle[]): Particle {
+export function sequence(children: Particle[]): Particle {
   return {
     kind: "sequence",
     min_occurs: 1,
@@ -60,7 +61,7 @@ function sequence(children: Particle[]): Particle {
   };
 }
 
-function leafElement(name: string, typeName: string, line: number, opts?: Partial<ElementDecl>): ElementDecl {
+export function leafElement(name: string, typeName: string, line: number, opts?: Partial<ElementDecl>): ElementDecl {
   return {
     id: `element:{${NS}}${name}`,
     name,
@@ -86,7 +87,7 @@ function leafElement(name: string, typeName: string, line: number, opts?: Partia
 }
 
 // xs:group name="BookCore" { sequence { element ISBN } }
-const isbnElement = leafElement("ISBN", "xs:string", 10);
+export const isbnElement = leafElement("ISBN", "xs:string", 10);
 export const bookCoreGroup: Group = {
   id: `group:{${NS}}BookCore`,
   name: "BookCore",
@@ -96,7 +97,7 @@ export const bookCoreGroup: Group = {
   source_ref: { file_id: "f1", line: 8 },
 };
 
-const titleAttr: AttributeDecl = {
+export const titleAttr: AttributeDecl = {
   id: `attribute:{${NS}}BookType/@title`,
   name: "title",
   qname: null,
@@ -113,7 +114,7 @@ const titleAttr: AttributeDecl = {
   source_ref: { file_id: "f1", line: 19 },
 };
 
-const editionElement = leafElement("Edition", "xs:string", 17, { min_occurs: 0 });
+export const editionElement = leafElement("Edition", "xs:string", 17, { min_occurs: 0 });
 
 // xs:complexType name="BookType" — group ref + own element + attribute.
 export const bookType: ComplexType = {
@@ -175,8 +176,8 @@ export const loanType: ComplexType = {
   source_ref: { file_id: "f1", line: 30 },
 };
 
-const bookElement = leafElement("Book", "tns:BookType", 43, { max_occurs: "unbounded" });
-const loanElement = leafElement("Loan", "tns:LoanType", 50, { max_occurs: "unbounded" });
+export const bookElement = leafElement("Book", "tns:BookType", 43, { max_occurs: "unbounded" });
+export const loanElement = leafElement("Loan", "tns:LoanType", 50, { max_occurs: "unbounded" });
 
 // Nested xs:key on the inline "Loans" complex type — exercises a
 // non-top-level element carrying its own constraint list.
@@ -354,6 +355,171 @@ export const libraryElement: ElementDecl = {
   ],
 };
 
+// --- Additional fixtures for Task 5 (lib/constraintXPath.ts) --------------
+// These are not wired into the Library particle tree; tests construct ad-hoc
+// `start` elements typed against them directly (the resolver only needs the
+// type to be reachable via the model's complex_types/groups/attribute_groups
+// lists, not to be part of any element's actual content model).
+
+// xs:complexType name="ExtendedBookType" — extension of BookType that *also*
+// adds its own element, so flattening must interleave base-then-own content:
+// base's [ISBN, Edition] followed by this type's own [Publisher].
+export const publisherElement = leafElement("Publisher", "xs:string", 95, { min_occurs: 0 });
+export const extendedBookType: ComplexType = {
+  id: `complexType:{${NS}}ExtendedBookType`,
+  name: "ExtendedBookType",
+  anonymous: false,
+  abstract: false,
+  mixed: false,
+  content_kind: "complex",
+  derivation: "extension",
+  base: "tns:BookType",
+  particle: sequence([elementParticle(publisherElement)]),
+  attributes: [],
+  attribute_group_refs: [],
+  simple_content_base: null,
+  simple_content_facets: [],
+  annotation: null,
+  source_ref: { file_id: "f1", line: 94 },
+};
+
+// `<xs:element ref="tns:Book"/>` particle — exercises collectChildElements
+// following resolveElementRef to reach BookType's children through the ref,
+// rather than the ref particle's own (name === null) declaration. The ref
+// particle keeps its own id distinct from the target's, matching the
+// convention used elsewhere (treeRows.ts, ChildrenTable.tsx): selection
+// targets the local particle, resolution follows the ref for content.
+export const bookRefParticleElement: ElementDecl = {
+  ...leafElement("Book", "", 100),
+  id: `element:tns:Book`,
+  name: null,
+  qname: null,
+  ref: "tns:Book",
+  ref_id: bookElement.id,
+  type_name: null,
+};
+export const refHolderType: ComplexType = {
+  id: `complexType:{${NS}}RefHolderType`,
+  name: "RefHolderType",
+  anonymous: false,
+  abstract: false,
+  mixed: false,
+  content_kind: "complex",
+  derivation: "none",
+  base: null,
+  particle: sequence([elementParticle(bookRefParticleElement)]),
+  attributes: [],
+  attribute_group_refs: [],
+  simple_content_base: null,
+  simple_content_facets: [],
+  annotation: null,
+  source_ref: { file_id: "f1", line: 99 },
+};
+export const refHolderElement = leafElement("RefHolder", "tns:RefHolderType", 98);
+
+// Self-referencing xs:group — exercises the visited-set recursion guard in
+// collectChildElements (group_ref -> group whose own particle refs itself).
+export const recursiveMarkerElement = leafElement("Marker", "xs:string", 105);
+export const recursiveGroup: Group = {
+  id: `group:{${NS}}RecursiveGroup`,
+  name: "RecursiveGroup",
+  ref: null,
+  particle: sequence([elementParticle(recursiveMarkerElement), groupRefParticle("tns:RecursiveGroup")]),
+  annotation: null,
+  source_ref: { file_id: "f1", line: 104 },
+};
+export const recursiveHolderType: ComplexType = {
+  id: `complexType:{${NS}}RecursiveHolderType`,
+  name: "RecursiveHolderType",
+  anonymous: false,
+  abstract: false,
+  mixed: false,
+  content_kind: "complex",
+  derivation: "none",
+  base: null,
+  particle: sequence([groupRefParticle("tns:RecursiveGroup")]),
+  attributes: [],
+  attribute_group_refs: [],
+  simple_content_base: null,
+  simple_content_facets: [],
+  annotation: null,
+  source_ref: { file_id: "f1", line: 103 },
+};
+export const recursiveHolderElement = leafElement("RecursiveHolder", "tns:RecursiveHolderType", 102);
+
+// Self-recursive element type (Node contains Child of type NodeType again) —
+// exercises the `.//` BFS recursion/depth cap: an unmatched search must
+// terminate rather than loop forever.
+export const nodeValueElement = leafElement("Value", "xs:string", 110);
+const nodeChildElement = leafElement("Child", "tns:NodeType", 111, {
+  max_occurs: "unbounded",
+  min_occurs: 0,
+});
+export const nodeType: ComplexType = {
+  id: `complexType:{${NS}}NodeType`,
+  name: "NodeType",
+  anonymous: false,
+  abstract: false,
+  mixed: false,
+  content_kind: "complex",
+  derivation: "none",
+  base: null,
+  particle: sequence([elementParticle(nodeValueElement), elementParticle(nodeChildElement)]),
+  attributes: [],
+  attribute_group_refs: [],
+  simple_content_base: null,
+  simple_content_facets: [],
+  annotation: null,
+  source_ref: { file_id: "f1", line: 109 },
+};
+export const nodeRootElement = leafElement("Node", "tns:NodeType", 108);
+
+// xs:attributeGroup name="ContactGroup" — exercises collectAttributes
+// flattening attribute-group refs via attributeGroups.collectFromGroup.
+export const phoneAttribute: AttributeDecl = {
+  id: `attribute:{${NS}}ContactGroup/@phone`,
+  name: "phone",
+  qname: null,
+  ref: null,
+  type_name: "xs:string",
+  type_inline: null,
+  use: "optional",
+  default: null,
+  fixed: null,
+  form: null,
+  target_namespace: null,
+  is_global: false,
+  annotation: null,
+  source_ref: { file_id: "f1", line: 115 },
+};
+export const contactAttributeGroup: AttributeGroup = {
+  id: `attributeGroup:{${NS}}ContactGroup`,
+  name: "ContactGroup",
+  ref: null,
+  attributes: [phoneAttribute],
+  attribute_group_refs: [],
+  annotation: null,
+  source_ref: { file_id: "f1", line: 114 },
+};
+export const contactHolderType: ComplexType = {
+  id: `complexType:{${NS}}ContactHolderType`,
+  name: "ContactHolderType",
+  anonymous: false,
+  abstract: false,
+  mixed: false,
+  content_kind: "complex",
+  derivation: "none",
+  base: null,
+  particle: null,
+  attributes: [],
+  attribute_group_refs: ["tns:ContactGroup"],
+  simple_content_base: null,
+  simple_content_facets: [],
+  annotation: null,
+  source_ref: { file_id: "f1", line: 113 },
+};
+export const contactHolderElement = leafElement("Contact", "tns:ContactHolderType", 112);
+
 export const constraintsModel: SchemaModel = {
   schema_id: "test-constraints",
   target_namespace: NS,
@@ -367,9 +533,18 @@ export const constraintsModel: SchemaModel = {
   elements: [libraryElement],
   attributes: [],
   simple_types: [],
-  complex_types: [bookType, specialBookType, loanType],
-  groups: [bookCoreGroup],
-  attribute_groups: [],
+  complex_types: [
+    bookType,
+    specialBookType,
+    loanType,
+    extendedBookType,
+    refHolderType,
+    recursiveHolderType,
+    nodeType,
+    contactHolderType,
+  ],
+  groups: [bookCoreGroup, recursiveGroup],
+  attribute_groups: [contactAttributeGroup],
   files: [
     {
       id: "f1",
