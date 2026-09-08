@@ -97,7 +97,7 @@ export function SampleXmlDialog() {
     let cancelled = false;
     setValidation({ status: "checking" });
     const filename = `${request.name}-sample.xml`;
-    withSchemaRetry((id) => validateXmlText(id, xml, filename))
+    withSchemaRetry((id) => validateXmlText(id, xml, filename, "sample"))
       .then((result) => {
         if (!cancelled) setValidation({ status: "done", result });
       })

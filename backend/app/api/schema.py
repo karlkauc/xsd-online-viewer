@@ -7,7 +7,7 @@ import hashlib
 import logging
 import time
 from collections.abc import Callable
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
@@ -49,6 +49,9 @@ class SchemaResponse(BaseModel):
 class ValidateTextPayload(BaseModel):
     content: str = Field(..., description="Raw XML content to validate")
     filename: str = Field(default="document.xml")
+    # Stored as ``source`` of the usage event: ``sample`` marks the automatic check of a
+    # generated sample document (SampleXmlDialog), so it is not mistaken for pasted text.
+    origin: Literal["text", "sample"] = Field(default="text")
 
 
 class ValidateUrlPayload(BaseModel):
@@ -320,8 +323,8 @@ async def validate_xml_text(
 ) -> ValidationResponse:
     data = payload.content.encode("utf-8")
     if len(data) > settings.max_upload_bytes:
-        raise reject("validate", "text", 413, f"content exceeds {settings.max_upload_mb} MB limit")
-    return _validate_xml_against_schema(schema_id, data, "text")
+        raise reject("validate", payload.origin, 413, f"content exceeds {settings.max_upload_mb} MB limit")
+    return _validate_xml_against_schema(schema_id, data, payload.origin)
 
 
 @router.post("/schema/{schema_id}/validate/url", response_model=ValidationResponse)

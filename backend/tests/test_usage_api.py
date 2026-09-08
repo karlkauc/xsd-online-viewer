@@ -103,6 +103,28 @@ def test_sample_xml_is_recorded(
     assert sample_missing.error_detail == "element not found: element:Nope"
 
 
+def test_sample_validation_is_recorded_with_source_sample(
+    client: TestClient, recorder: ListRecorder, simple_xsd_bytes: bytes
+) -> None:
+    """The sample dialog validates a generated root document; that check must be
+    distinguishable from a pasted text (the dashboard pairs it with the export)."""
+    r = client.post("/api/schema/text", json={"filename": "s.xsd", "content": simple_xsd_bytes.decode()})
+    schema_id = r.json()["schema_id"]
+    sample = client.get(
+        f"/api/schema/{schema_id}/sample", params={"element": "element:{http://example.com/simple}Person"}
+    )
+    r = client.post(
+        f"/api/schema/{schema_id}/validate/text",
+        json={"content": sample.text, "filename": "Person-sample.xml", "origin": "sample"},
+    )
+    assert r.status_code == 200
+    validated = recorder.events[-1]
+    assert (validated.event_type, validated.source) == ("validate", "sample")
+    assert validated.status in ("ok", "invalid") and validated.input_bytes == len(sample.content)
+    r = client.post(f"/api/schema/{schema_id}/validate/text", json={"content": "<x/>", "origin": "nope"})
+    assert r.status_code == 422 and recorder.events[-1] is validated
+
+
 def test_outbound_click_is_recorded_as_page_view(client: TestClient, recorder: ListRecorder) -> None:
     r = client.get("/go/freexmltoolkit", params={"to": "releases"}, follow_redirects=False)
     assert r.status_code == 302

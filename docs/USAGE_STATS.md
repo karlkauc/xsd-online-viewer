@@ -20,7 +20,7 @@ One row per event in table `usage_event` (DDL: `backend/sql/usage_stats.sql`):
 | `user_agent`, `device` | UA string (≤255) and a cheap classification `desktop`/`mobile`/`bot`/`unknown` |
 | `referrer` | `scheme://host/path` of the `Referer` header, query dropped |
 | `path` | page_view only — SPA path (`/`, `/paste`, `/url`, `/fundsxml`); unknown paths get a 404 and are not recorded. `/go/freexmltoolkit/docs` or `/go/freexmltoolkit/releases` with `source=freexmltoolkit` and `status_code=302` is an outbound click on a FreeXmlToolkit link (Learn more / Download) (counted redirect, see `app/api/go.py`) |
-| `source` | `upload`/`text`/`url`/`release` (loads, validations); `html`/`formatted`/`sample` (exports — `sample` is a generated sample XML instance; `input_bytes` then holds the size of the generated document) |
+| `source` | `upload`/`text`/`url`/`release` (loads, validations); `html`/`formatted`/`sample` (exports — `sample` is a generated sample XML instance; `input_bytes` then holds the size of the generated document). A `validate` event with `source='sample'` is the automatic schema check the sample dialog runs on a generated document — only document roots are checked, so such an event marks the preceding sample export (same visitor, same `input_bytes`) as a whole-document sample; its `status` (`ok`/`invalid`/`rejected`) tells whether the generated XML was schema-valid |
 | `schema_name` | upload/text: file **basename**; url: URL without query string (for `validate` events with `source='url'` this is the URL of the XML *document*); release: `tag/file`; sample export: main file of the loaded schema |
 | `target_namespace` | of the main schema |
 | `input_bytes`, `file_count`, `element_count`, `type_count`, `diagnostic_count` | sizes and counts |

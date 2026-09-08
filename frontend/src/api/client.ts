@@ -145,15 +145,19 @@ export async function validateXmlFile(
   return handleJson<ValidationResponse>(response);
 }
 
+/** Where the XML came from; recorded as the usage event's `source`. */
+export type ValidateTextOrigin = "text" | "sample";
+
 export async function validateXmlText(
   schemaId: string,
   content: string,
   filename = "document.xml",
+  origin: ValidateTextOrigin = "text",
 ): Promise<ValidationResponse> {
   const response = await fetch(`${API_BASE}/schema/${schemaId}/validate/text`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ content, filename }),
+    body: JSON.stringify({ content, filename, origin }),
   });
   return handleJson<ValidationResponse>(response);
 }
