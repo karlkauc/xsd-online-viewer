@@ -549,6 +549,11 @@ class XsdParser:
 
         self._process_overrides(model)
         link_keyrefs(model, self.state.diagnostics)
+        # Local import: idroles.py imports XSD_NS from this module, so a
+        # module-level import here would be circular.
+        from app.parser.idroles import apply_id_roles
+
+        apply_id_roles(model)
 
         model.diagnostics.extend(self.state.diagnostics)
         return model

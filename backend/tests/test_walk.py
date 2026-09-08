@@ -40,3 +40,28 @@ class TestIterAttributes:
         model = parse_single(simple_xsd_bytes, "simple.xsd")
         names = {a.name for a in iter_attributes(model)}
         assert {"id", "country"} <= names
+
+    def test_reaches_attributes_on_inline_complex_types_of_nested_elements(
+        self,
+    ) -> None:
+        # "Inner" is a nested element (inside OuterType's particle) whose own
+        # complexType is inline (not named) and carries an attribute — that
+        # attribute is only reachable if iter_attributes recurses into a
+        # nested element's own type_inline_complex, not just top-level ones.
+        xsd = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:complexType name="OuterType">
+    <xs:sequence>
+      <xs:element name="Inner">
+        <xs:complexType>
+          <xs:attribute name="innerAttr" type="xs:string"/>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="Outer" type="OuterType"/>
+</xs:schema>
+"""
+        model = parse_single(xsd, "nested-inline.xsd")
+        names = {a.name for a in iter_attributes(model)}
+        assert "innerAttr" in names

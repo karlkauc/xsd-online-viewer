@@ -190,6 +190,11 @@ class SimpleType(BaseModel):
 
 AttributeUse = Literal["required", "optional", "prohibited"]
 
+# ID/IDREF role a declaration's type resolves to, computed by the
+# ``idroles.apply_id_roles`` post-pass. ``None`` means the type carries no
+# ID/IDREF role at all (most declarations).
+IdRole = Literal["id", "idref", "idrefs"]
+
 
 class AttributeDecl(BaseModel):
     id: str
@@ -208,6 +213,8 @@ class AttributeDecl(BaseModel):
     source_ref: SourceRef | None = None
     version_constraints: VersionConstraints | None = None
     inheritable: bool = False  # XSD 1.1 ``@inheritable`` on xs:attribute
+    # ID/IDREF role of this attribute's type, set by idroles.apply_id_roles.
+    id_role: IdRole | None = None
 
 
 class AttributeGroup(BaseModel):
@@ -281,6 +288,10 @@ class ElementDecl(BaseModel):
     version_constraints: VersionConstraints | None = None
     alternatives: list[Alternative] = Field(default_factory=list)
     identity_constraints: list[IdentityConstraint] = Field(default_factory=list)
+    # ID/IDREF role of this element's type, set by idroles.apply_id_roles.
+    # Always None for a ``ref`` particle — the frontend resolves the role
+    # through the target of ``resolveElementRef``.
+    id_role: IdRole | None = None
 
 
 # ---------------------------------------------------------------------------

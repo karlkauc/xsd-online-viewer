@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+           xmlns:foo="http://example.com/foo"
+           xmlns:tns="http://example.com/id-idref"
+           targetNamespace="http://example.com/id-idref"
+           elementFormDefault="qualified">
+
+  <!-- Direct builtin roles. -->
+  <xs:element name="DirectId" type="xs:ID"/>
+  <xs:element name="DirectIdref" type="xs:IDREF"/>
+  <xs:element name="DirectIdrefs" type="xs:IDREFS"/>
+
+  <!-- Same XSD namespace under a different prefix ("xsd:" instead of "xs:"). -->
+  <xs:element name="PrefixedIdrefViaXsd" type="xsd:IDREF"/>
+
+  <!-- Non-XSD namespace with a local name that happens to be "ID" — must
+       NOT be classified as an id role. -->
+  <xs:element name="NonXsdId" type="foo:ID"/>
+
+  <!-- Inline restriction with the base given directly via @base, the shape
+       FundsXML4 actually uses (e.g. AssetUniqueID). -->
+  <xs:element name="InlineIdrefRestriction">
+    <xs:simpleType>
+      <xs:restriction base="xs:IDREF">
+        <xs:maxLength value="256"/>
+      </xs:restriction>
+    </xs:simpleType>
+  </xs:element>
+
+  <!-- Parser quirk: restriction with no @base attribute, base given instead
+       as a nested anonymous xs:simpleType (stored in member_inline[0] with
+       base=None). -->
+  <xs:element name="QuirkInlineBaseIdref">
+    <xs:simpleType>
+      <xs:restriction>
+        <xs:simpleType>
+          <xs:restriction base="xs:IDREF"/>
+        </xs:simpleType>
+        <xs:maxLength value="32"/>
+      </xs:restriction>
+    </xs:simpleType>
+  </xs:element>
+
+  <!-- Named simple type restricting xs:IDREF. -->
+  <xs:simpleType name="RefType">
+    <xs:restriction base="xs:IDREF">
+      <xs:maxLength value="128"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:element name="NamedRefTypeElement" type="tns:RefType"/>
+
+  <!-- Two-level derived: DerivedRefType restricts the named RefType. -->
+  <xs:simpleType name="DerivedRefType">
+    <xs:restriction base="tns:RefType">
+      <xs:minLength value="1"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:element name="DerivedRefTypeElement" type="tns:DerivedRefType"/>
+
+  <!-- List of RefType -> idrefs. -->
+  <xs:simpleType name="RefTypeList">
+    <xs:list itemType="tns:RefType"/>
+  </xs:simpleType>
+
+  <xs:element name="ListOfRefType" type="tns:RefTypeList"/>
+
+  <!-- Union with a non-id member -> idrefs (RefType is an idref). -->
+  <xs:simpleType name="RefOrToken">
+    <xs:union memberTypes="tns:RefType xs:token"/>
+  </xs:simpleType>
+
+  <xs:element name="UnionRefOrToken" type="tns:RefOrToken"/>
+
+  <!-- Union where one member is xs:ID -> id wins over the token member. -->
+  <xs:simpleType name="IdOrToken">
+    <xs:union memberTypes="xs:ID xs:token"/>
+  </xs:simpleType>
+
+  <xs:element name="UnionIdOrToken" type="tns:IdOrToken"/>
+
+  <!-- Mutual restriction cycle -> None (cycle guard), not infinite recursion. -->
+  <xs:simpleType name="CycleA">
+    <xs:restriction base="tns:CycleB"/>
+  </xs:simpleType>
+  <xs:simpleType name="CycleB">
+    <xs:restriction base="tns:CycleA"/>
+  </xs:simpleType>
+
+  <xs:element name="CycleElement" type="tns:CycleA"/>
+
+  <!-- simpleContent extension of xs:ID. -->
+  <xs:complexType name="SimpleContentIdType">
+    <xs:simpleContent>
+      <xs:extension base="xs:ID">
+        <xs:attribute name="unit" type="xs:string"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
+  <xs:element name="SimpleContentIdElement" type="tns:SimpleContentIdType"/>
+
+  <!-- Global attribute. -->
+  <xs:attribute name="globalIdAttr" type="xs:ID"/>
+
+  <!-- Attribute group with an idref attribute. -->
+  <xs:attributeGroup name="RefAttrGroup">
+    <xs:attribute name="groupRef" type="tns:RefType"/>
+  </xs:attributeGroup>
+
+  <!-- Attributes: direct id, named ref type, inline ref, plain string,
+       plus a group ref pulling in the attribute-group attribute above. -->
+  <xs:complexType name="AttrHolderType">
+    <xs:sequence>
+      <xs:element name="Placeholder" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:ID" use="required"/>
+    <xs:attribute name="namedRef" type="tns:RefType"/>
+    <xs:attribute name="inlineRef">
+      <xs:simpleType>
+        <xs:restriction base="xs:IDREF">
+          <xs:maxLength value="64"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="plain" type="xs:string"/>
+    <xs:attributeGroup ref="tns:RefAttrGroup"/>
+  </xs:complexType>
+
+  <xs:element name="AttrHolder" type="tns:AttrHolderType"/>
+
+</xs:schema>
