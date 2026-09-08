@@ -612,3 +612,22 @@ class TestPickMainXsd:
             "schemas/main.xsd": b'<xs:schema><xs:import schemaLocation="./common/types.xsd"/></xs:schema>',
         }
         assert pick_main_xsd(files) == "schemas/main.xsd"
+
+
+class TestLeadingWhitespaceBeforeXmlDeclaration:
+    """Some published schemas (e.g. nuspec.xsd on GitHub) start with a blank
+    line before ``<?xml ...?>``. The XML spec forbids that, but the viewer
+    should still load the file and tell the user about the defect."""
+
+    def test_is_parsed_with_a_warning(self, library_xsd_bytes: bytes) -> None:
+        assert library_xsd_bytes.startswith(b"<?xml")
+        content = b"\n  \n" + library_xsd_bytes
+        model = parse_single(content, "library.xsd")
+        assert _find_element(model, "Library") is not None
+        warnings = [d for d in model.diagnostics if d.severity == "warning"]
+        assert any("XML declaration" in d.message and "whitespace" in d.message for d in warnings)
+
+    def test_stripped_content_is_kept_for_the_text_view(self, library_xsd_bytes: bytes) -> None:
+        model = parse_single(b"\n" + library_xsd_bytes, "library.xsd")
+        (main,) = [f for f in model.files if f.filename == "library.xsd"]
+        assert main.content.startswith("<?xml")

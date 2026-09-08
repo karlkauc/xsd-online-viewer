@@ -242,6 +242,24 @@ def _namespace_and_local(tag: str) -> tuple[str | None, str]:
     return None, tag
 
 
+# Whitespace (optionally behind a UTF-8 BOM) in front of the XML declaration.
+# The spec requires ``<?xml`` at byte 0, and lxml enforces that; real-world
+# files on GitHub & co. frequently violate it with a stray leading newline.
+_LEADING_WS_BEFORE_DECL_RE = re.compile(rb"\A(?:\xef\xbb\xbf)?\s+(?=<\?xml)")
+
+
+def _strip_whitespace_before_xml_declaration(content: bytes) -> tuple[bytes, bool]:
+    """Drop whitespace that precedes ``<?xml`` so lxml accepts the document.
+
+    Returns the (possibly unchanged) content and whether anything was
+    stripped, so the caller can warn the user about the defect.
+    """
+    match = _LEADING_WS_BEFORE_DECL_RE.match(content)
+    if match is None:
+        return content, False
+    return content[match.end() :], True
+
+
 def _text(elem: etree._Element | None) -> str:
     if elem is None:
         return ""
@@ -318,6 +336,21 @@ class XsdParser:
         key = (target_ns_hint, filename)
         if key in self.state.by_key:
             return self.state.by_key[key]
+        file_id = hashlib.sha1(filename.encode("utf-8")).hexdigest()[:12]
+        content, stripped = _strip_whitespace_before_xml_declaration(content)
+        if stripped:
+            self.state.diagnostics.append(
+                Diagnostic(
+                    severity="warning",
+                    message=(
+                        f"{filename}: leading whitespace before the XML declaration was "
+                        "removed. The XML specification requires '<?xml' at the very "
+                        "start of the file; strict parsers reject this file as-is."
+                    ),
+                    file_id=file_id,
+                    line=1,
+                )
+            )
         try:
             tree = parse_bytes(content, filename)
         except SecurityError as exc:
@@ -341,7 +374,6 @@ class XsdParser:
             )
             return None
         target_ns = root.get("targetNamespace") or target_ns_hint
-        file_id = hashlib.sha1(filename.encode("utf-8")).hexdigest()[:12]
         loaded = _LoadedFile(
             file_id=file_id,
             filename=filename,
