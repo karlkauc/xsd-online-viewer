@@ -22,6 +22,12 @@ import type {
 } from "../../types/schema";
 import { computeRootElements } from "../../lib/rootElements";
 import { occursStyle } from "../../lib/cardinality";
+import {
+  collectElementAssertions,
+  countAssertions,
+  makeModelResolver,
+  type TypeResolver,
+} from "../../lib/assertions";
 
 export const NODE_WIDTH = 220;
 export const COMPOSITOR_WIDTH = 70;
@@ -71,6 +77,9 @@ interface BuildContext {
   // (a type whose content refs the element it defines) would otherwise expand
   // forever, since every repetition of the ref carries the same id.
   pathIds: Set<string>;
+  // Resolves a type's assertions (own + extension/restriction base chain,
+  // including simple types) for the ⚖ badge — see lib/assertions.ts.
+  assertionResolver: TypeResolver;
 }
 
 function nextId(context: BuildContext): string {
@@ -163,7 +172,9 @@ function computeElementDisplay(
   const { optional, repeating } = hostParticle
     ? occursStyle(hostParticle.min_occurs, hostParticle.max_occurs)
     : { optional: false, repeating: false };
-  const assertCount = resolvedComplex?.assertions?.length ?? 0;
+  const assertCount = countAssertions(
+    collectElementAssertions(target, context.assertionResolver),
+  );
   const alternativesCount = element.alternatives?.length ?? 0;
 
   // Row counts that actually render in ElementNode.tsx.
@@ -477,6 +488,7 @@ export function buildDiagramGraph(
     typeIndex: buildTypeIndex(model),
     elementIndex: buildElementIndex(model),
     pathIds: new Set(),
+    assertionResolver: makeModelResolver(model),
   };
 
   let nextTopY = 0;

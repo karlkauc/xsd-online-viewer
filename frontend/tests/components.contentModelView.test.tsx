@@ -5,6 +5,14 @@ import { ContentModelView } from "../src/components/ContentModelView/ContentMode
 import { useSelection } from "../src/stores/selectionStore";
 import { smallModel } from "./fixtures/smallModel";
 import { refModel, DOCUMENT_ID, SIGNATURE_REF_ID } from "./fixtures/refModel";
+import {
+  assertionsModel,
+  codeAttribute,
+  codeElement,
+  measurementElement,
+  measurementType,
+  positiveCodeType,
+} from "./fixtures/assertionsModel";
 
 function selectId(id: string) {
   act(() => {
@@ -105,5 +113,66 @@ describe("ContentModelView element references", () => {
     const row = screen.getByText("ds:Signature").closest("tr");
     expect(row).not.toBeNull();
     expect(row!.textContent).toContain("ds:SignatureType");
+  });
+});
+
+describe("ContentModelView assertions table", () => {
+  beforeEach(() => {
+    useSelection.getState().clearSchema();
+  });
+
+  function selectInAssertionsModel(id: string) {
+    act(() => {
+      useSelection.getState().setSchema("assert", assertionsModel);
+      useSelection.getState().setSelected(id);
+    });
+  }
+
+  it("shows an assertions table for an element typed by a named complex type", () => {
+    selectInAssertionsModel(measurementElement.id);
+    render(<ContentModelView />);
+    expect(screen.getByText("Assertions")).toBeInTheDocument();
+    expect(screen.getByText("xs:date(@from) le xs:date(@to)")).toBeInTheDocument();
+    expect(screen.getByText("count(Value) gt 0")).toBeInTheDocument();
+  });
+
+  it("shows an assertions table for a directly-selected complexType", () => {
+    act(() => {
+      useSelection.getState().setSchema("assert", assertionsModel);
+      useSelection.getState().setSelected(measurementType.id);
+    });
+    render(<ContentModelView />);
+    expect(screen.getByText("Assertions")).toBeInTheDocument();
+    expect(screen.getByText("xs:date(@from) le xs:date(@to)")).toBeInTheDocument();
+  });
+
+  it("shows an assertions table for a directly-selected simpleType", () => {
+    act(() => {
+      useSelection.getState().setSchema("assert", assertionsModel);
+      useSelection.getState().setSelected(positiveCodeType.id);
+    });
+    render(<ContentModelView />);
+    expect(screen.getByText("Assertions")).toBeInTheDocument();
+    expect(screen.getByText("string-length($value) gt 0")).toBeInTheDocument();
+  });
+
+  it("shows an assertions table for an element typed by a named simpleType", () => {
+    selectInAssertionsModel(codeElement.id);
+    render(<ContentModelView />);
+    expect(screen.getByText("Assertions")).toBeInTheDocument();
+    expect(screen.getByText("string-length($value) gt 0")).toBeInTheDocument();
+  });
+
+  it("shows an assertions table for an attribute typed by a named simpleType", () => {
+    selectInAssertionsModel(codeAttribute.id);
+    render(<ContentModelView />);
+    expect(screen.getByText("Assertions")).toBeInTheDocument();
+    expect(screen.getByText("string-length($value) gt 0")).toBeInTheDocument();
+  });
+
+  it("does not render an assertions table when there are no assertions", () => {
+    selectId("element:{http://example.com/simple}Person");
+    render(<ContentModelView />);
+    expect(screen.queryByText("Assertions")).not.toBeInTheDocument();
   });
 });

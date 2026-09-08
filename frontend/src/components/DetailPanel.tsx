@@ -19,6 +19,13 @@ import type {
 import { KindBadge } from "./TreeView/KindBadge";
 import { FacetGroups } from "./FacetGroups";
 import { AssertionsList } from "./AssertionsList";
+import {
+  collectAttributeAssertions,
+  collectComplexAssertions,
+  collectElementAssertions,
+  collectSimpleAssertions,
+  makeIndexResolver,
+} from "../lib/assertions";
 import { AlternativesList } from "./AlternativesList";
 import { openSampleXml } from "./SampleXmlDialog";
 import { CopyButton } from "./CopyButton";
@@ -336,6 +343,8 @@ function renderElement(element: ElementDecl, ctx: PanelCtx) {
     ? (complexEntry.node as ComplexType)
     : undefined;
 
+  const assertionGroups = collectElementAssertions(declaration, makeIndexResolver(index));
+
   const sampleName = declaration.name ?? element.name ?? element.ref ?? "element";
 
   return (
@@ -441,6 +450,7 @@ function renderElement(element: ElementDecl, ctx: PanelCtx) {
           inheritedFrom={complexEntry!.label}
         />
       )}
+      <AssertionsList groups={assertionGroups} />
     </section>
   );
 }
@@ -457,6 +467,7 @@ function renderAttribute(attr: AttributeDecl, ctx: PanelCtx) {
     inheritedEntry && "facets" in inheritedEntry.node
       ? (inheritedEntry.node as SimpleType)
       : undefined;
+  const assertionGroups = collectAttributeAssertions(attr, makeIndexResolver(index));
   return (
     <section>
       <SectionHead title="Attribute" />
@@ -504,6 +515,7 @@ function renderAttribute(attr: AttributeDecl, ctx: PanelCtx) {
           inheritedFrom={inheritedEntry!.label}
         />
       )}
+      <AssertionsList groups={assertionGroups} />
     </section>
   );
 }
@@ -543,9 +555,7 @@ function renderComplexType(complex: ComplexType, ctx: PanelCtx) {
       {complex.simple_content_facets.length > 0 && (
         <FacetGroups facets={complex.simple_content_facets} restriction={null} />
       )}
-      {complex.assertions && complex.assertions.length > 0 && (
-        <AssertionsList assertions={complex.assertions} />
-      )}
+      <AssertionsList groups={collectComplexAssertions(complex, makeIndexResolver(index))} />
       {complex.attributes.length > 0 && (
         <div className="mt-4">
           <SubHead>Attributes ({complex.attributes.length})</SubHead>
@@ -672,9 +682,7 @@ function renderSimpleType(simple: SimpleType, ctx: PanelCtx) {
         )}
       </div>
       <FacetGroups facets={simple.facets} restriction={null} />
-      {simple.assertions && simple.assertions.length > 0 && (
-        <AssertionsList assertions={simple.assertions} />
-      )}
+      <AssertionsList groups={collectSimpleAssertions(simple, makeIndexResolver(index))} />
     </section>
   );
 }

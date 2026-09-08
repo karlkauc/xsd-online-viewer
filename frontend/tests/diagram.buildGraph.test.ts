@@ -4,9 +4,11 @@ import type { Particle, SchemaModel } from "../src/types/schema";
 import {
   buildDiagramGraph,
   COMPOSITOR_HEIGHT,
+  NODE_HEIGHT,
 } from "../src/components/DiagramView/buildGraph";
 import { smallModel } from "./fixtures/smallModel";
 import { refModel, DOCUMENT_ID, SIGNATURE_REF_ID } from "./fixtures/refModel";
+import { assertionsModel } from "./fixtures/assertionsModel";
 
 const PERSON_ID = "element:{http://example.com/simple}Person";
 const ADDRESS_ID = "element:{http://example.com/simple}PersonType/Address";
@@ -313,5 +315,52 @@ describe("buildDiagramGraph cardinality flags", () => {
     const { nodes } = buildDiagramGraph(model, new Set([PERSON_ID]), null);
     expect(nodeHeight(elementByLabel(nodes, "LastName")!)).toBe(53);
     expect(nodeHeight(elementByLabel(nodes, "Age")!)).toBe(51);
+  });
+});
+
+describe("buildDiagramGraph assertion badge", () => {
+  function elementByLabel(nodes: Node[], label: string): Node | undefined {
+    return nodes.find(
+      (n) => n.type === "element" && (n.data as { label: string }).label === label,
+    );
+  }
+  function assertCountOf(label: string): number | undefined {
+    const { nodes } = buildDiagramGraph(assertionsModel, new Set(), null);
+    const node = elementByLabel(nodes, label);
+    if (!node) throw new Error(`node ${label} missing`);
+    return (node.data as { assertCount?: number }).assertCount;
+  }
+
+  it("counts a named complex type's own assertions", () => {
+    expect(assertCountOf("Measurement")).toBe(2);
+  });
+
+  it("counts a named simple type's assertions too", () => {
+    expect(assertCountOf("Code")).toBe(1);
+  });
+
+  it("counts an inline simple type's assertion", () => {
+    expect(assertCountOf("InlineCoded")).toBe(1);
+  });
+
+  it("counts assertions across an extension-base chain", () => {
+    expect(assertCountOf("Derived")).toBe(2);
+  });
+
+  it("counts a simpleContent base simple type's assertion", () => {
+    expect(assertCountOf("Payment")).toBe(1);
+  });
+
+  it("does not infinite-loop on a self-referential extension", () => {
+    expect(assertCountOf("Cyclic")).toBe(1);
+  });
+
+  it("does not change the height budget of the badge-carrying nodes", () => {
+    // Measurement is expandable (has a resolved complex type) but has no
+    // attributes/documentation of its own: header+type row (NODE_HEIGHT)
+    // plus the expand hint (21), regardless of how many assertions it has.
+    const { nodes } = buildDiagramGraph(assertionsModel, new Set(), null);
+    const node = elementByLabel(nodes, "Measurement")!;
+    expect(nodeHeight(node)).toBe(NODE_HEIGHT + 21);
   });
 });

@@ -5,6 +5,13 @@ import { useSelection } from "../src/stores/selectionStore";
 import type { ComplexType, Facet, SchemaModel } from "../src/types/schema";
 import { smallModel } from "./fixtures/smallModel";
 import { refModel, SIGNATURE_ID, SIGNATURE_REF_ID } from "./fixtures/refModel";
+import {
+  assertionsModel,
+  codeAttribute,
+  codeElement,
+  derivedAssertType,
+  measurementElement,
+} from "./fixtures/assertionsModel";
 
 describe("DetailPanel", () => {
   beforeEach(() => {
@@ -226,5 +233,56 @@ describe("DetailPanel element references", () => {
 
     act(() => link.click());
     expect(useSelection.getState().selectedId).toBe(SIGNATURE_ID);
+  });
+});
+
+describe("DetailPanel assertions contributed by types", () => {
+  beforeEach(() => {
+    useSelection.getState().clearSchema();
+  });
+
+  it("shows an element's named complex type's assertions with a 'from' label", () => {
+    act(() => {
+      useSelection.getState().setSchema("assert", assertionsModel);
+      useSelection.getState().setSelected(measurementElement.id);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("Assertions")).toBeInTheDocument();
+    expect(screen.getByText(/2 · XPath 2.0 · display-only/i)).toBeInTheDocument();
+    expect(screen.getByText("MeasurementType")).toBeInTheDocument();
+    expect(screen.getByText("xs:date(@from) le xs:date(@to)")).toBeInTheDocument();
+    expect(screen.getByText("count(Value) gt 0")).toBeInTheDocument();
+  });
+
+  it("shows an element's named simple type's assertion with a 'from' label", () => {
+    act(() => {
+      useSelection.getState().setSchema("assert", assertionsModel);
+      useSelection.getState().setSelected(codeElement.id);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("PositiveCode")).toBeInTheDocument();
+    expect(screen.getByText("string-length($value) gt 0")).toBeInTheDocument();
+  });
+
+  it("shows an attribute's named simple type's assertion with a 'from' label", () => {
+    act(() => {
+      useSelection.getState().setSchema("assert", assertionsModel);
+      useSelection.getState().setSelected(codeAttribute.id);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("PositiveCode")).toBeInTheDocument();
+    expect(screen.getByText("string-length($value) gt 0")).toBeInTheDocument();
+  });
+
+  it("shows both levels of an extension chain when a complexType is selected directly", () => {
+    act(() => {
+      useSelection.getState().setSchema("assert", assertionsModel);
+      useSelection.getState().setSelected(derivedAssertType.id);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText(/2 · XPath 2.0 · display-only/i)).toBeInTheDocument();
+    expect(screen.getByText("@derived-flag = 'ok'")).toBeInTheDocument();
+    expect(screen.getByText("@base-flag = 'ok'")).toBeInTheDocument();
+    expect(screen.getByText("BaseAssertType")).toBeInTheDocument();
   });
 });

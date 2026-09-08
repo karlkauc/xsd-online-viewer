@@ -10,9 +10,18 @@ import type {
 } from "../../types/schema";
 import { useSelection } from "../../stores/selectionStore";
 import { resolveElementRef, resolveReference } from "../../lib/indexSchema";
+import {
+  collectAttributeAssertions,
+  collectComplexAssertions,
+  collectElementAssertions,
+  collectSimpleAssertions,
+  makeIndexResolver,
+  type AssertionGroup,
+} from "../../lib/assertions";
 import { Header } from "./Header";
 import { ChildrenTable } from "./ChildrenTable";
 import { AttributesTable } from "./AttributesTable";
+import { AssertionsTable } from "./AssertionsTable";
 import { SimpleTypeCard } from "./SimpleTypeCard";
 
 function resolveComplex(typeName: string | null, index: NodeIndexEntry[]): ComplexType | undefined {
@@ -136,12 +145,33 @@ export function ContentModelView() {
     return null;
   }, [entry, index, indexById]);
 
+  const assertionGroups = useMemo<AssertionGroup[]>(() => {
+    if (!entry) return [];
+    const resolver = makeIndexResolver(index);
+    if (entry.kind === "element") {
+      const selectedElement = entry.node as ElementDecl;
+      const e = resolveElementRef(selectedElement, indexById) ?? selectedElement;
+      return collectElementAssertions(e, resolver);
+    }
+    if (entry.kind === "complexType") {
+      return collectComplexAssertions(entry.node as ComplexType, resolver);
+    }
+    if (entry.kind === "simpleType") {
+      return collectSimpleAssertions(entry.node as SimpleType, resolver);
+    }
+    if (entry.kind === "attribute") {
+      return collectAttributeAssertions(entry.node as AttributeDecl, resolver);
+    }
+    return [];
+  }, [entry, index, indexById]);
+
   if (!entry) return null;
 
   return (
     <div className="h-full overflow-auto">
       <Header entry={entry} onSelectBase={onSelectBase} />
       {body}
+      <AssertionsTable groups={assertionGroups} />
     </div>
   );
 }
