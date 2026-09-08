@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Node } from "@xyflow/react";
-import type { SchemaModel } from "../src/types/schema";
+import type { Particle, SchemaModel } from "../src/types/schema";
 import {
   buildDiagramGraph,
   COMPOSITOR_HEIGHT,
@@ -242,5 +242,76 @@ describe("buildDiagramGraph reference cycles", () => {
       null,
     );
     expect(nodes.length).toBeLessThan(20);
+  });
+});
+
+describe("buildDiagramGraph cardinality flags", () => {
+  function flags(node: Node | undefined): { optional: boolean; repeating: boolean } {
+    if (!node) throw new Error("node missing");
+    const data = node.data as { optional?: boolean; repeating?: boolean };
+    return { optional: data.optional ?? false, repeating: data.repeating ?? false };
+  }
+  function elementByLabel(nodes: Node[], label: string): Node | undefined {
+    return nodes.find(
+      (n) => n.type === "element" && (n.data as { label: string }).label === label,
+    );
+  }
+  function particle(kind: Particle["kind"], min: number, max: number | "unbounded"): Particle {
+    return {
+      kind,
+      min_occurs: min,
+      max_occurs: max,
+      element: null,
+      group_ref: kind === "group-ref" ? "tns:NameGroup" : null,
+      group_inline: null,
+      children: [],
+      wildcard_namespace: kind === "any" ? "##other" : null,
+      wildcard_process_contents: kind === "any" ? "lax" : null,
+      annotation: null,
+    };
+  }
+
+  it("marks a root element as mandatory and single", () => {
+    const { nodes } = buildDiagramGraph(smallModel, new Set(), null);
+    expect(flags(nodes[0])).toEqual({ optional: false, repeating: false });
+  });
+
+  it("derives element flags from the hosting particle", () => {
+    const model = structuredClone(smallModel) as SchemaModel;
+    const children = model.complex_types[0].particle!.children;
+    children[0].min_occurs = 0; // FirstName 0..1
+    children[1].max_occurs = "unbounded"; // LastName 1..∞
+    children[2].min_occurs = 0; // Address 0..3
+    children[2].max_occurs = 3;
+
+    const { nodes } = buildDiagramGraph(model, new Set([PERSON_ID]), null);
+    expect(flags(elementByLabel(nodes, "FirstName"))).toEqual({ optional: true, repeating: false });
+    expect(flags(elementByLabel(nodes, "LastName"))).toEqual({ optional: false, repeating: true });
+    expect(flags(elementByLabel(nodes, "Address"))).toEqual({ optional: true, repeating: true });
+    expect(flags(elementByLabel(nodes, "Age"))).toEqual({ optional: false, repeating: false });
+  });
+
+  it("derives compositor flags from the compositor particle", () => {
+    const model = structuredClone(smallModel) as SchemaModel;
+    const sequence = model.complex_types[0].particle!;
+    sequence.min_occurs = 0;
+    sequence.max_occurs = "unbounded";
+    sequence.children.push(particle("any", 0, 1), particle("group-ref", 1, 2));
+
+    const { nodes } = buildDiagramGraph(model, new Set([PERSON_ID]), null);
+    const byKind = (kind: string) =>
+      compositorNodes(nodes).find((n) => (n.data as { kind: string }).kind === kind);
+    expect(flags(byKind("sequence"))).toEqual({ optional: true, repeating: true });
+    expect(flags(byKind("any"))).toEqual({ optional: true, repeating: false });
+    expect(flags(byKind("group-ref"))).toEqual({ optional: false, repeating: true });
+  });
+
+  it("adds the thicker border to the height budget of repeating elements", () => {
+    const model = structuredClone(smallModel) as SchemaModel;
+    const children = model.complex_types[0].particle!.children;
+    children[1].max_occurs = "unbounded"; // LastName: plain leaf, 2px border
+    const { nodes } = buildDiagramGraph(model, new Set([PERSON_ID]), null);
+    expect(nodeHeight(elementByLabel(nodes, "LastName")!)).toBe(53);
+    expect(nodeHeight(elementByLabel(nodes, "Age")!)).toBe(51);
   });
 });

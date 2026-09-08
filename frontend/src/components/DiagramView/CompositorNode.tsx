@@ -8,6 +8,10 @@ interface CompositorData {
   // XSD 1.1: when present, the owning complexType declares xs:openContent.
   // Render a dashed border + corner "+" glyph as a visual cue.
   openContentMode?: "interleave" | "suffix" | "none";
+  // Cardinality of the particle, encoded in the border like ElementNode:
+  // optional → dashed, repeating → 2px. The open-content cue takes precedence.
+  optional?: boolean;
+  repeating?: boolean;
 }
 
 const BG: Record<CompositorKind, string> = {
@@ -16,6 +20,14 @@ const BG: Record<CompositorKind, string> = {
   all: "bg-emerald-200 dark:bg-emerald-800",
   any: "bg-fuchsia-200 dark:bg-fuchsia-800",
   "group-ref": "bg-pink-200 dark:bg-pink-800",
+};
+
+const BORDER: Record<CompositorKind, string> = {
+  sequence: "border-slate-400 dark:border-slate-500",
+  choice: "border-amber-500 dark:border-amber-500",
+  all: "border-emerald-500 dark:border-emerald-500",
+  any: "border-fuchsia-500 dark:border-fuchsia-500",
+  "group-ref": "border-pink-500 dark:border-pink-500",
 };
 
 const TITLE: Record<CompositorKind, string> = {
@@ -103,7 +115,13 @@ function CompositorIcon({ kind }: { kind: CompositorKind }) {
 }
 
 export function CompositorNode({ data }: { data: CompositorData }) {
-  const { kind, openContentMode } = data;
+  const { kind, openContentMode, optional, repeating } = data;
+  const hasOpenContent = openContentMode != null && openContentMode !== "none";
+  // The node is a fixed 70×40 border-box, so a 2px border never changes the
+  // layout — only the inner padding shrinks.
+  const borderClass = hasOpenContent
+    ? "border-2 border-dashed border-sky-500/70 dark:border-sky-300/70"
+    : `${repeating ? "border-2" : "border"} ${optional ? "border-dashed" : "border-solid"} ${BORDER[kind]}`;
   // group-ref uses the supplied label; xs:all may be tagged "all+" to flag
   // XSD 1.1 relaxations (maxOccurs > 1 or wildcard children); other
   // compositors fall back to their kind name.
@@ -119,7 +137,7 @@ export function CompositorNode({ data }: { data: CompositorData }) {
         : TITLE[kind];
   return (
     <div
-      className={`relative flex h-full w-full flex-col items-center justify-center gap-0.5 rounded-md px-1 py-1 text-slate-900 dark:text-slate-100 ${BG[kind]} ${openContentMode && openContentMode !== "none" ? "border-2 border-dashed border-sky-500/70 dark:border-sky-300/70" : ""}`}
+      className={`relative flex h-full w-full flex-col items-center justify-center gap-0.5 rounded-md px-1 py-1 text-slate-900 dark:text-slate-100 ${BG[kind]} ${borderClass}`}
       style={{ width: 70, height: 40 }}
       title={openContentTitle}
     >
@@ -128,7 +146,7 @@ export function CompositorNode({ data }: { data: CompositorData }) {
       <span className="truncate font-mono text-[9px] leading-none" style={{ maxWidth: 64 }}>
         {showLabel}
       </span>
-      {openContentMode && openContentMode !== "none" && (
+      {hasOpenContent && (
         <span
           className="absolute -top-1.5 -right-1.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-sky-500 text-white text-[9px] font-bold leading-none shadow-sm"
           aria-label={`open content: ${openContentMode}`}

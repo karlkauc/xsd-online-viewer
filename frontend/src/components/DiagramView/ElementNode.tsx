@@ -7,6 +7,10 @@ interface ElementNodeData {
   label: string;
   type?: string | null;
   occurs?: string | null;
+  // Cardinality of the hosting particle, encoded in the border: optional
+  // (minOccurs 0) → dashed, repeating (maxOccurs > 1) → 2px instead of 1px.
+  optional?: boolean;
+  repeating?: boolean;
   expandable?: boolean;
   expanded?: boolean;
   selected?: boolean;
@@ -30,10 +34,17 @@ export function ElementNode({ data }: { data: ElementNodeData }) {
   return (
     <div
       className={clsx(
-        "relative rounded-md border bg-white dark:bg-slate-900 shadow-sm text-xs",
+        "relative rounded-md bg-white dark:bg-slate-900 shadow-sm text-xs",
+        // Border width and style come from the cardinality; the colour from
+        // the selection. A 2px border grows the node by 2px — buildGraph.ts
+        // budgets for it (REPEAT_BORDER_EXTRA).
+        data.repeating ? "border-2" : "border",
+        data.optional ? "border-dashed" : "border-solid",
         data.selected
           ? "border-accent ring-2 ring-accent/50"
-          : "border-slate-300 dark:border-slate-700",
+          : data.optional
+            ? "border-slate-400 dark:border-slate-600"
+            : "border-slate-300 dark:border-slate-700",
       )}
       style={{ width: 220 }}
     >

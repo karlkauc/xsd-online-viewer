@@ -21,6 +21,7 @@ import type {
   SchemaModel,
 } from "../../types/schema";
 import { computeRootElements } from "../../lib/rootElements";
+import { occursStyle } from "../../lib/cardinality";
 
 export const NODE_WIDTH = 220;
 export const COMPOSITOR_WIDTH = 70;
@@ -31,6 +32,7 @@ export const COMPOSITOR_HEIGHT = 40;
 // these numbers, so a budget below the real height overlaps neighbours; if
 // you change the CSS in ElementNode.tsx, re-measure and adjust.
 const BORDER_H = 2; // 1px top + bottom on the node container
+const REPEAT_BORDER_EXTRA = 2; // repeating nodes draw a 2px border (+1px top/bottom)
 const HEADER_H = 25; // py-1 + 16px line + 1px border-b
 const TYPE_H = 24; // py-1 + 16px line
 const SECTION_PAD = 9; // 1px border-t + py-1
@@ -158,6 +160,9 @@ function computeElementDisplay(
   const docFull = collectDocumentation(element) ?? collectDocumentation(target);
   const docLines = truncateDocLines(docFull);
   const expandable = resolvedComplex != null;
+  const { optional, repeating } = hostParticle
+    ? occursStyle(hostParticle.min_occurs, hostParticle.max_occurs)
+    : { optional: false, repeating: false };
   const assertCount = resolvedComplex?.assertions?.length ?? 0;
   const alternativesCount = element.alternatives?.length ?? 0;
 
@@ -166,6 +171,7 @@ function computeElementDisplay(
     Math.min(attrs.length, MAX_INLINE_ATTRS) + (attrs.length > MAX_INLINE_ATTRS ? 1 : 0);
 
   let height = NODE_HEIGHT;
+  if (repeating) height += REPEAT_BORDER_EXTRA;
   if (attrRows) {
     height += SECTION_PAD + attrRows * ATTR_ROW_H + (attrRows - 1) * ATTR_ROW_GAP;
   }
@@ -178,6 +184,8 @@ function computeElementDisplay(
     label: element.name ?? element.ref ?? "?",
     type: target.type_name,
     occurs: hostParticle ? formatOccurs(hostParticle.min_occurs, hostParticle.max_occurs) : null,
+    optional,
+    repeating,
     expandable,
     expanded: context.expandedIds.has(element.id),
     selected: context.selectedId === element.id,
@@ -214,8 +222,13 @@ function addCompositorNode(
   x: number,
   y: number,
   context: BuildContext,
-  // Optional XSD 1.1 cues that decorate the compositor.
-  extras: { openContentMode?: "interleave" | "suffix" | "none" } = {},
+  // Cardinality of the particle (drives the border style) plus optional
+  // XSD 1.1 cues that decorate the compositor.
+  extras: {
+    optional?: boolean;
+    repeating?: boolean;
+    openContentMode?: "interleave" | "suffix" | "none";
+  } = {},
 ): void {
   context.nodes.push({
     id,
@@ -351,7 +364,15 @@ function placeParticle(
 
   if (particle.kind === "any") {
     const flowId = nextId(context);
-    addCompositorNode(flowId, "any", "any", compositorX, topY, context);
+    addCompositorNode(
+      flowId,
+      "any",
+      "any",
+      compositorX,
+      topY,
+      context,
+      occursStyle(particle.min_occurs, particle.max_occurs),
+    );
     return {
       rootFlowId: flowId,
       span: {
@@ -371,6 +392,7 @@ function placeParticle(
       compositorX,
       topY,
       context,
+      occursStyle(particle.min_occurs, particle.max_occurs),
     );
     return {
       rootFlowId: flowId,
@@ -424,6 +446,7 @@ function placeParticle(
     compositorX,
     compositorY,
     context,
+    occursStyle(particle.min_occurs, particle.max_occurs),
   );
   for (const child of childResults) {
     addEdge(context, compositorId, child.rootFlowId);

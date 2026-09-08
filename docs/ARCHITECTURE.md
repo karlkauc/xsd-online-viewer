@@ -269,7 +269,11 @@ Everything view-related lives in a single Zustand store at
    - **DiagramView** calls `buildDiagramGraph(model, expandedIds)` to produce
      React Flow `nodes` + `edges`, then renders via custom node types
      (`ElementNode`, `CompositorNode`). Expansion is driven by
-     `expandedIds`; clicking an element toggles it.
+     `expandedIds`; clicking an element toggles it. Both node types encode
+     the particle's cardinality in their border (`lib/cardinality.ts`):
+     `minOccurs="0"` → dashed, `maxOccurs > 1` → 2px instead of 1px. The
+     thicker border grows an element node by 2px, which `buildGraph.ts`
+     adds to its height budget (`REPEAT_BORDER_EXTRA`).
    - **TreeView** is a virtualized tree over `buildTreeRows(model, ...)` with
      per-kind filter chips.
    - **TextView** holds a ref to the CodeMirror `EditorView` and re-scrolls
