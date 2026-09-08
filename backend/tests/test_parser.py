@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import io
+import time
 import zipfile
 from pathlib import Path
 
+import pytest
+
+from app.parser.walk import iter_elements
 from app.parser.xsd_parser import parse_files_map, parse_single, parse_zip
 
 FIXTURES = Path(__file__).parent / "fixtures"
+REPO_ROOT = Path(__file__).parent.parent.parent
+FUNDSXML4_XSD = REPO_ROOT / "FundsXML4.xsd"
 
 
 def _find_element(model, name):
@@ -631,3 +637,254 @@ class TestLeadingWhitespaceBeforeXmlDeclaration:
         model = parse_single(b"\n" + library_xsd_bytes, "library.xsd")
         (main,) = [f for f in model.files if f.filename == "library.xsd"]
         assert main.content.startswith("<?xml")
+
+
+def _find_by_name(model, name: str):
+    """Best-effort: the first element anywhere in the model (top-level or
+    nested in a content model) with this name."""
+    return next((e for e in iter_elements(model) if e.name == name), None)
+
+
+class TestIdentityConstraints:
+    def test_document_order(self, identity_constraints_xsd_bytes: bytes) -> None:
+        model = parse_single(identity_constraints_xsd_bytes, "identity_constraints.xsd")
+        library = _find_element(model, "Library")
+        assert library is not None
+        names = [c.name for c in library.identity_constraints]
+        assert names == ["bookKey", "uniqueTitle", "loanBookRef", "danglingRef"]
+
+    def test_kinds(self, identity_constraints_xsd_bytes: bytes) -> None:
+        model = parse_single(identity_constraints_xsd_bytes, "identity_constraints.xsd")
+        library = _find_element(model, "Library")
+        kinds = {c.name: c.kind for c in library.identity_constraints}
+        assert kinds == {
+            "bookKey": "key",
+            "uniqueTitle": "unique",
+            "loanBookRef": "keyref",
+            "danglingRef": "keyref",
+        }
+
+    def test_selector_and_fields_verbatim(
+        self, identity_constraints_xsd_bytes: bytes
+    ) -> None:
+        model = parse_single(identity_constraints_xsd_bytes, "identity_constraints.xsd")
+        library = _find_element(model, "Library")
+        by_name = {c.name: c for c in library.identity_constraints}
+        assert by_name["bookKey"].selector == "tns:Books/tns:Book"
+        assert by_name["bookKey"].fields == ["tns:ISBN"]
+        assert by_name["uniqueTitle"].selector == ".//tns:Book"
+        assert by_name["uniqueTitle"].fields == ["@title", "tns:Edition"]
+
+    def test_id_and_qname_are_clark_form(
+        self, identity_constraints_xsd_bytes: bytes
+    ) -> None:
+        model = parse_single(identity_constraints_xsd_bytes, "identity_constraints.xsd")
+        library = _find_element(model, "Library")
+        book_key = next(c for c in library.identity_constraints if c.name == "bookKey")
+        assert book_key.qname == "{http://example.com/keys}bookKey"
+        assert book_key.id == "identityConstraint:{http://example.com/keys}bookKey"
+
+    def test_keyref_resolves_refer_id_to_the_key(
+        self, identity_constraints_xsd_bytes: bytes
+    ) -> None:
+        model = parse_single(identity_constraints_xsd_bytes, "identity_constraints.xsd")
+        library = _find_element(model, "Library")
+        by_name = {c.name: c for c in library.identity_constraints}
+        book_key = by_name["bookKey"]
+        loan_book_ref = by_name["loanBookRef"]
+        assert loan_book_ref.refer == "tns:bookKey"
+        assert loan_book_ref.refer_id == book_key.id
+
+    def test_dangling_keyref_gets_no_refer_id_and_a_warning(
+        self, identity_constraints_xsd_bytes: bytes
+    ) -> None:
+        model = parse_single(identity_constraints_xsd_bytes, "identity_constraints.xsd")
+        library = _find_element(model, "Library")
+        dangling = next(c for c in library.identity_constraints if c.name == "danglingRef")
+        assert dangling.refer == "tns:noSuchKey"
+        assert dangling.refer_id is None
+        warnings = [d for d in model.diagnostics if d.severity == "warning"]
+        assert any(
+            "danglingRef" in d.message and "noSuchKey" in d.message for d in warnings
+        )
+
+    def test_annotation_source_line_and_version_constraints(
+        self, identity_constraints_xsd_bytes: bytes
+    ) -> None:
+        model = parse_single(identity_constraints_xsd_bytes, "identity_constraints.xsd")
+        library = _find_element(model, "Library")
+        by_name = {c.name: c for c in library.identity_constraints}
+
+        book_key = by_name["bookKey"]
+        assert book_key.annotation is not None
+        assert book_key.annotation.documentation
+        assert "unique among the library's books" in book_key.annotation.documentation[0].text
+        assert book_key.source_ref is not None
+        assert book_key.source_ref.line is not None
+        assert book_key.source_ref.line > 0
+
+        loan_book_ref = by_name["loanBookRef"]
+        assert loan_book_ref.version_constraints is not None
+        assert loan_book_ref.version_constraints.min_version == "1.1"
+
+    def test_nested_element_has_its_own_constraint(
+        self, identity_constraints_xsd_bytes: bytes
+    ) -> None:
+        model = parse_single(identity_constraints_xsd_bytes, "identity_constraints.xsd")
+        loans = _find_by_name(model, "Loans")
+        assert loans is not None
+        assert [c.name for c in loans.identity_constraints] == ["loanKey"]
+        assert loans.identity_constraints[0].kind == "key"
+
+    def test_unprefixed_refer_without_target_namespace(self) -> None:
+        # Mirrors FundsXML4.xsd (no targetNamespace, no tns prefix): Fund's
+        # "benchmarkID" key and "benchmarkDynamicRef" keyref, whose `refer`
+        # attribute is a bare local name.
+        xsd = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:complexType name="FundType">
+    <xs:sequence>
+      <xs:element name="BenchmarkID" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="Funds">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Fund" type="FundType" maxOccurs="unbounded">
+          <xs:key name="benchmarkID">
+            <xs:selector xpath="FundStaticData/Benchmarks/Benchmark"/>
+            <xs:field xpath="BenchmarkID"/>
+          </xs:key>
+          <xs:keyref name="benchmarkDynamicRef" refer="benchmarkID">
+            <xs:selector xpath="FundDynamicData/Benchmarks/Benchmark"/>
+            <xs:field xpath="BenchmarkID"/>
+          </xs:keyref>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>"""
+        model = parse_single(xsd, "fundsxml-like.xsd")
+        fund = _find_by_name(model, "Fund")
+        assert fund is not None
+        by_name = {c.name: c for c in fund.identity_constraints}
+        assert by_name["benchmarkID"].id == "identityConstraint:benchmarkID"
+        assert by_name["benchmarkID"].qname == "benchmarkID"
+        assert by_name["benchmarkDynamicRef"].refer_id == "identityConstraint:benchmarkID"
+        assert model.diagnostics == []
+
+    def test_legacy_simple_xsd_has_no_identity_constraints(
+        self, simple_xsd_bytes: bytes
+    ) -> None:
+        model = parse_single(simple_xsd_bytes, "simple.xsd")
+        for el in model.elements:
+            assert el.identity_constraints == []
+
+    def test_missing_selector_defaults_to_empty_string(self) -> None:
+        xsd = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="Broken">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="A" type="xs:string"/>
+      </xs:sequence>
+    </xs:complexType>
+    <xs:key name="noSelector">
+      <xs:field xpath="A"/>
+    </xs:key>
+  </xs:element>
+</xs:schema>"""
+        model = parse_single(xsd, "broken.xsd")
+        broken = _find_element(model, "Broken")
+        assert broken is not None
+        (constraint,) = broken.identity_constraints
+        assert constraint.selector == ""
+        assert constraint.fields == ["A"]
+
+    def test_keyref_without_refer_does_not_crash_or_warn(self) -> None:
+        xsd = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="Broken">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="A" type="xs:string"/>
+      </xs:sequence>
+    </xs:complexType>
+    <xs:keyref name="noRefer">
+      <xs:selector xpath="."/>
+      <xs:field xpath="A"/>
+    </xs:keyref>
+  </xs:element>
+</xs:schema>"""
+        model = parse_single(xsd, "broken.xsd")
+        broken = _find_element(model, "Broken")
+        assert broken is not None
+        (constraint,) = broken.identity_constraints
+        assert constraint.refer is None
+        assert constraint.refer_id is None
+        assert model.diagnostics == []
+
+    def test_xsd11_key_ref_falls_back_to_local_name(self) -> None:
+        # XSD 1.1 identity-constraint sharing: <xs:key ref="..."> reuses
+        # another constraint's fields instead of declaring its own; it has
+        # no `name` of its own, so we fall back to the ref's local part for
+        # display.
+        xsd = b"""<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:tns="http://example.com/keyref"
+           targetNamespace="http://example.com/keyref">
+  <xs:element name="Outer">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Inner" type="xs:string"/>
+      </xs:sequence>
+    </xs:complexType>
+    <xs:key name="outerKey">
+      <xs:selector xpath="."/>
+      <xs:field xpath="tns:Inner"/>
+    </xs:key>
+  </xs:element>
+  <xs:element name="Sibling">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Inner" type="xs:string"/>
+      </xs:sequence>
+    </xs:complexType>
+    <xs:key ref="tns:outerKey"/>
+  </xs:element>
+</xs:schema>"""
+        model = parse_single(xsd, "keyref-share.xsd")
+        sibling = _find_element(model, "Sibling")
+        assert sibling is not None
+        (constraint,) = sibling.identity_constraints
+        assert constraint.name == "outerKey"
+        assert constraint.selector == ""
+        assert constraint.fields == []
+
+    @pytest.mark.skipif(
+        not FUNDSXML4_XSD.exists(),
+        reason="FundsXML4.xsd is a local reference copy, not checked into git",
+    )
+    def test_fundsxml4_key_and_keyref_are_parsed(self) -> None:
+        content = FUNDSXML4_XSD.read_bytes()
+        t0 = time.monotonic()
+        model = parse_single(content, "FundsXML4.xsd")
+        elapsed = time.monotonic() - t0
+        assert elapsed < 5, f"parsing FundsXML4.xsd took {elapsed:.1f}s, expected < 5s"
+
+        fund = _find_by_name(model, "Fund")
+        assert fund is not None
+        by_name = {c.name: c for c in fund.identity_constraints}
+        assert by_name["benchmarkID"].kind == "key"
+        assert by_name["benchmarkID"].selector == "FundStaticData/Benchmarks/Benchmark"
+        keyref = by_name["benchmarkDynamicRef"]
+        assert keyref.kind == "keyref"
+        assert keyref.refer == "benchmarkID"
+        assert keyref.refer_id == by_name["benchmarkID"].id
+
+        transactions = _find_by_name(model, "Transactions")
+        assert transactions is not None
+        assert [c.name for c in transactions.identity_constraints] == ["transactionID"]
+
+        # No dangling keyrefs anywhere in the real-world schema.
+        assert not any("unknown key" in d.message for d in model.diagnostics)

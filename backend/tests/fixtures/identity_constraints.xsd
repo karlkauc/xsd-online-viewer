@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:vc="http://www.w3.org/2007/XMLSchema-versioning"
+           xmlns:tns="http://example.com/keys"
+           targetNamespace="http://example.com/keys"
+           elementFormDefault="qualified">
+
+  <xs:group name="BookCore">
+    <xs:sequence>
+      <xs:element name="ISBN" type="xs:string"/>
+    </xs:sequence>
+  </xs:group>
+
+  <xs:complexType name="BookType">
+    <xs:sequence>
+      <xs:group ref="tns:BookCore"/>
+      <xs:element name="Edition" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="title" type="xs:string"/>
+  </xs:complexType>
+
+  <!-- Mirrors the FundsXML4 "Benchmark" shape: an extension that adds no
+       particle of its own, only inherits BookType's. -->
+  <xs:complexType name="SpecialBookType">
+    <xs:complexContent>
+      <xs:extension base="tns:BookType"/>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="LoanType">
+    <xs:sequence>
+      <xs:element name="LoanID" type="xs:string"/>
+      <xs:element name="BookISBN" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:element name="Library">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Books">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="Book" type="tns:BookType" maxOccurs="unbounded"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="Loans">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="Loan" type="tns:LoanType" maxOccurs="unbounded"/>
+            </xs:sequence>
+          </xs:complexType>
+          <xs:key name="loanKey">
+            <xs:selector xpath="tns:Loan"/>
+            <xs:field xpath="tns:LoanID"/>
+          </xs:key>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+
+    <xs:key name="bookKey">
+      <xs:annotation>
+        <xs:documentation>Each ISBN must be unique among the library's books.</xs:documentation>
+      </xs:annotation>
+      <xs:selector xpath="tns:Books/tns:Book"/>
+      <xs:field xpath="tns:ISBN"/>
+    </xs:key>
+
+    <xs:unique name="uniqueTitle">
+      <xs:selector xpath=".//tns:Book"/>
+      <xs:field xpath="@title"/>
+      <xs:field xpath="tns:Edition"/>
+    </xs:unique>
+
+    <xs:keyref name="loanBookRef" refer="tns:bookKey" vc:minVersion="1.1">
+      <xs:selector xpath="tns:Loans/tns:Loan"/>
+      <xs:field xpath="tns:BookISBN"/>
+    </xs:keyref>
+
+    <xs:keyref name="danglingRef" refer="tns:noSuchKey">
+      <xs:selector xpath="tns:Loans/tns:Loan"/>
+      <xs:field xpath="tns:BookISBN"/>
+    </xs:keyref>
+  </xs:element>
+
+</xs:schema>

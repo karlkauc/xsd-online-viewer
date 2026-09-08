@@ -27,6 +27,7 @@ from app.parser.errors import (
     no_xsd_in_zip_message,
     not_a_schema_message,
 )
+from app.parser.identity import link_keyrefs
 from app.parser.model import (
     Alternative,
     Annotation,
@@ -43,6 +44,8 @@ from app.parser.model import (
     Facet,
     FacetKind,
     Group,
+    IdentityConstraint,
+    IdentityConstraintKind,
     OpenContent,
     OverrideDirective,
     OverrideReplacement,
@@ -545,6 +548,7 @@ class XsdParser:
                 self._process_top_level(child, loaded, model)
 
         self._process_overrides(model)
+        link_keyrefs(model, self.state.diagnostics)
 
         model.diagnostics.extend(self.state.diagnostics)
         return model
@@ -684,6 +688,8 @@ class XsdParser:
         for alt_elem in elem.findall(_xsd("alternative")):
             alternatives.append(self._parse_alternative(alt_elem, loaded))
 
+        identity_constraints = self._parse_identity_constraints(elem, loaded)
+
         qname = self._compose_qname(loaded, name) if name and is_global else None
         identifier = self._make_id("element", qname or ref or f"anon-{self.state.next_anon()}")
 
@@ -710,7 +716,69 @@ class XsdParser:
             source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
             version_constraints=_vc_attrs(elem),
             alternatives=alternatives,
+            identity_constraints=identity_constraints,
         )
+
+    _IDENTITY_CONSTRAINT_TAGS: frozenset[str] = frozenset({"key", "keyref", "unique"})
+
+    def _parse_identity_constraints(
+        self, elem: etree._Element, loaded: _LoadedFile
+    ) -> list[IdentityConstraint]:
+        """Parse ``xs:key`` / ``xs:keyref`` / ``xs:unique`` children of an
+        element declaration.
+
+        Identity-constraint names live in the schema's target-namespace
+        symbol space regardless of how deeply the owning element is nested
+        (unlike local elements/attributes), so ids/qnames are always built
+        via ``_compose_qname``/``_make_id`` — the same helpers global
+        declarations use. ``refer_id`` (keyref only) is left ``None`` here;
+        ``identity.link_keyrefs`` resolves it once every element in the
+        model has been parsed.
+        """
+        constraints: list[IdentityConstraint] = []
+        for child in elem:
+            if not isinstance(child.tag, str):
+                continue
+            _, local = _namespace_and_local(child.tag)
+            if local not in self._IDENTITY_CONSTRAINT_TAGS:
+                continue
+            kind: IdentityConstraintKind = local  # type: ignore[assignment]
+            name = child.get("name")
+            ref = child.get("ref")  # XSD 1.1 identity-constraint sharing
+            if not name and ref:
+                name = ref.rpartition(":")[2]
+            name = name or ""
+            selector_elem = child.find(_xsd("selector"))
+            selector = selector_elem.get("xpath", "") if selector_elem is not None else ""
+            fields = [f.get("xpath", "") for f in child.findall(_xsd("field"))]
+            refer = child.get("refer")
+            qname = self._compose_qname(loaded, name)
+            identifier = self._make_id("identityConstraint", qname)
+            constraints.append(
+                IdentityConstraint(
+                    id=identifier,
+                    kind=kind,
+                    name=name,
+                    qname=qname,
+                    selector=selector,
+                    fields=fields,
+                    refer=refer,
+                    refer_id=(
+                        self._resolve_ref_id("identityConstraint", child, refer)
+                        if refer
+                        else None
+                    ),
+                    xpath_default_namespace=(
+                        selector_elem.get("xpathDefaultNamespace")
+                        if selector_elem is not None
+                        else None
+                    ),
+                    annotation=self._collect_annotation(child),
+                    source_ref=SourceRef(file_id=loaded.file_id, line=child.sourceline),
+                    version_constraints=_vc_attrs(child),
+                )
+            )
+        return constraints
 
     def _parse_alternative(
         self, elem: etree._Element, loaded: _LoadedFile

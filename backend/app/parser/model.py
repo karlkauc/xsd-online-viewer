@@ -100,6 +100,34 @@ class Assertion(BaseModel):
     version_constraints: VersionConstraints | None = None
 
 
+IdentityConstraintKind = Literal["key", "keyref", "unique"]
+
+
+class IdentityConstraint(BaseModel):
+    """An XSD identity constraint (``xs:key``, ``xs:keyref``, ``xs:unique``).
+
+    ``selector``/``fields`` are XPath 1.0 expressions taken verbatim —
+    display-only, the viewer never evaluates them against an instance
+    document. ``refer``/``refer_id`` only apply to ``kind == "keyref"``:
+    ``refer`` is the raw ``refer`` QName as written, ``refer_id`` is the id
+    of the ``key``/``unique`` constraint it resolves to, filled in by the
+    ``identity.link_keyrefs`` post-pass once every element has been parsed.
+    """
+
+    id: str
+    kind: IdentityConstraintKind
+    name: str
+    qname: QName
+    selector: str
+    fields: list[str] = Field(default_factory=list)
+    refer: QName | None = None
+    refer_id: str | None = None
+    xpath_default_namespace: str | None = None
+    annotation: Annotation | None = None
+    source_ref: SourceRef | None = None
+    version_constraints: VersionConstraints | None = None
+
+
 # ---------------------------------------------------------------------------
 # Facets
 # ---------------------------------------------------------------------------
@@ -252,6 +280,7 @@ class ElementDecl(BaseModel):
     source_ref: SourceRef | None = None
     version_constraints: VersionConstraints | None = None
     alternatives: list[Alternative] = Field(default_factory=list)
+    identity_constraints: list[IdentityConstraint] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

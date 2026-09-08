@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterator
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
@@ -27,13 +26,13 @@ from app.parser.model import (
     ComplexType,
     ElementDecl,
     Group,
-    Particle,
     QName,
     SchemaModel,
     SimpleType,
 )
 from app.parser.security import inspect_dtd, make_parser
 from app.parser.w3c import bytes_for_location
+from app.parser.walk import _iter_declarations
 
 logger = logging.getLogger(__name__)
 
@@ -222,53 +221,6 @@ def _local(qname: QName | None, name: str | None) -> str | None:
     if qname:
         return qname.split(":")[-1]
     return None
-
-
-def _iter_particle(particle: Particle | None) -> Iterator[object]:
-    if particle is None:
-        return
-    if particle.element is not None:
-        yield from _iter_element(particle.element)
-    if particle.group_inline is not None:
-        yield from _iter_group(particle.group_inline)
-    for child in particle.children:
-        yield from _iter_particle(child)
-
-
-def _iter_element(element: ElementDecl) -> Iterator[object]:
-    yield element
-    if element.type_inline_complex is not None:
-        yield from _iter_complex(element.type_inline_complex)
-    if element.type_inline_simple is not None:
-        yield element.type_inline_simple
-
-
-def _iter_complex(ct: ComplexType) -> Iterator[object]:
-    yield ct
-    yield from _iter_particle(ct.particle)
-    yield from ct.attributes
-
-
-def _iter_group(group: Group) -> Iterator[object]:
-    yield group
-    yield from _iter_particle(group.particle)
-
-
-def _iter_declarations(model: SchemaModel) -> Iterator[object]:
-    """Yield every named-or-local declaration, including ones nested inside
-    complex types / groups, so local elements (e.g. ``<Age>`` inside a content
-    model) can still be resolved for the best-effort XSD reference."""
-    for element in model.elements:
-        yield from _iter_element(element)
-    for ct in model.complex_types:
-        yield from _iter_complex(ct)
-    yield from model.simple_types
-    yield from model.attributes
-    for group in model.groups:
-        yield from _iter_group(group)
-    for ag in model.attribute_groups:
-        yield ag
-        yield from ag.attributes
 
 
 def find_declaration_by_local(
