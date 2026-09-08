@@ -45,10 +45,12 @@ and switch tabs to see how the override file is listed in the text view.
   Text view).
 * **`vc:*` badges** — declarations gated by version constraints carry a
   small `vc` chip; hover for the full attribute set.
-* **Diagram chips** — `⚖ N` for assertions on the resolved type,
-  `≷ N` for type alternatives on the element, dashed compositor border
-  with corner `+` for open content, and `all+` label when an `xs:all`
-  exercises 1.1 relaxations.
+* **Diagram chips** — `⚖ N` for assertions on the resolved type (this counts
+  `xs:assert` on a complex type, `xs:assertion` on a simple type, and any
+  assertion inherited through an extension/restriction base chain — not just
+  the type's own `xs:assert`), `≷ N` for type alternatives on the element,
+  dashed compositor border with corner `+` for open content, and `all+`
+  label when an `xs:all` exercises 1.1 relaxations.
 * **Assertion blocks** — XPath text is rendered verbatim with the
   `xpathDefaultNamespace` chip when it differs from the schema default.
 * **Type-alternative ladder** — `if (test) → type`, `else → type`,

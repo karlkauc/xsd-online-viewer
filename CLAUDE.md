@@ -79,7 +79,9 @@ cached and a soft reload can keep showing the old UI.
   API, Zustand index, URL hash, and React Flow node ids.
 - **Model contract**: `SchemaModel` is mirrored by hand between
   `backend/app/parser/model.py` and `frontend/src/types/schema.ts`. Keep them
-  in sync when changing shapes.
+  in sync when changing shapes — this now also covers `IdentityConstraint`
+  (`ElementDecl.identity_constraints`) and `IdRole` (`ElementDecl.id_role` /
+  `AttributeDecl.id_role`).
 - **Parser choice**: we use lxml, not `xmlschema`, because we need to preserve
   annotations, appinfo, comments, and source line numbers.
 - **Default tab is `diagram`** (`selectionStore.ts`), enforced by the e2e

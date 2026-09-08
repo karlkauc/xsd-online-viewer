@@ -25,6 +25,42 @@ const LEGEND_KINDS: SchemaNodeKind[] = [
   "attributeGroup",
 ];
 
+// Diagram-node badges explained for reference — glyph, its colour class (kept
+// in sync with ElementNode.tsx's own badge styling), and a one-line meaning.
+// Ordered to match the badges' left-to-right order on the node.
+const DIAGRAM_BADGES: { glyph: string; className: string; meaning: string }[] = [
+  {
+    glyph: "ID",
+    className:
+      "bg-indigo-50 text-indigo-800 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-200 dark:border-indigo-800/60",
+    meaning: "declared as xs:ID",
+  },
+  {
+    glyph: "⇢ ID",
+    className:
+      "bg-indigo-50 text-indigo-800 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-200 dark:border-indigo-800/60",
+    meaning: "declared as xs:IDREF / xs:IDREFS",
+  },
+  {
+    glyph: "⚿ N",
+    className:
+      "bg-teal-50 text-teal-800 border-teal-200 dark:bg-teal-900/30 dark:text-teal-200 dark:border-teal-800/60",
+    meaning: "N identity constraint(s) (xs:key / xs:keyref / xs:unique)",
+  },
+  {
+    glyph: "≷ N",
+    className:
+      "bg-violet-50 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-200 dark:border-violet-800/60",
+    meaning: "N XSD 1.1 type alternative(s)",
+  },
+  {
+    glyph: "⚖ N",
+    className:
+      "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800/60",
+    meaning: "N XSD 1.1 assertion(s)",
+  },
+];
+
 export function AboutDialog() {
   const [open, setOpen] = useState(false);
   const [version, setVersion] = useState<string | null>(null);
@@ -147,6 +183,22 @@ export function AboutDialog() {
             <li key={kind} className="flex items-center gap-2">
               <KindBadge kind={kind} />
               <span className="font-mono text-xs">{kind}</span>
+            </li>
+          ))}
+        </ul>
+
+        <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          Diagram badges
+        </p>
+        <ul aria-label="Diagram badges" className="mt-1 space-y-1 text-sm">
+          {DIAGRAM_BADGES.map((badge) => (
+            <li key={badge.glyph} className="flex items-center gap-2">
+              <span
+                className={`inline-flex items-center gap-0.5 px-1 rounded text-[10px] font-mono font-medium border ${badge.className}`}
+              >
+                {badge.glyph}
+              </span>
+              <span className="text-slate-600 dark:text-slate-300">{badge.meaning}</span>
             </li>
           ))}
         </ul>

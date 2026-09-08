@@ -53,6 +53,23 @@ describe("AboutDialog", () => {
     expect(legend).toHaveTextContent("attributeGroup");
   });
 
+  it("explains the diagram badges with a legend", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ status: "ok", version: "x" }) });
+    render(<AboutDialog />);
+    act(() => openAbout());
+    const legend = screen.getByRole("list", { name: "Diagram badges" });
+    expect(legend).toHaveTextContent("⚿");
+    expect(legend).toHaveTextContent("identity constraint");
+    expect(legend).toHaveTextContent("ID");
+    expect(legend).toHaveTextContent("xs:ID");
+    expect(legend).toHaveTextContent("⇢ ID");
+    expect(legend).toHaveTextContent("xs:IDREF");
+    expect(legend).toHaveTextContent("⚖");
+    expect(legend).toHaveTextContent("assertion");
+    expect(legend).toHaveTextContent("≷");
+    expect(legend).toHaveTextContent("type alternative");
+  });
+
   it("hands over to the feedback dialog", async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ status: "ok", version: "x" }) });
     const onFeedback = vi.fn();

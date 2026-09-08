@@ -175,6 +175,25 @@ with cross-references stored as stable IDs (see ID scheme below). Anonymous
 inline types get synthetic IDs based on their parent path; every node retains
 a `source_ref = { file_id, line }` pointing back to the original XSD location.
 
+Two post-passes run after the walk, both over the already-built `SchemaModel`
+rather than during parsing (so they can see declarations regardless of
+document order or which file they came from):
+
+- `identity.link_keyrefs` — resolves each `xs:keyref`'s `@refer` QName to the
+  `xs:key`/`xs:unique` constraint it names, filling in `refer_id` (falls back
+  to a unique local-name match when the prefix doesn't resolve; appends a
+  warning diagnostic when neither works).
+- `idroles.apply_id_roles` — classifies every element/attribute's type as
+  `id` / `idref` / `idrefs` / `None`, walking simple-type base
+  (`restriction`/`list`/`union`) and `simpleContent` extension chains so an
+  inline-restricted `xs:IDREF` (the shape FundsXML4 actually uses) is caught,
+  not just the built-in type used directly.
+
+Both share `backend/app/parser/walk.py` — read-only generators
+(`iter_elements`, `iter_attributes`) that traverse the model graph (nested
+particles, inline types, XSD 1.1 alternatives) without following named
+references, originally split out of `validation.py` for exactly this reuse.
+
 ### Data model
 
 `backend/app/parser/model.py` defines the Pydantic models. `SchemaModel` holds:
@@ -184,6 +203,14 @@ a `source_ref = { file_id, line }` pointing back to the original XSD location.
   `attribute_groups` — flat lists of declarations
 - `files` — every file that fed the parse (id, name, relationship, content)
 - `diagnostics` — non-fatal warnings and errors surfaced in the UI
+
+`ElementDecl.identity_constraints` is a list of `IdentityConstraint` (`xs:key`
+/ `xs:keyref` / `xs:unique`): `selector`/`fields` are XPath 1.0 text kept
+verbatim (display-only, never evaluated), and a `keyref` additionally carries
+`refer` (the raw QName) and `refer_id` (filled in by `identity.link_keyrefs`).
+`ElementDecl.id_role` and `AttributeDecl.id_role` hold the `IdRole` a
+declaration's type resolves to (`"id" | "idref" | "idrefs" | None`), set by
+`idroles.apply_id_roles`.
 
 The Pydantic models are JSON-serialized as the API response; the frontend
 mirrors them as TypeScript interfaces in `frontend/src/types/schema.ts`. Any
@@ -249,10 +276,22 @@ Everything view-related lives in a single Zustand store at
   schema loads. `buildIndex(model)` (in `lib/indexSchema.ts`) walks the model
   and produces both an O(1) `id → entry` map and a reverse `qname → entries[]`
   map used by "Find Usages".
+- `constraintsById` — every identity constraint in the model, keyed by its own
+  id, alongside the id of the element that declares it (`hostId`); also built
+  by `buildIndex`. `idDeclarations`/`idrefDeclarations` — flat lists of every
+  `NodeIndexEntry` whose `id_role` is `"id"` / `"idref"`-or-`"idrefs"`, used by
+  the ID reference / Referenced-by-IDREF sections (see ID scheme above for why
+  these stay flat lists rather than a cross-reference map).
 - `activeTab` — default is `"diagram"`. The tab bar is a simple setter; all
   tabs read from the same in-memory model, no refetch on switch.
 - `selectedId`, `expandedIds` — selection is global across views: click a node
   in the tree, it lights up in the diagram and scrolls in the text view.
+- `sourceJump` / `jumpToSource(ref)` — switches to the Text tab and
+  scrolls/highlights an arbitrary `SourceRef`, independent of the current
+  selection's own `source_ref`. Used by `SourceLineLink` wherever a
+  constraint's selector/field step, or an ID/IDREF candidate, carries its own
+  source location distinct from the selected node's (e.g. a constraint card
+  inside a different element's detail panel).
 - `filterKinds`, `searchQuery` — drive the tree filter and the search palette.
 - `setExpandedIds(ids)` — bulk replacement used by the diagram's
   Expand all / Collapse all buttons; the set of expandable element ids is
@@ -281,7 +320,19 @@ Everything view-related lives in a single Zustand store at
      auto-switching the file tab if the selection points into a different
      file.
 4. `DetailPanel` reads `indexById.get(selectedId)` and renders type, facets,
-   annotations, and a "Find Usages" list via `usagesByTarget`.
+   annotations, and a "Find Usages" list via `usagesByTarget`. Two pure
+   `lib/` modules feed it (and `ContentModelView`/`buildGraph.ts`, via their
+   own resolvers) without touching the store themselves:
+   - `lib/constraintXPath.ts` resolves a constraint's `selector`/`fields`
+     XPath 1.0 text into a token chain, matching each step against the
+     schema's content model (extension base chains, group refs, element
+     refs, a bounded-depth `.//` descendant search) — tokens that resolve
+     become the clickable "Go to `<step>`" buttons in `IdentityConstraintsList`.
+   - `lib/assertions.ts` collects the `xs:assert`/`xs:assertion` groups a
+     declaration's type contributes, including any from a base-type chain,
+     so an *element* (not just its type) shows the assertions it inherits;
+     `makeIndexResolver`/`makeModelResolver` adapt it to `NodeIndexEntry[]`
+     vs. the plain `SchemaModel` `buildGraph.ts` works with.
 
 ## Cross-cutting concerns
 
@@ -309,6 +360,15 @@ diagram, expand-all, content model and detail panel all substitute the
 referenced declaration for everything but the particle's own cardinality.
 Diagram layout guards the reference cycles this makes reachable (a type whose
 content refs the element defining it) with a root→node path set.
+
+An identity constraint (`xs:key`/`xs:keyref`/`xs:unique`) gets its own id,
+`identityConstraint:{ns}name` — but unlike every id above, it is **not** a
+selectable node: nothing in the tree, diagram, or `selectedId` ever resolves
+to one. It exists purely as a cross-reference target, keyed in
+`constraintsById` (`{ constraint, hostId }`, `hostId` being the id of the
+*element* that declares it), so a `keyref`'s `refer_id` and a "refers to"
+button both resolve to "the element hosting that key" rather than to the
+constraint itself.
 
 ### Source locations
 

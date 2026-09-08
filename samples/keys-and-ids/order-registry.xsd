@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Order registry — identity constraints / ID-IDREF showcase.
+
+  Features exercised:
+    * xs:key / xs:keyref     — Product.sku is a compound key, Order Items
+                                reference it (an unresolvable line stays
+                                display-only, nothing is validated).
+    * xs:unique + .// + "|"  — email uniqueness checked across two different
+                                element shapes (Customer and Order/Contact)
+                                via a union selector.
+    * xs:ID on an element    — Order/OrderNumber.
+    * xs:ID on an attribute  — Customer/@id.
+    * xs:IDREF               — Customer/@favoriteOrderRef (direct built-in).
+    * inline xs:IDREF        — Order/@relatedOrderRef (restricted, like the
+                                shape FundsXML4 actually uses).
+    * xs:IDREFS               — Order/@customerRefs.
+    * xs:assert               — Order: a discount can't exceed the total.
+-->
+<xs:schema
+    xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:vc="http://www.w3.org/2007/XMLSchema-versioning"
+    xmlns:tns="http://example.com/order-registry"
+    targetNamespace="http://example.com/order-registry"
+    elementFormDefault="qualified"
+    vc:minVersion="1.1">
+
+  <xs:element name="Registry" type="tns:RegistryType">
+    <!-- Product.sku is a compound business key — unrelated to xs:ID/IDREF,
+         which is the document-wide, untyped identity mechanism below. -->
+    <xs:key name="productKey">
+      <xs:selector xpath="tns:Products/tns:Product"/>
+      <xs:field xpath="@sku"/>
+    </xs:key>
+
+    <!-- Every order item must reference a known product. -->
+    <xs:keyref name="orderItemRef" refer="tns:productKey">
+      <xs:selector xpath="tns:Orders/tns:Order/tns:Items/tns:Item"/>
+      <xs:field xpath="@sku"/>
+    </xs:keyref>
+
+    <!-- Email addresses must be unique across customers AND order contacts —
+         a union selector (".// … | .//…") reaching two different element
+         shapes at different depths in the document. -->
+    <xs:unique name="emailUnique">
+      <xs:selector xpath=".//tns:Customer | .//tns:Contact"/>
+      <xs:field xpath="@email"/>
+    </xs:unique>
+  </xs:element>
+
+  <xs:complexType name="RegistryType">
+    <xs:sequence>
+      <xs:element name="Customers" type="tns:CustomersType"/>
+      <xs:element name="Products" type="tns:ProductsType"/>
+      <xs:element name="Orders" type="tns:OrdersType"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="CustomersType">
+    <xs:sequence>
+      <xs:element name="Customer" type="tns:CustomerType" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="CustomerType">
+    <xs:sequence>
+      <xs:element name="Name" type="xs:string"/>
+    </xs:sequence>
+    <!-- Attribute-level xs:ID. -->
+    <xs:attribute name="id" type="xs:ID" use="required"/>
+    <xs:attribute name="email" type="xs:string" use="required"/>
+    <!-- Direct built-in xs:IDREF — XSD binds it to *any* xs:ID in the
+         document (here, conceptually, an Order/OrderNumber), never to one
+         specific declaration; see the viewer's "ID reference" section. -->
+    <xs:attribute name="favoriteOrderRef" type="xs:IDREF"/>
+  </xs:complexType>
+
+  <xs:complexType name="ProductsType">
+    <xs:sequence>
+      <xs:element name="Product" type="tns:ProductType" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ProductType">
+    <xs:sequence>
+      <xs:element name="Name" type="xs:string"/>
+      <xs:element name="Price" type="xs:decimal"/>
+    </xs:sequence>
+    <xs:attribute name="sku" type="xs:token" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="OrdersType">
+    <xs:sequence>
+      <xs:element name="Order" type="tns:OrderType" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="OrderType">
+    <xs:sequence>
+      <!-- Element-level xs:ID. -->
+      <xs:element name="OrderNumber" type="xs:ID"/>
+      <xs:element name="Contact" type="tns:ContactType" minOccurs="0"/>
+      <xs:element name="Items" type="tns:ItemsType"/>
+      <xs:element name="Total" type="xs:decimal"/>
+      <xs:element name="Discount" type="xs:decimal" minOccurs="0"/>
+    </xs:sequence>
+    <!-- Inline restriction of xs:IDREF — the shape FundsXML4 actually uses
+         for its IDREF-typed attributes (base given via @base, plus a
+         facet), rather than the built-in type directly. -->
+    <xs:attribute name="relatedOrderRef">
+      <xs:simpleType>
+        <xs:restriction base="xs:IDREF">
+          <xs:maxLength value="64"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <!-- xs:IDREFS — a whitespace-separated list of IDs. -->
+    <xs:attribute name="customerRefs" type="xs:IDREFS"/>
+    <!-- A discount, when present, can never exceed the order total. -->
+    <xs:assert test="not(Discount) or Discount le Total"/>
+  </xs:complexType>
+
+  <xs:complexType name="ContactType">
+    <xs:sequence>
+      <xs:element name="Name" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="email" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="ItemsType">
+    <xs:sequence>
+      <xs:element name="Item" type="tns:ItemType" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ItemType">
+    <xs:sequence>
+      <xs:element name="Quantity" type="xs:positiveInteger"/>
+    </xs:sequence>
+    <xs:attribute name="sku" type="xs:token" use="required"/>
+  </xs:complexType>
+
+</xs:schema>
