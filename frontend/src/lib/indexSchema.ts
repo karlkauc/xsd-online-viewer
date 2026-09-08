@@ -7,6 +7,7 @@ import type {
   ComplexType,
   ElementDecl,
   Group,
+  IdentityConstraint,
   NodeIndexEntry,
   OverrideDirective,
   OverrideReplacement,
@@ -33,12 +34,29 @@ export interface IndexBundle {
     { directive: OverrideDirective; replacement: OverrideReplacement }
   >;
   overridesByOriginalKey: Map<string, OverrideReplacement[]>;
+  // Every identity constraint (xs:key/xs:keyref/xs:unique) in the model,
+  // keyed by its own id, alongside the id of the element that declares it
+  // ("host") — a keyref's `refer_id` (when resolved) is itself a key into
+  // this same map.
+  constraintsById: Map<string, { constraint: IdentityConstraint; hostId: string }>;
+  // Elements/attributes whose type resolves to the ID role, and to the
+  // IDREF/IDREFS role, per idroles.apply_id_roles. XSD binds an IDREF to
+  // *any* xs:ID in the document, not a specific declaration, so these stay
+  // flat lists rather than a cross-reference map.
+  idDeclarations: NodeIndexEntry[];
+  idrefDeclarations: NodeIndexEntry[];
 }
 
 export function buildIndex(model: SchemaModel): IndexBundle {
   const entries: NodeIndexEntry[] = [];
   const usagesByTarget = new Map<string, NodeIndexEntry[]>();
   const parentById = new Map<string, string>();
+  const constraintsById = new Map<
+    string,
+    { constraint: IdentityConstraint; hostId: string }
+  >();
+  const idDeclarations: NodeIndexEntry[] = [];
+  const idrefDeclarations: NodeIndexEntry[] = [];
 
   const addUsage = (target: string | null | undefined, entry: NodeIndexEntry) => {
     if (!target) return;
@@ -65,6 +83,13 @@ export function buildIndex(model: SchemaModel): IndexBundle {
     entries.push(entry);
     setParent(element.id, parentId);
     addUsage(element.type_name, entry);
+    for (const constraint of element.identity_constraints ?? []) {
+      constraintsById.set(constraint.id, { constraint, hostId: element.id });
+    }
+    if (element.id_role === "id") idDeclarations.push(entry);
+    else if (element.id_role === "idref" || element.id_role === "idrefs") {
+      idrefDeclarations.push(entry);
+    }
     if (element.type_inline_complex) visitComplexType(element.type_inline_complex, element.id);
     if (element.type_inline_simple) visitSimpleType(element.type_inline_simple, element.id);
   };
@@ -128,6 +153,10 @@ export function buildIndex(model: SchemaModel): IndexBundle {
     entries.push(entry);
     setParent(attr.id, parentId);
     addUsage(attr.type_name, entry);
+    if (attr.id_role === "id") idDeclarations.push(entry);
+    else if (attr.id_role === "idref" || attr.id_role === "idrefs") {
+      idrefDeclarations.push(entry);
+    }
     if (attr.type_inline) visitSimpleType(attr.type_inline, attr.id);
   };
 
@@ -194,6 +223,9 @@ export function buildIndex(model: SchemaModel): IndexBundle {
     parentById,
     overrideByReplacementId,
     overridesByOriginalKey,
+    constraintsById,
+    idDeclarations,
+    idrefDeclarations,
   };
 }
 

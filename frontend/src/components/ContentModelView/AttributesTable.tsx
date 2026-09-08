@@ -1,7 +1,8 @@
 import { useMemo } from "react";
-import type { AttributeDecl, AttributeGroup, NodeIndexEntry } from "../../types/schema";
+import type { AttributeDecl } from "../../types/schema";
 import { useSelection } from "../../stores/selectionStore";
 import { resolveReference } from "../../lib/indexSchema";
+import { collectFromGroup, type ResolvedAttribute } from "../../lib/attributeGroups";
 import { TapToReveal } from "../TapToReveal";
 
 interface AttributesTableProps {
@@ -9,29 +10,6 @@ interface AttributesTableProps {
   attributes: AttributeDecl[];
   /** Attribute-group QNames to resolve and inline. */
   attributeGroupRefs: string[];
-}
-
-interface ResolvedAttribute {
-  attr: AttributeDecl;
-  /** Origin label when the attribute was pulled in via a referenced group. */
-  origin: string | null;
-}
-
-function collectFromGroup(
-  ref: string,
-  index: NodeIndexEntry[],
-  seen: Set<string>,
-  out: ResolvedAttribute[],
-): void {
-  const entry = resolveReference(ref, index, ["attributeGroup"]);
-  if (!entry) return;
-  if (seen.has(entry.id)) return;
-  seen.add(entry.id);
-  const ag = entry.node as AttributeGroup;
-  for (const a of ag.attributes) out.push({ attr: a, origin: entry.label });
-  for (const nested of ag.attribute_group_refs) {
-    collectFromGroup(nested, index, seen, out);
-  }
 }
 
 function firstDocLine(attr: AttributeDecl): string {

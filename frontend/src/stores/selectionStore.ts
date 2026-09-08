@@ -1,11 +1,13 @@
 import { create } from "zustand";
 import type {
+  IdentityConstraint,
   NodeIndexEntry,
   OverrideDirective,
   OverrideReplacement,
   SchemaModel,
   SchemaNode,
   SchemaNodeKind,
+  SourceRef,
   ValidationResponse,
 } from "../types/schema";
 import { buildIndex } from "../lib/indexSchema";
@@ -28,6 +30,9 @@ interface SelectionState {
     { directive: OverrideDirective; replacement: OverrideReplacement }
   >;
   overridesByOriginalKey: Map<string, OverrideReplacement[]>;
+  constraintsById: Map<string, { constraint: IdentityConstraint; hostId: string }>;
+  idDeclarations: NodeIndexEntry[];
+  idrefDeclarations: NodeIndexEntry[];
 
   activeTab: ViewTab;
   selectedId: string | null;
@@ -37,6 +42,10 @@ interface SelectionState {
   validationResult: ValidationResponse | null;
   diagnosticsVisible: boolean;
   minimapVisible: boolean;
+  /** Set by jumpToSource — an arbitrary source location (e.g. a
+   *  constraint's selector step, or an ID/IDREF candidate) to scroll the
+   *  Text tab to, taking priority over the current selection's source_ref. */
+  sourceJump: SourceRef | null;
 
   setSchema: (schemaId: string, model: SchemaModel, source?: SchemaSource | null) => void;
   /** Rebind to a renewed server-side id without touching the view state. */
@@ -44,6 +53,9 @@ interface SelectionState {
   clearSchema: () => void;
   setActiveTab: (tab: ViewTab) => void;
   setSelected: (id: string | null) => void;
+  /** Switch to the Text tab and scroll/highlight an arbitrary source line,
+   *  independent of the current selection. */
+  jumpToSource: (ref: SourceRef) => void;
   toggleExpanded: (id: string) => void;
   setExpanded: (id: string, expanded: boolean) => void;
   setExpandedIds: (ids: Set<string>) => void;
@@ -81,6 +93,9 @@ export const useSelection = create<SelectionState>((set, get) => ({
   parentById: new Map(),
   overrideByReplacementId: new Map(),
   overridesByOriginalKey: new Map(),
+  constraintsById: new Map(),
+  idDeclarations: [],
+  idrefDeclarations: [],
 
   activeTab: "diagram",
   selectedId: null,
@@ -90,6 +105,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
   validationResult: null,
   diagnosticsVisible: true,
   minimapVisible: defaultMinimapVisible(),
+  sourceJump: null,
 
   setSchema: (schemaId, model, source = null) => {
     const {
@@ -99,6 +115,9 @@ export const useSelection = create<SelectionState>((set, get) => ({
       parentById,
       overrideByReplacementId,
       overridesByOriginalKey,
+      constraintsById,
+      idDeclarations,
+      idrefDeclarations,
     } = buildIndex(model);
     set({
       schemaId,
@@ -110,12 +129,16 @@ export const useSelection = create<SelectionState>((set, get) => ({
       parentById,
       overrideByReplacementId,
       overridesByOriginalKey,
+      constraintsById,
+      idDeclarations,
+      idrefDeclarations,
       selectedId: null,
       expandedIds: new Set(),
       searchQuery: "",
       validationResult: null,
       diagnosticsVisible: true,
       minimapVisible: defaultMinimapVisible(),
+      sourceJump: null,
     });
   },
 
@@ -132,15 +155,23 @@ export const useSelection = create<SelectionState>((set, get) => ({
       parentById: new Map(),
       overrideByReplacementId: new Map(),
       overridesByOriginalKey: new Map(),
+      constraintsById: new Map(),
+      idDeclarations: [],
+      idrefDeclarations: [],
       selectedId: null,
       expandedIds: new Set(),
       validationResult: null,
+      sourceJump: null,
     }),
 
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   setSelected: (id) => {
-    set({ selectedId: id });
+    set({ selectedId: id, sourceJump: null });
+  },
+
+  jumpToSource: (ref) => {
+    set({ activeTab: "text", sourceJump: ref });
   },
 
   toggleExpanded: (id) => {

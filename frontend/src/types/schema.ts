@@ -89,6 +89,32 @@ export interface Assertion {
   version_constraints?: VersionConstraints | null;
 }
 
+// XSD identity constraints (``xs:key`` / ``xs:keyref`` / ``xs:unique``).
+// ``selector``/``fields`` are XPath 1.0 expressions taken verbatim —
+// display-only, the viewer never evaluates them against an instance
+// document. ``refer``/``refer_id`` only apply to ``kind === "keyref"``.
+export type IdentityConstraintKind = "key" | "keyref" | "unique";
+
+export interface IdentityConstraint {
+  id: string;
+  kind: IdentityConstraintKind;
+  name: string;
+  qname: QName;
+  selector: string;
+  fields: string[];
+  refer: QName | null;
+  refer_id: string | null;
+  xpath_default_namespace: string | null;
+  annotation: Annotation | null;
+  source_ref: SourceRef | null;
+  version_constraints: VersionConstraints | null;
+}
+
+// ID/IDREF role a declaration's type resolves to, computed by the backend's
+// ``idroles.apply_id_roles`` post-pass. ``undefined``/``null`` means the
+// type carries no ID/IDREF role at all (most declarations).
+export type IdRole = "id" | "idref" | "idrefs";
+
 export type SimpleTypeDerivation = "restriction" | "list" | "union" | "atomic";
 
 export interface SimpleType {
@@ -127,6 +153,7 @@ export interface AttributeDecl {
   source_ref: SourceRef | null;
   version_constraints?: VersionConstraints | null;
   inheritable?: boolean;
+  id_role?: IdRole | null;
 }
 
 export interface AttributeGroup {
@@ -188,6 +215,8 @@ export interface ElementDecl {
   source_ref: SourceRef | null;
   version_constraints?: VersionConstraints | null;
   alternatives?: Alternative[];
+  identity_constraints?: IdentityConstraint[];
+  id_role?: IdRole | null;
 }
 
 export type ComplexDerivationKind = "none" | "restriction" | "extension";

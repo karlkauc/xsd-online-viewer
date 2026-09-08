@@ -41,6 +41,7 @@ export function TextView() {
   const schemaId = useSelection((s) => s.schemaId);
   const selectedId = useSelection((s) => s.selectedId);
   const indexById = useSelection((s) => s.indexById);
+  const sourceJump = useSelection((s) => s.sourceJump);
 
   const viewRef = useRef<EditorView | null>(null);
   const [viewReady, setViewReady] = useState(false);
@@ -53,22 +54,26 @@ export function TextView() {
     [model, activeFileId],
   );
 
-  // If the selection points into another file, switch the tab so the
+  // If the target location points into another file, switch the tab so the
   // highlight is visible. Keeps Tree/Diagram ↔ Text selection in lock-step.
+  // A pending sourceJump (e.g. a constraint's source line, or an ID/IDREF
+  // candidate) takes priority over the current selection's own source_ref.
   useEffect(() => {
-    if (!selectedId) return;
-    const entry = indexById.get(selectedId);
-    const fileId = entry?.source_ref?.file_id;
+    const fileId = sourceJump?.file_id ?? indexById.get(selectedId ?? "")?.source_ref?.file_id;
     if (fileId && fileId !== activeFileId) setActiveFileId(fileId);
-  }, [selectedId, indexById, activeFileId]);
+  }, [selectedId, indexById, activeFileId, sourceJump]);
 
   const targetLine = useMemo(() => {
+    if (sourceJump) {
+      if (sourceJump.file_id !== activeFile?.id) return null;
+      return sourceJump.line ?? null;
+    }
     if (!selectedId) return null;
     const entry = indexById.get(selectedId);
     if (!entry?.source_ref) return null;
     if (entry.source_ref.file_id !== activeFile?.id) return null;
     return entry.source_ref.line ?? null;
-  }, [selectedId, indexById, activeFile]);
+  }, [selectedId, indexById, activeFile, sourceJump]);
 
   const attachView = useCallback((view: EditorView | null) => {
     viewRef.current = view;
@@ -98,7 +103,7 @@ export function TextView() {
       });
     });
     return () => cancelAnimationFrame(id);
-  }, [targetLine, activeFile?.id, viewReady]);
+  }, [targetLine, activeFile?.id, viewReady, sourceJump]);
 
   if (!model || !activeFile) return null;
 

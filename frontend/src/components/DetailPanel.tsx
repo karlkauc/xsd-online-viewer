@@ -6,6 +6,7 @@ import type {
   AttributeGroup,
   ComplexType,
   ElementDecl,
+  IdentityConstraint,
   NodeIndexEntry,
   OpenContent,
   OverrideReplacement,
@@ -13,7 +14,7 @@ import type {
   SchemaNode,
   SchemaNodeKind,
   SimpleType,
-  VersionConstraints,
+  SourceRef,
 } from "../types/schema";
 import { KindBadge } from "./TreeView/KindBadge";
 import { FacetGroups } from "./FacetGroups";
@@ -21,6 +22,8 @@ import { AssertionsList } from "./AssertionsList";
 import { AlternativesList } from "./AlternativesList";
 import { openSampleXml } from "./SampleXmlDialog";
 import { CopyButton } from "./CopyButton";
+import { VersionBadge } from "./VersionBadge";
+import { UsageRow } from "./UsageRow";
 
 // Kind-scoped accent colors — mirror KindBadge so the header's left bar and
 // in-row dots read as "same thing as the E/A/CT/ST/G/AG badge".
@@ -42,8 +45,13 @@ export function DetailPanel() {
   const indexById = useSelection((s) => s.indexById);
   const index = useSelection((s) => s.index);
   const usagesByTarget = useSelection((s) => s.usagesByTarget);
+  const parentById = useSelection((s) => s.parentById);
+  const constraintsById = useSelection((s) => s.constraintsById);
+  const idDeclarations = useSelection((s) => s.idDeclarations);
+  const idrefDeclarations = useSelection((s) => s.idrefDeclarations);
   const setSelected = useSelection((s) => s.setSelected);
   const setActiveTab = useSelection((s) => s.setActiveTab);
+  const jumpToSource = useSelection((s) => s.jumpToSource);
   const model = useSelection((s) => s.model);
   const overrideByReplacementId = useSelection(
     (s) => s.overrideByReplacementId,
@@ -51,6 +59,18 @@ export function DetailPanel() {
   const overridesByOriginalKey = useSelection(
     (s) => s.overridesByOriginalKey,
   );
+
+  const ctx: PanelCtx = {
+    index,
+    indexById,
+    parentById,
+    constraintsById,
+    idDeclarations,
+    idrefDeclarations,
+    setSelected,
+    jumpToSource,
+    model,
+  };
 
   const entry = selectedId ? indexById.get(selectedId) : undefined;
 
@@ -149,7 +169,7 @@ export function DetailPanel() {
       />
 
       <div className="p-4 space-y-6 text-sm">
-        {renderSpecifics(node, index, setSelected, model)}
+        {renderSpecifics(node, ctx)}
         {renderAnnotation(node)}
         {usages.length > 0 && (
           <section>
@@ -265,20 +285,32 @@ function Header({
 
 type SetSelected = (id: string) => void;
 
-function renderSpecifics(
-  node: SchemaNode,
-  index: NodeIndexEntry[],
-  setSelected: SetSelected,
-  model: SchemaModel | null,
-) {
-  if ("type_inline_complex" in node) return renderElement(node, index, setSelected);
-  if ("use" in node) return renderAttribute(node, index, setSelected);
-  if ("content_kind" in node) return renderComplexType(node, index, setSelected, model);
-  if ("facets" in node) return renderSimpleType(node, index, setSelected);
+// Bundles everything a `render*` specifics function might need to resolve
+// cross-references and react to clicks, so adding a new lookup (e.g. for
+// constraints/ID-IDREF UI in later tasks) doesn't ripple through every
+// function's parameter list.
+export interface PanelCtx {
+  index: NodeIndexEntry[];
+  indexById: Map<string, NodeIndexEntry>;
+  parentById: Map<string, string>;
+  constraintsById: Map<string, { constraint: IdentityConstraint; hostId: string }>;
+  idDeclarations: NodeIndexEntry[];
+  idrefDeclarations: NodeIndexEntry[];
+  setSelected: SetSelected;
+  jumpToSource: (ref: SourceRef) => void;
+  model: SchemaModel | null;
+}
+
+function renderSpecifics(node: SchemaNode, ctx: PanelCtx) {
+  if ("type_inline_complex" in node) return renderElement(node, ctx);
+  if ("use" in node) return renderAttribute(node, ctx);
+  if ("content_kind" in node) return renderComplexType(node, ctx);
+  if ("facets" in node) return renderSimpleType(node, ctx);
   return null;
 }
 
-function renderElement(element: ElementDecl, index: NodeIndexEntry[], setSelected: SetSelected) {
+function renderElement(element: ElementDecl, ctx: PanelCtx) {
+  const { index, setSelected } = ctx;
   // An `<xs:element ref="…">` particle contributes only its cardinality —
   // type, flags and facets all live on the global declaration it points at,
   // which for an imported namespace sits in another file.
@@ -416,11 +448,8 @@ function renderElement(element: ElementDecl, index: NodeIndexEntry[], setSelecte
 // Renders the kind-scoped specifics for an attribute; passing the model
 // (when known) allows resolving Phase-1 schema-level state. Currently
 // unused inside this helper but kept for symmetry with renderComplexType.
-function renderAttribute(
-  attr: AttributeDecl,
-  index: NodeIndexEntry[],
-  setSelected: SetSelected,
-) {
+function renderAttribute(attr: AttributeDecl, ctx: PanelCtx) {
+  const { index, setSelected } = ctx;
   const inheritedEntry = attr.type_name
     ? resolveReference(attr.type_name, index, ["simpleType"])
     : undefined;
@@ -479,12 +508,8 @@ function renderAttribute(
   );
 }
 
-function renderComplexType(
-  complex: ComplexType,
-  index: NodeIndexEntry[],
-  setSelected: SetSelected,
-  model: SchemaModel | null,
-) {
+function renderComplexType(complex: ComplexType, ctx: PanelCtx) {
+  const { index, setSelected, model } = ctx;
   const implicitGroup = resolveDefaultAttributesGroup(complex, model, index);
   return (
     <section>
@@ -617,11 +642,8 @@ function resolveDefaultAttributesGroup(
   return { group, name: groupName };
 }
 
-function renderSimpleType(
-  simple: SimpleType,
-  index: NodeIndexEntry[],
-  setSelected: SetSelected,
-) {
+function renderSimpleType(simple: SimpleType, ctx: PanelCtx) {
+  const { index, setSelected } = ctx;
   return (
     <section>
       <SectionHead title="Simple type" />
@@ -869,28 +891,6 @@ function resolveTypeRef(typeName: string, index: NodeIndexEntry[]) {
   return undefined;
 }
 
-// Used-by row
-function UsageRow({ entry, onClick }: { entry: NodeIndexEntry; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left group hover:bg-slate-100 dark:hover:bg-slate-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors"
-    >
-      <KindBadge kind={entry.kind} />
-      <span className="font-mono text-[12.5px] truncate flex-1 text-slate-800 dark:text-slate-100">
-        {entry.label}
-      </span>
-      <span
-        className="text-slate-300 dark:text-slate-600 group-hover:text-accent group-hover:translate-x-0.5 transition-all"
-        aria-hidden="true"
-      >
-        →
-      </span>
-    </button>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // XSD 1.1 — xs:override badges
 // ---------------------------------------------------------------------------
@@ -954,56 +954,8 @@ function OverriddenByButtons({
 }
 
 // ---------------------------------------------------------------------------
-// XSD 1.1 — version constraints chip and schema overview
+// XSD 1.1 — schema overview
 // ---------------------------------------------------------------------------
-
-function VersionBadge({ vc }: { vc: VersionConstraints }) {
-  const summary = summarizeVersionConstraints(vc);
-  if (!summary) return null;
-  return (
-    <span
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium border bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800/60"
-      title={describeVersionConstraints(vc)}
-    >
-      <span className="text-[9px] uppercase tracking-wide font-semibold opacity-70">
-        vc
-      </span>
-      {summary}
-    </span>
-  );
-}
-
-function summarizeVersionConstraints(vc: VersionConstraints): string | null {
-  if (vc.min_version && vc.max_version) {
-    return `${vc.min_version}–${vc.max_version}`;
-  }
-  if (vc.min_version) return `≥ ${vc.min_version}`;
-  if (vc.max_version) return `< ${vc.max_version}`;
-  if (vc.type_available) return `needs ${stripPrefix(vc.type_available)}`;
-  if (vc.facet_available) return `needs ${stripPrefix(vc.facet_available)}`;
-  if (vc.type_unavailable) return `not ${stripPrefix(vc.type_unavailable)}`;
-  if (vc.facet_unavailable) return `not ${stripPrefix(vc.facet_unavailable)}`;
-  return null;
-}
-
-function describeVersionConstraints(vc: VersionConstraints): string {
-  const parts: string[] = [];
-  if (vc.min_version) parts.push(`minVersion=${vc.min_version}`);
-  if (vc.max_version) parts.push(`maxVersion=${vc.max_version}`);
-  if (vc.type_available) parts.push(`typeAvailable=${vc.type_available}`);
-  if (vc.type_unavailable) parts.push(`typeUnavailable=${vc.type_unavailable}`);
-  if (vc.facet_available) parts.push(`facetAvailable=${vc.facet_available}`);
-  if (vc.facet_unavailable)
-    parts.push(`facetUnavailable=${vc.facet_unavailable}`);
-  return parts.join(" · ");
-}
-
-function stripPrefix(qname: string): string {
-  // Show first listed name without prefix for compactness in chips.
-  const first = qname.split(/\s+/)[0];
-  const colon = first.indexOf(":");
-  return colon === -1 ? first : first.slice(colon + 1);
-}
 
 function SchemaOverview({ model }: { model: SchemaModel }) {
   const version = model.xsd_version ?? "unknown";
