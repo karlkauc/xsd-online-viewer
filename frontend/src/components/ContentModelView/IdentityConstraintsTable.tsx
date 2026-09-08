@@ -1,6 +1,6 @@
 import type { ElementDecl, IdentityConstraint, NodeIndexEntry } from "../../types/schema";
 import { resolveConstraintPaths, type ResolveContext } from "../../lib/constraintXPath";
-import { ConstraintPath } from "../IdentityConstraintsList";
+import { ConstraintPath, ReferButton } from "../IdentityConstraintsList";
 import { resolveReferTarget } from "../../lib/constraintRefer";
 import { SourceLineLink } from "../SourceLineLink";
 import { useSelection } from "../../stores/selectionStore";
@@ -76,22 +76,12 @@ export function IdentityConstraintsTable({
                   <td className="py-1.5 pr-3">
                     {constraint.kind !== "keyref" ? (
                       <span className="text-slate-400">—</span>
-                    ) : referTarget ? (
-                      <button
-                        type="button"
-                        className="font-mono text-teal-700 dark:text-teal-300 hover:underline"
-                        title={`Go to ${referTarget.name}`}
-                        onClick={() => setSelected(referTarget.hostId)}
-                      >
-                        ⚿ {referTarget.name} →
-                      </button>
                     ) : (
-                      <code
-                        className="font-mono text-slate-500 dark:text-slate-400"
-                        title="key not found in this schema"
-                      >
-                        {constraint.refer ?? "?"}
-                      </code>
+                      <ReferButton
+                        constraint={constraint}
+                        referTarget={referTarget}
+                        setSelected={setSelected}
+                      />
                     )}
                   </td>
                   <td className="py-1.5 pr-3 hidden md:table-cell">

@@ -6,7 +6,7 @@ import {
 } from "../lib/constraintXPath";
 import { SourceLineLink } from "./SourceLineLink";
 import { VersionBadge } from "./VersionBadge";
-import { resolveReferTarget } from "../lib/constraintRefer";
+import { resolveReferTarget, type ReferTarget } from "../lib/constraintRefer";
 
 type SetSelected = (id: string) => void;
 
@@ -105,23 +105,11 @@ function ConstraintCard({
         ))}
         {constraint.kind === "keyref" && (
           <PathRow label="refers to">
-            {referTarget ? (
-              <button
-                type="button"
-                className="font-mono text-teal-700 dark:text-teal-300 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
-                title={`Go to ${referTarget.name}`}
-                onClick={() => setSelected(referTarget.hostId)}
-              >
-                ⚿ {referTarget.name} →
-              </button>
-            ) : (
-              <code
-                className="font-mono text-slate-500 dark:text-slate-400"
-                title="key not found in this schema"
-              >
-                {constraint.refer ?? "?"}
-              </code>
-            )}
+            <ReferButton
+              constraint={constraint}
+              referTarget={referTarget}
+              setSelected={setSelected}
+            />
           </PathRow>
         )}
       </div>
@@ -159,6 +147,53 @@ function KindChip({ kind }: { kind: IdentityConstraint["kind"] }) {
     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-medium border bg-teal-50 text-teal-800 border-teal-200 dark:bg-teal-900/30 dark:text-teal-200 dark:border-teal-800/60">
       {kind}
     </span>
+  );
+}
+
+interface ReferButtonProps {
+  /** The keyref constraint whose `refer` this button/fallback describes —
+   *  only `constraint.refer` is read (for the unresolved fallback text). */
+  constraint: IdentityConstraint;
+  /** Result of `lib/constraintRefer.ts`'s `resolveReferTarget` — `null` when
+   *  neither `refer_id` nor a local-name match resolved. */
+  referTarget: ReferTarget | null;
+  setSelected: SetSelected;
+}
+
+// Renders a keyref's "refers to" control: a clickable `⚿ name →` button when
+// `referTarget` resolved (selecting the key/unique constraint's host
+// element), or a plain, titled fallback `<code>` showing the raw `refer`
+// QName when it didn't. Shared by the detail-panel cards
+// (IdentityConstraintsList) and the centre-pane table
+// (ContentModelView/IdentityConstraintsTable.tsx) so both surfaces stay in
+// sync — including the focus-visible ring, which is easy to drop when
+// copy-pasted by hand.
+export function ReferButton({ constraint, referTarget, setSelected }: ReferButtonProps) {
+  if (!referTarget) {
+    return (
+      <code
+        className="font-mono text-slate-500 dark:text-slate-400"
+        title="key not found in this schema"
+      >
+        {constraint.refer ?? "?"}
+      </code>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="font-mono text-teal-700 dark:text-teal-300 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+      title={`Go to ${referTarget.name}`}
+      onClick={(event) => {
+        // The centre-pane table's rows aren't clickable today, but stopping
+        // propagation here keeps this control safe to drop into a clickable
+        // row later without silently double-firing selection.
+        event.stopPropagation();
+        setSelected(referTarget.hostId);
+      }}
+    >
+      ⚿ {referTarget.name} →
+    </button>
   );
 }
 
