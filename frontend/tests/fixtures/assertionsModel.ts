@@ -231,6 +231,51 @@ export const derivedElement: ElementDecl = {
   source_ref: { file_id: "f1", line: 74 },
 };
 
+// --- Restriction chain: base and derived (via restriction) complex types
+// both assert. XSD 1.1 inherits a complex type's assertions through
+// complexContent/simpleContent *restriction* just like extension. -----------
+
+export const restrictedAssertType: ComplexType = {
+  id: `complexType:{${NS}}RestrictedAssertType`,
+  name: "RestrictedAssertType",
+  anonymous: false,
+  abstract: false,
+  mixed: false,
+  content_kind: "complex",
+  derivation: "restriction",
+  base: "tns:BaseAssertType",
+  particle: null,
+  attributes: [],
+  attribute_group_refs: [],
+  simple_content_base: null,
+  simple_content_facets: [],
+  annotation: null,
+  source_ref: { file_id: "f1", line: 95 },
+  assertions: [assertion("@restricted-flag = 'ok'", 96)],
+};
+
+export const restrictedElement: ElementDecl = {
+  id: `element:{${NS}}Restricted`,
+  name: "Restricted",
+  qname: `{${NS}}Restricted`,
+  ref: null,
+  type_name: "tns:RestrictedAssertType",
+  type_inline_simple: null,
+  type_inline_complex: null,
+  min_occurs: 1,
+  max_occurs: 1,
+  default: null,
+  fixed: null,
+  nillable: false,
+  abstract: false,
+  substitution_group: null,
+  form: null,
+  target_namespace: NS,
+  is_global: true,
+  annotation: null,
+  source_ref: { file_id: "f1", line: 94 },
+};
+
 // --- complexType with simpleContent whose base simple type asserts --------
 
 export const amountValueType: SimpleType = {
@@ -360,12 +405,20 @@ export const assertionsModel: SchemaModel = {
     codeElement,
     inlineCodedElement,
     derivedElement,
+    restrictedElement,
     paymentElement,
     cyclicElement,
   ],
   attributes: [codeAttribute],
   simple_types: [positiveCodeType, amountValueType],
-  complex_types: [measurementType, baseAssertType, derivedAssertType, amountType, cyclicType],
+  complex_types: [
+    measurementType,
+    baseAssertType,
+    derivedAssertType,
+    restrictedAssertType,
+    amountType,
+    cyclicType,
+  ],
   groups: [],
   attribute_groups: [],
   files: [

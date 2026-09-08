@@ -175,10 +175,14 @@ with cross-references stored as stable IDs (see ID scheme below). Anonymous
 inline types get synthetic IDs based on their parent path; every node retains
 a `source_ref = { file_id, line }` pointing back to the original XSD location.
 
-Two post-passes run after the walk, both over the already-built `SchemaModel`
+Three post-passes run after the walk, all over the already-built `SchemaModel`
 rather than during parsing (so they can see declarations regardless of
-document order or which file they came from):
+document order or which file they came from), in this order:
 
+- `_process_overrides` — materializes every `xs:override` block's replacement
+  declarations into the model's flat lists, cross-referenced through
+  `model.overrides`. Runs first so the two passes below see the overridden
+  declarations too, not the originals they replace.
 - `identity.link_keyrefs` — resolves each `xs:keyref`'s `@refer` QName to the
   `xs:key`/`xs:unique` constraint it names, filling in `refer_id` (falls back
   to a unique local-name match when the prefix doesn't resolve; appends a
@@ -189,7 +193,7 @@ document order or which file they came from):
   inline-restricted `xs:IDREF` (the shape FundsXML4 actually uses) is caught,
   not just the built-in type used directly.
 
-Both share `backend/app/parser/walk.py` — read-only generators
+The latter two share `backend/app/parser/walk.py` — read-only generators
 (`iter_elements`, `iter_attributes`) that traverse the model graph (nested
 particles, inline types, XSD 1.1 alternatives) without following named
 references, originally split out of `validation.py` for exactly this reuse.
@@ -280,7 +284,7 @@ Everything view-related lives in a single Zustand store at
   id, alongside the id of the element that declares it (`hostId`); also built
   by `buildIndex`. `idDeclarations`/`idrefDeclarations` — flat lists of every
   `NodeIndexEntry` whose `id_role` is `"id"` / `"idref"`-or-`"idrefs"`, used by
-  the ID reference / Referenced-by-IDREF sections (see ID scheme above for why
+  the ID reference / Referenced-by-IDREF sections (see ID scheme below for why
   these stay flat lists rather than a cross-reference map).
 - `activeTab` — default is `"diagram"`. The tab bar is a simple setter; all
   tabs read from the same in-memory model, no refetch on switch.

@@ -99,8 +99,11 @@ export function makeModelResolver(model: SchemaModel): TypeResolver {
   };
 }
 
-// Own assertions + the xs:extension base chain, cycle-guarded by type id.
-// When the chain bottoms out at a complexType with simpleContent whose base
+// Own assertions + the xs:extension/xs:restriction base chain, cycle-guarded
+// by type id. XSD 1.1 defines a complex type's assertions as the base type's
+// assertions followed by its own, for restriction as much as extension
+// (restriction can only narrow, so the base's assertions still hold). When
+// the chain bottoms out at a complexType with simpleContent whose base
 // resolves to a simpleType (not a further complexType), the simple type's own
 // restriction-base chain is folded in too.
 export function collectComplexAssertions(
@@ -117,7 +120,12 @@ export function collectComplexAssertions(
     if (current.assertions?.length) {
       groups.push({ assertions: current.assertions, from: label, typeId: current.id });
     }
-    if (current.derivation !== "extension" || !current.base) break;
+    if (
+      !current.base ||
+      (current.derivation !== "extension" && current.derivation !== "restriction")
+    ) {
+      break;
+    }
     const resolvedComplex = resolver.resolveComplex(current.base);
     if (resolvedComplex) {
       current = resolvedComplex.node;

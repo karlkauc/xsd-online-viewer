@@ -3,9 +3,10 @@
   Order registry — identity constraints / ID-IDREF showcase.
 
   Features exercised:
-    * xs:key / xs:keyref     — Product.sku is a compound key, Order Items
-                                reference it (an unresolvable line stays
-                                display-only, nothing is validated).
+    * xs:key / xs:keyref     — Product.sku is a compound key; orderItemRef
+                                resolves it to productKey, but the viewer is
+                                display-only — nothing is actually validated
+                                against instance documents.
     * xs:unique + .// + "|"  — email uniqueness checked across two different
                                 element shapes (Customer and Order/Contact)
                                 via a union selector.

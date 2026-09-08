@@ -28,14 +28,21 @@ A single showcase schema for the viewer's identity-constraint (`xs:key` /
   (`Registry`).
 * The centre pane on the Tree tab shows the same three constraints in a
   table, plus an **Assertions** table for `OrderType`.
-* Select `Customer` or `OrderNumber` to see the indigo **ID role** chip
-  (`ID` / `IDREF` / `IDREFS`) and the matching **ID reference** /
+* Select `OrderNumber` (Tree tab) to see the indigo **ID role** chip (`ID`)
+  on the element itself. `Customer` and `Order` are typed by named complex
+  types (`CustomerType`/`OrderType`), so the elements carry no chip — their
+  ID/IDREF roles sit on the attributes instead. Select `Customer/@id` in the
+  tree or attributes table to see the `ID` chip and the **ID reference**
+  section, or `Customer/@favoriteOrderRef` to see the `IDREF` chip and the
   **Referenced by IDREF** section — XSD never binds an IDREF to one specific
   ID, so both sides list every candidate/usage in the schema instead of a
   resolved target.
-* The Diagram tab shows the teal `⚿ N` badge on `Registry`, the indigo
-  `ID` / `⇢ ID` badges on `OrderNumber`/`Customer`/`Order`, and the amber
-  `⚖ N` badge on `Order` (inherited from `OrderType`'s assertion).
+* The Diagram tab shows the teal `⚿ N` badge on `Registry`, the indigo `ID`
+  badge on `OrderNumber` (the only node whose element itself is ID/IDREF
+  typed — attribute-level roles on `Customer`/`Order` don't render as
+  attribute rows on the diagram, since those two are typed by named complex
+  types, not inline ones), and the amber `⚖ 1` badge on `Order` (inherited
+  from `OrderType`'s assertion).
 
 `Product/@sku` and `Item/@sku` are deliberately **not** typed `xs:ID`/
 `xs:IDREF` — `xs:key`/`xs:keyref` and `xs:ID`/`xs:IDREF` are independent XSD

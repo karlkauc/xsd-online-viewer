@@ -24,6 +24,8 @@ import {
   measurementType,
   paymentElement,
   positiveCodeType,
+  restrictedAssertType,
+  restrictedElement,
 } from "./fixtures/assertionsModel";
 
 describe("countAssertions", () => {
@@ -66,6 +68,20 @@ describe.each([
       expect(groups).toHaveLength(2);
       expect(groups[0]).toMatchObject({ from: "DerivedAssertType" });
       expect(groups[0].assertions[0].test).toBe("@derived-flag = 'ok'");
+      expect(groups[1]).toMatchObject({ from: "BaseAssertType" });
+      expect(groups[1].assertions[0].test).toBe("@base-flag = 'ok'");
+    });
+
+    it("walks the restriction-base chain, labelling each group by its declaring type", () => {
+      const resolver = makeResolver();
+      const groups = collectComplexAssertions(
+        restrictedAssertType,
+        resolver,
+        "RestrictedAssertType",
+      );
+      expect(groups).toHaveLength(2);
+      expect(groups[0]).toMatchObject({ from: "RestrictedAssertType" });
+      expect(groups[0].assertions[0].test).toBe("@restricted-flag = 'ok'");
       expect(groups[1]).toMatchObject({ from: "BaseAssertType" });
       expect(groups[1].assertions[0].test).toBe("@base-flag = 'ok'");
     });
@@ -125,6 +141,12 @@ describe.each([
       const resolver = makeResolver();
       const groups = collectElementAssertions(derivedElement, resolver);
       expect(groups.map((g) => g.from)).toEqual(["DerivedAssertType", "BaseAssertType"]);
+    });
+
+    it("walks the restriction-base chain for a named complex type", () => {
+      const resolver = makeResolver();
+      const groups = collectElementAssertions(restrictedElement, resolver);
+      expect(groups.map((g) => g.from)).toEqual(["RestrictedAssertType", "BaseAssertType"]);
     });
 
     it("includes the simpleContent base simple type's assertions", () => {
