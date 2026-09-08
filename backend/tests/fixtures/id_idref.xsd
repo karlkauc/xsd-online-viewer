@@ -102,6 +102,24 @@
 
   <xs:element name="SimpleContentIdElement" type="tns:SimpleContentIdType"/>
 
+  <!-- Mutual simpleContent-extension cycle between two complex types ->
+       None (cycle guard on the complex hop), not infinite recursion. Illegal
+       per XSD, but the parser doesn't reject it, so classify_type_ref must
+       stay defensive here the same way it already is for simple-type
+       restriction cycles above (CycleA/CycleB). -->
+  <xs:complexType name="ComplexCycleA">
+    <xs:simpleContent>
+      <xs:extension base="tns:ComplexCycleB"/>
+    </xs:simpleContent>
+  </xs:complexType>
+  <xs:complexType name="ComplexCycleB">
+    <xs:simpleContent>
+      <xs:extension base="tns:ComplexCycleA"/>
+    </xs:simpleContent>
+  </xs:complexType>
+
+  <xs:element name="ComplexCycleElement" type="tns:ComplexCycleA"/>
+
   <!-- Global attribute. -->
   <xs:attribute name="globalIdAttr" type="xs:ID"/>
 

@@ -81,6 +81,7 @@ class TestElementIdRoles:
             ("UnionIdOrToken", "id"),
             ("CycleElement", None),
             ("SimpleContentIdElement", "id"),
+            ("ComplexCycleElement", None),
             ("AttrHolder", None),
         ],
     )

@@ -66,9 +66,13 @@ def _declaring_namespace(
     ``xs:import``ed schema, most commonly), so a type must be indexed under
     *its own* file's target namespace — not the model's primary one, or a
     same-named type from a different namespace would collide with it. Falls
-    back to the model's target namespace when the type's file is unknown
-    (defensive; every parsed type carries a ``source_ref``) or declares none
-    (e.g. a chameleon-included file with no ``targetNamespace`` of its own).
+    back to the model's target namespace only when the type's file is
+    unknown (defensive; every parsed type carries a ``source_ref``). When
+    the file *is* known but declares no target namespace of its own (e.g. a
+    chameleon-included file), that ``None`` is returned as-is — the loader
+    already resolves such a file's effective namespace onto
+    ``target_namespace`` before this pass runs (via ``target_ns_hint``), so
+    ``file_namespaces`` never actually holds ``None`` for one in practice.
     Mirrors ``sample.py``'s ``_Context.namespace_of``.
     """
     file_id = decl.source_ref.file_id if decl.source_ref else None
@@ -154,7 +158,14 @@ def classify_type_ref(
 ) -> IdRole | None:
     """Classify the ID/IDREF role a type *reference* (a ``type="..."``
     QName) resolves to: builtin XSD type -> named simple type -> named
-    complex type with simple content (via its ``simple_content_base``)."""
+    complex type with simple content (via its ``simple_content_base``).
+
+    ``seen`` also guards the complex -> ``simple_content_base`` -> complex
+    hop: two named complex types whose ``simpleContent`` extensions name
+    each other (illegal per XSD, but not rejected by the parser) would
+    otherwise recurse forever. It shares one set with ``classify_simple``'s
+    guard since declaration ids are unique across the whole model.
+    """
     clark = expand_qname(qname, index.namespaces)
     role = index.builtin_roles.get(clark)
     if role is not None:
@@ -167,7 +178,9 @@ def classify_type_ref(
 
     ct = index.complex_by_clark.get(clark) or index.complex_by_local.get(local)
     if ct is not None and ct.content_kind == "simple" and ct.simple_content_base:
-        return classify_type_ref(ct.simple_content_base, index, seen)
+        if ct.id in seen:
+            return None
+        return classify_type_ref(ct.simple_content_base, index, seen | {ct.id})
 
     return None
 
