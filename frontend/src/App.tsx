@@ -283,7 +283,18 @@ export default function App() {
     <div className="flex flex-col h-full">
       <header className="flex items-center justify-between gap-2 md:gap-3 px-3 md:px-4 py-2 md:py-3 short:py-1 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
         <div className="flex items-center gap-3 min-w-0">
-          <h1 className="text-base md:text-lg font-semibold shrink-0">Online XSD Viewer</h1>
+          <h1 className="text-base md:text-lg font-semibold shrink-0">
+            {/* A real navigation, not a store reset: it also drops the
+                /url?src=… or /fundsxml?release=… path and the #/id/ hash, so
+                the user lands on the clean start page. */}
+            <a
+              href="/"
+              className="text-inherit no-underline hover:underline"
+              title="Back to the start page"
+            >
+              Online XSD Viewer
+            </a>
+          </h1>
           {model?.target_namespace && (
             <span className="hidden lg:inline min-w-0 text-sm font-mono text-slate-500 dark:text-slate-400 truncate">
               {model.target_namespace}

@@ -59,3 +59,30 @@ test("theme toggle persists across reloads", async ({ page }) => {
   const afterReload = await page.locator("html").evaluate((el) => el.classList.contains("dark"));
   expect(afterReload).toBe(after);
 });
+
+test("the header title links back to a clean start page", async ({ page }) => {
+  await page.goto("/fundsxml");
+  await expect(page.getByRole("tab", { name: "FundsXML Releases" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+
+  // From an input tab: back to "/" with the default File tab.
+  await page.getByRole("link", { name: "Online XSD Viewer" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("tab", { name: "File / ZIP" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+
+  // From a loaded schema with a selection hash: schema dropped, URL clean.
+  await page.locator('input[type="file"]').setInputFiles(SIMPLE_XSD);
+  await page.getByRole("button", { name: "Tree" }).click();
+  await page.getByRole("treeitem").filter({ hasText: "Person" }).first().click();
+  await expect(page).toHaveURL(/#\/id\//);
+
+  await page.getByRole("link", { name: "Online XSD Viewer" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "Load an XSD schema" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Load a different schema file" })).toHaveCount(0);
+});
