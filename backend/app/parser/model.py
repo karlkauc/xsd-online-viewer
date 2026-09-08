@@ -16,6 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field
 # Shared types
 # ---------------------------------------------------------------------------
 
+# The XSD namespace itself. Lives here (rather than in xsd_parser.py, its
+# original home) so idroles.py can import it without creating a circular
+# import between xsd_parser.py and idroles.py.
+XSD_NS = "http://www.w3.org/2001/XMLSchema"
+
 QName = str  # serialized as "prefix:local" or "local"
 
 

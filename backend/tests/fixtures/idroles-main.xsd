@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:o="urn:idroles-other"
+           xmlns:tns="urn:idroles-main"
+           targetNamespace="urn:idroles-main"
+           elementFormDefault="qualified">
+
+  <xs:import namespace="urn:idroles-other" schemaLocation="idroles-other.xsd"/>
+
+  <!-- Same local name as idroles-other.xsd's RefType, but NOT an id-bearing
+       type — must not collide with the imported one when both are indexed
+       by their own file's target namespace. -->
+  <xs:simpleType name="RefType">
+    <xs:restriction base="xs:string">
+      <xs:maxLength value="32"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:element name="UseMain" type="tns:RefType"/>
+  <xs:element name="UseOther" type="o:RefType"/>
+
+</xs:schema>

@@ -10,8 +10,9 @@ import pytest
 from app.parser.idroles import expand_qname
 from app.parser.model import ElementDecl, SchemaModel
 from app.parser.walk import iter_attributes, iter_elements
-from app.parser.xsd_parser import parse_single
+from app.parser.xsd_parser import parse_files_map, parse_single
 
+FIXTURES = Path(__file__).parent / "fixtures"
 REPO_ROOT = Path(__file__).parent.parent.parent
 FUNDSXML4_XSD = REPO_ROOT / "FundsXML4.xsd"
 
@@ -140,6 +141,37 @@ class TestSimpleXsdFixture:
     def test_person_id_attribute_is_id(self, simple_xsd_bytes: bytes) -> None:
         model = parse_single(simple_xsd_bytes, "simple.xsd")
         assert _attribute_role(model, "id") == "id"
+
+
+class TestMultiFileNamedTypeNamespacing:
+    """Named simple/complex types must be indexed under their *own* file's
+    target namespace, not the model's primary one — otherwise a same-named
+    type from an imported namespace collides with a main-namespace type of
+    the same local name (regression: reviewer-reported in fix round 1)."""
+
+    @pytest.fixture
+    def model(self) -> SchemaModel:
+        files = {
+            name: (FIXTURES / name).read_bytes()
+            for name in ("idroles-main.xsd", "idroles-other.xsd")
+        }
+        return parse_files_map(files, "idroles-main.xsd")
+
+    def test_element_typed_by_imported_namespace_type_gets_its_role(
+        self, model: SchemaModel
+    ) -> None:
+        # idroles-other.xsd's RefType (urn:idroles-other) restricts
+        # xs:IDREF — must resolve via the Clark key scoped to *that* file's
+        # namespace, not collide with idroles-main.xsd's own RefType.
+        assert _element_role(model, "UseOther") == "idref"
+
+    def test_element_typed_by_own_namespace_type_keeps_its_own_role(
+        self, model: SchemaModel
+    ) -> None:
+        # idroles-main.xsd's RefType (urn:idroles-main) restricts xs:string
+        # — must NOT pick up the "idref" role from the same-named imported
+        # type.
+        assert _element_role(model, "UseMain") is None
 
 
 class TestDefaultIsNone:

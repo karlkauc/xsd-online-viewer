@@ -28,7 +28,9 @@ from app.parser.errors import (
     not_a_schema_message,
 )
 from app.parser.identity import link_keyrefs
+from app.parser.idroles import apply_id_roles
 from app.parser.model import (
+    XSD_NS,
     Alternative,
     Annotation,
     AppInfo,
@@ -67,7 +69,6 @@ from app.parser.security import (
 
 logger = logging.getLogger(__name__)
 
-XSD_NS = "http://www.w3.org/2001/XMLSchema"
 XML_NS = "http://www.w3.org/XML/1998/namespace"
 VC_NS = "http://www.w3.org/2007/XMLSchema-versioning"
 
@@ -549,10 +550,6 @@ class XsdParser:
 
         self._process_overrides(model)
         link_keyrefs(model, self.state.diagnostics)
-        # Local import: idroles.py imports XSD_NS from this module, so a
-        # module-level import here would be circular.
-        from app.parser.idroles import apply_id_roles
-
         apply_id_roles(model)
 
         model.diagnostics.extend(self.state.diagnostics)

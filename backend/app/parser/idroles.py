@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.parser.model import (
+    XSD_NS,
     AttributeDecl,
     ComplexType,
     ElementDecl,
@@ -54,8 +55,30 @@ class _Index:
     complex_by_local: dict[str, ComplexType] = field(default_factory=dict)
 
 
+def _declaring_namespace(
+    decl: SimpleType | ComplexType,
+    file_namespaces: dict[str, str | None],
+    model_target_namespace: str | None,
+) -> str | None:
+    """The target namespace a named type was actually declared under.
+
+    A multi-file model can have files with different target namespaces (an
+    ``xs:import``ed schema, most commonly), so a type must be indexed under
+    *its own* file's target namespace — not the model's primary one, or a
+    same-named type from a different namespace would collide with it. Falls
+    back to the model's target namespace when the type's file is unknown
+    (defensive; every parsed type carries a ``source_ref``) or declares none
+    (e.g. a chameleon-included file with no ``targetNamespace`` of its own).
+    Mirrors ``sample.py``'s ``_Context.namespace_of``.
+    """
+    file_id = decl.source_ref.file_id if decl.source_ref else None
+    if file_id is not None and file_id in file_namespaces:
+        return file_namespaces[file_id]
+    return model_target_namespace
+
+
 def _build_index(model: SchemaModel, xsd_ns: str) -> _Index:
-    target_ns = model.target_namespace
+    file_namespaces: dict[str, str | None] = {f.id: f.target_namespace for f in model.files}
     index = _Index(
         namespaces=model.namespaces,
         builtin_roles={
@@ -67,13 +90,15 @@ def _build_index(model: SchemaModel, xsd_ns: str) -> _Index:
     for st in model.simple_types:
         if not st.name:
             continue
-        clark = f"{{{target_ns}}}{st.name}" if target_ns else st.name
+        ns = _declaring_namespace(st, file_namespaces, model.target_namespace)
+        clark = f"{{{ns}}}{st.name}" if ns else st.name
         index.simple_by_clark.setdefault(clark, st)
         index.simple_by_local.setdefault(st.name, st)
     for ct in model.complex_types:
         if not ct.name:
             continue
-        clark = f"{{{target_ns}}}{ct.name}" if target_ns else ct.name
+        ns = _declaring_namespace(ct, file_namespaces, model.target_namespace)
+        clark = f"{{{ns}}}{ct.name}" if ns else ct.name
         index.complex_by_clark.setdefault(clark, ct)
         index.complex_by_local.setdefault(ct.name, ct)
     return index
@@ -178,11 +203,6 @@ def apply_id_roles(model: SchemaModel) -> None:
     a named simple/complex type referenced by ``type="..."`` may be declared
     anywhere in the model, including after the point where it's used.
     """
-    # Local import: xsd_parser.py imports apply_id_roles from this module
-    # (inside XsdParser.parse(), for the same reason), so importing XSD_NS
-    # from xsd_parser at module level here would be a circular import.
-    from app.parser.xsd_parser import XSD_NS
-
     index = _build_index(model, XSD_NS)
     for element in iter_elements(model):
         element.id_role = _classify_element(element, index)
