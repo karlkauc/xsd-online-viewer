@@ -15,6 +15,7 @@ import {
   bookElement,
   NS as CONSTRAINTS_NS,
 } from "./fixtures/constraintsModel";
+import { idRolesModel, holderElement } from "./fixtures/idRolesModel";
 
 const PERSON_ID = "element:{http://example.com/simple}Person";
 const ADDRESS_ID = "element:{http://example.com/simple}PersonType/Address";
@@ -411,5 +412,36 @@ describe("buildDiagramGraph identity-constraint badge", () => {
     const { nodes } = buildDiagramGraph(constraintsModel, new Set(), null);
     const node = elementByLabel(nodes, "Library")!;
     expect(nodeHeight(node)).toBe(NODE_HEIGHT + 21);
+  });
+});
+
+describe("buildDiagramGraph ID/IDREF badge", () => {
+  function elementByLabel(nodes: Node[], label: string): Node | undefined {
+    return nodes.find(
+      (n) => n.type === "element" && (n.data as { label: string }).label === label,
+    );
+  }
+  function nodeFor(label: string): Node {
+    const { nodes } = buildDiagramGraph(idRolesModel, new Set([holderElement.id]), null);
+    const node = elementByLabel(nodes, label);
+    if (!node) throw new Error(`node ${label} missing`);
+    return node;
+  }
+
+  it("carries the element's id_role into the node data", () => {
+    expect((nodeFor("UniqueID").data as { idRole?: string | null }).idRole).toBe("id");
+    expect((nodeFor("BenchmarkRef").data as { idRole?: string | null }).idRole).toBe("idref");
+    expect((nodeFor("RelatedRefs").data as { idRole?: string | null }).idRole).toBe("idrefs");
+  });
+
+  it("is null/absent for an element without an id_role", () => {
+    expect((nodeFor("Plain").data as { idRole?: string | null }).idRole ?? null).toBeNull();
+  });
+
+  it("does not change the height budget of an idRole-carrying node", () => {
+    // These are plain leaves: no attrs, no docs, no expandable type, so the
+    // height stays NODE_HEIGHT regardless of id_role.
+    expect(nodeHeight(nodeFor("UniqueID"))).toBe(NODE_HEIGHT);
+    expect(nodeHeight(nodeFor("Plain"))).toBe(NODE_HEIGHT);
   });
 });

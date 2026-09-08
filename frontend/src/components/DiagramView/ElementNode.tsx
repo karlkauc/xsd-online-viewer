@@ -1,6 +1,17 @@
 import { Handle, Position } from "@xyflow/react";
 import clsx from "clsx";
 import { TapToReveal } from "../TapToReveal";
+import type { IdRole } from "../../types/schema";
+
+// Title/aria-label text for the indigo ID/IDREF badge and attribute marker
+// — kept local (mirrors IdReferenceSections.tsx's own copy) so the diagram
+// module stays self-contained rather than reaching into the detail-panel
+// component tree for a three-entry lookup.
+const ID_ROLE_TITLE: Record<IdRole, string> = {
+  id: "xs:ID",
+  idref: "xs:IDREF",
+  idrefs: "xs:IDREFS",
+};
 
 interface ElementNodeData {
   schemaId: string;
@@ -14,11 +25,17 @@ interface ElementNodeData {
   expandable?: boolean;
   expanded?: boolean;
   selected?: boolean;
-  attributes?: { id: string; name: string | null; type_name: string | null }[];
+  attributes?: {
+    id: string;
+    name: string | null;
+    type_name: string | null;
+    id_role?: IdRole | null;
+  }[];
   documentationLines?: string[];
   documentationFull?: string | null;
   assertCount?: number;
   alternativesCount?: number;
+  idRole?: IdRole | null;
   identityConstraintCount?: number;
   identityConstraintTitle?: string | null;
 }
@@ -54,6 +71,15 @@ export function ElementNode({ data }: { data: ElementNodeData }) {
       <div className="flex items-center justify-between gap-1 px-2 py-1 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800">
         <span className="font-mono font-semibold truncate">{data.label}</span>
         <span className="flex items-center gap-1 shrink-0">
+          {data.idRole ? (
+            <span
+              className="inline-flex items-center gap-0.5 px-1 rounded text-[9.5px] font-mono font-medium border bg-indigo-50 text-indigo-800 border-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-200 dark:border-indigo-800/60"
+              title={ID_ROLE_TITLE[data.idRole]}
+              aria-label={ID_ROLE_TITLE[data.idRole]}
+            >
+              {data.idRole === "id" ? "ID" : "⇢ ID"}
+            </span>
+          ) : null}
           {data.identityConstraintCount && data.identityConstraintCount > 0 ? (
             <span
               className="inline-flex items-center gap-0.5 px-1 rounded text-[9.5px] font-mono font-medium border bg-teal-50 text-teal-800 border-teal-200 dark:bg-teal-900/30 dark:text-teal-200 dark:border-teal-800/60"
@@ -94,6 +120,15 @@ export function ElementNode({ data }: { data: ElementNodeData }) {
             <li key={attr.id} className="font-mono text-[10px] truncate">
               <span className="text-amber-700 dark:text-amber-300">@{attr.name}</span>
               {attr.type_name && <span className="text-slate-500"> : {attr.type_name}</span>}
+              {attr.id_role && (
+                <span
+                  className="ml-1 text-indigo-600 dark:text-indigo-400"
+                  title={ID_ROLE_TITLE[attr.id_role]}
+                  aria-label={ID_ROLE_TITLE[attr.id_role]}
+                >
+                  •
+                </span>
+              )}
             </li>
           ))}
           {attrs.length > 4 && (

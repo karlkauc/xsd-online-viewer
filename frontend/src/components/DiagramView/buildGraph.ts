@@ -176,6 +176,7 @@ function computeElementDisplay(
     collectElementAssertions(target, context.assertionResolver),
   );
   const alternativesCount = element.alternatives?.length ?? 0;
+  const idRole = target.id_role ?? null;
   const identityConstraints = target.identity_constraints ?? [];
   const identityConstraintCount = identityConstraints.length;
   const identityConstraintTitle = identityConstraintCount
@@ -210,6 +211,7 @@ function computeElementDisplay(
     documentationFull: docFull,
     assertCount,
     alternativesCount,
+    idRole,
     identityConstraintCount,
     identityConstraintTitle,
   };

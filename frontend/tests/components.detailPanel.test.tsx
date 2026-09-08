@@ -19,6 +19,14 @@ import {
   bookElement,
   NS as CONSTRAINTS_NS,
 } from "./fixtures/constraintsModel";
+import {
+  idRolesModel,
+  uniqueIdElement,
+  benchmarkRefElement,
+  relatedRefsElement,
+  plainElement,
+  refAttribute,
+} from "./fixtures/idRolesModel";
 
 describe("DetailPanel", () => {
   beforeEach(() => {
@@ -344,5 +352,156 @@ describe("DetailPanel identity constraints", () => {
     const [bookStep] = screen.getAllByRole("button", { name: "tns:Book" });
     await user.click(bookStep);
     expect(useSelection.getState().selectedId).toBe(bookElement.id);
+  });
+});
+
+describe("DetailPanel ID/IDREF", () => {
+  beforeEach(() => {
+    useSelection.getState().clearSchema();
+  });
+
+  it("shows an IDREF chip and the ID reference section for an idref element", () => {
+    act(() => {
+      useSelection.getState().setSchema("idroles", idRolesModel);
+      useSelection.getState().setSelected(benchmarkRefElement.id);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("ID role")).toBeInTheDocument();
+    expect(screen.getByText("IDREF")).toBeInTheDocument();
+    expect(screen.getByText("ID reference")).toBeInTheDocument();
+    expect(
+      screen.getByText(/does not bind an IDREF to a specific ID/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("UniqueID")).toBeInTheDocument();
+  });
+
+  it("shows an IDREFS chip for an idrefs element", () => {
+    act(() => {
+      useSelection.getState().setSchema("idroles", idRolesModel);
+      useSelection.getState().setSelected(relatedRefsElement.id);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("IDREFS")).toBeInTheDocument();
+    expect(screen.getByText("ID reference")).toBeInTheDocument();
+  });
+
+  it("shows 'Referenced by IDREF' with usage rows for an xs:ID element", () => {
+    act(() => {
+      useSelection.getState().setSchema("idroles", idRolesModel);
+      useSelection.getState().setSelected(uniqueIdElement.id);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("ID role")).toBeInTheDocument();
+    expect(screen.getByText("Referenced by IDREF")).toBeInTheDocument();
+    expect(screen.getByText("BenchmarkRef")).toBeInTheDocument();
+    expect(screen.getByText("RelatedRefs")).toBeInTheDocument();
+    expect(screen.getByText("refAttr")).toBeInTheDocument();
+  });
+
+  it("shows the IDREF chip and ID reference section for an idref attribute", () => {
+    act(() => {
+      useSelection.getState().setSchema("idroles", idRolesModel);
+      useSelection.getState().setSelected(refAttribute.id);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("ID role")).toBeInTheDocument();
+    expect(screen.getByText("IDREF")).toBeInTheDocument();
+    expect(screen.getByText("ID reference")).toBeInTheDocument();
+  });
+
+  it("does not show ID role or ID/IDREF sections for a plain element", () => {
+    act(() => {
+      useSelection.getState().setSchema("idroles", idRolesModel);
+      useSelection.getState().setSelected(plainElement.id);
+    });
+    render(<DetailPanel />);
+    expect(screen.queryByText("ID role")).not.toBeInTheDocument();
+    expect(screen.queryByText("ID reference")).not.toBeInTheDocument();
+    expect(screen.queryByText("Referenced by IDREF")).not.toBeInTheDocument();
+  });
+
+  it("caps xs:ID candidates at 8 with a 'Show all (9)' button that reveals the 9th", async () => {
+    const user = userEvent.setup();
+    function makeIdElement(i: number) {
+      return {
+        id: `element:{urn:capmodel}Id${i}`,
+        name: `Id${i}`,
+        qname: `{urn:capmodel}Id${i}`,
+        ref: null,
+        type_name: "xs:ID",
+        type_inline_simple: null,
+        type_inline_complex: null,
+        min_occurs: 1,
+        max_occurs: 1,
+        default: null,
+        fixed: null,
+        nillable: false,
+        abstract: false,
+        substitution_group: null,
+        form: "qualified" as const,
+        target_namespace: "urn:capmodel",
+        is_global: true,
+        annotation: null,
+        source_ref: { file_id: "f1", line: 10 + i },
+        id_role: "id" as const,
+      };
+    }
+    const capIdElements = Array.from({ length: 9 }, (_, i) => makeIdElement(i));
+    const capRefElement = {
+      id: "element:{urn:capmodel}Ref",
+      name: "Ref",
+      qname: "{urn:capmodel}Ref",
+      ref: null,
+      type_name: "xs:IDREF",
+      type_inline_simple: null,
+      type_inline_complex: null,
+      min_occurs: 1,
+      max_occurs: 1,
+      default: null,
+      fixed: null,
+      nillable: false,
+      abstract: false,
+      substitution_group: null,
+      form: "qualified" as const,
+      target_namespace: "urn:capmodel",
+      is_global: true,
+      annotation: null,
+      source_ref: { file_id: "f1", line: 1 },
+      id_role: "idref" as const,
+    };
+    const capModel: SchemaModel = {
+      schema_id: "cap-test",
+      target_namespace: "urn:capmodel",
+      namespaces: {},
+      element_form_default: "qualified",
+      attribute_form_default: "qualified",
+      elements: [capRefElement, ...capIdElements],
+      attributes: [],
+      simple_types: [],
+      complex_types: [],
+      groups: [],
+      attribute_groups: [],
+      files: [
+        {
+          id: "f1",
+          filename: "cap.xsd",
+          target_namespace: "urn:capmodel",
+          relationship: "main",
+          content: null,
+        },
+      ],
+      diagnostics: [],
+    };
+    act(() => {
+      useSelection.getState().setSchema("cap", capModel);
+      useSelection.getState().setSelected(capRefElement.id);
+    });
+    render(<DetailPanel />);
+    for (let i = 0; i < 8; i++) {
+      expect(screen.getByText(`Id${i}`)).toBeInTheDocument();
+    }
+    expect(screen.queryByText("Id8")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show all (9)" }));
+    expect(screen.getByText("Id8")).toBeInTheDocument();
   });
 });

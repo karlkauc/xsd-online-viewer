@@ -32,6 +32,11 @@ import { openSampleXml } from "./SampleXmlDialog";
 import { CopyButton } from "./CopyButton";
 import { VersionBadge } from "./VersionBadge";
 import { UsageRow } from "./UsageRow";
+import {
+  IdReferenceSection,
+  IdRoleChip,
+  ReferencedByIdrefSection,
+} from "./IdReferenceSections";
 
 // Kind-scoped accent colors — mirror KindBadge so the header's left bar and
 // in-row dots read as "same thing as the E/A/CT/ST/G/AG badge".
@@ -318,7 +323,7 @@ function renderSpecifics(node: SchemaNode, ctx: PanelCtx) {
 }
 
 function renderElement(element: ElementDecl, ctx: PanelCtx) {
-  const { index, indexById, constraintsById, setSelected } = ctx;
+  const { index, indexById, parentById, constraintsById, idDeclarations, idrefDeclarations, setSelected } = ctx;
   // An `<xs:element ref="…">` particle contributes only its cardinality —
   // type, flags and facets all live on the global declaration it points at,
   // which for an imported namespace sits in another file.
@@ -345,6 +350,7 @@ function renderElement(element: ElementDecl, ctx: PanelCtx) {
     : undefined;
 
   const assertionGroups = collectElementAssertions(declaration, makeIndexResolver(index));
+  const idRole = declaration.id_role ?? null;
 
   const sampleName = declaration.name ?? element.name ?? element.ref ?? "element";
 
@@ -401,6 +407,11 @@ function renderElement(element: ElementDecl, ctx: PanelCtx) {
         <DataRow label="Cardinality">
           <Cardinality min={element.min_occurs} max={element.max_occurs} />
         </DataRow>
+        {idRole && (
+          <DataRow label="ID role">
+            <IdRoleChip role={idRole} />
+          </DataRow>
+        )}
         {(declaration.default || declaration.fixed) && (
           <>
             {declaration.default && (
@@ -460,6 +471,20 @@ function renderElement(element: ElementDecl, ctx: PanelCtx) {
         constraintsById={constraintsById}
         setSelected={setSelected}
       />
+      {(idRole === "idref" || idRole === "idrefs") && (
+        <IdReferenceSection
+          idDeclarations={idDeclarations}
+          indexById={indexById}
+          parentById={parentById}
+          setSelected={setSelected}
+        />
+      )}
+      {idRole === "id" && (
+        <ReferencedByIdrefSection
+          idrefDeclarations={idrefDeclarations}
+          setSelected={setSelected}
+        />
+      )}
     </section>
   );
 }
@@ -468,7 +493,7 @@ function renderElement(element: ElementDecl, ctx: PanelCtx) {
 // (when known) allows resolving Phase-1 schema-level state. Currently
 // unused inside this helper but kept for symmetry with renderComplexType.
 function renderAttribute(attr: AttributeDecl, ctx: PanelCtx) {
-  const { index, setSelected } = ctx;
+  const { index, indexById, parentById, idDeclarations, idrefDeclarations, setSelected } = ctx;
   const inheritedEntry = attr.type_name
     ? resolveReference(attr.type_name, index, ["simpleType"])
     : undefined;
@@ -477,6 +502,7 @@ function renderAttribute(attr: AttributeDecl, ctx: PanelCtx) {
       ? (inheritedEntry.node as SimpleType)
       : undefined;
   const assertionGroups = collectAttributeAssertions(attr, makeIndexResolver(index));
+  const idRole = attr.id_role ?? null;
   return (
     <section>
       <SectionHead title="Attribute" />
@@ -493,6 +519,11 @@ function renderAttribute(attr: AttributeDecl, ctx: PanelCtx) {
         <DataRow label="Use">
           <UseChip use={attr.use} />
         </DataRow>
+        {idRole && (
+          <DataRow label="ID role">
+            <IdRoleChip role={idRole} />
+          </DataRow>
+        )}
         {attr.default && (
           <DataRow label="Default">
             <code className="font-mono text-[12px]">{attr.default}</code>
@@ -525,6 +556,20 @@ function renderAttribute(attr: AttributeDecl, ctx: PanelCtx) {
         />
       )}
       <AssertionsList groups={assertionGroups} />
+      {(idRole === "idref" || idRole === "idrefs") && (
+        <IdReferenceSection
+          idDeclarations={idDeclarations}
+          indexById={indexById}
+          parentById={parentById}
+          setSelected={setSelected}
+        />
+      )}
+      {idRole === "id" && (
+        <ReferencedByIdrefSection
+          idrefDeclarations={idrefDeclarations}
+          setSelected={setSelected}
+        />
+      )}
     </section>
   );
 }

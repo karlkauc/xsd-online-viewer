@@ -101,6 +101,70 @@ describe("ElementNode identity-constraint badge", () => {
   });
 });
 
+describe("ElementNode ID/IDREF badge", () => {
+  afterEach(() => cleanup());
+
+  it("shows the ID badge with an xs:ID title when idRole is 'id'", () => {
+    const box = renderElement({ idRole: "id" });
+    const badge = box.querySelector("[aria-label='xs:ID']");
+    expect(badge).not.toBeNull();
+    expect(badge).toHaveAttribute("title", "xs:ID");
+    expect(badge?.textContent).toBe("ID");
+  });
+
+  it("shows the ⇢ ID badge with an xs:IDREF title when idRole is 'idref'", () => {
+    const box = renderElement({ idRole: "idref" });
+    const badge = box.querySelector("[aria-label='xs:IDREF']");
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toBe("⇢ ID");
+  });
+
+  it("shows the ⇢ ID badge with an xs:IDREFS title when idRole is 'idrefs'", () => {
+    const box = renderElement({ idRole: "idrefs" });
+    const badge = box.querySelector("[aria-label='xs:IDREFS']");
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toBe("⇢ ID");
+  });
+
+  it("shows no ID/IDREF badge when idRole is absent", () => {
+    const box = renderElement({});
+    expect(box.querySelector("[aria-label='xs:ID']")).toBeNull();
+    expect(box.querySelector("[aria-label='xs:IDREF']")).toBeNull();
+    expect(box.querySelector("[aria-label='xs:IDREFS']")).toBeNull();
+  });
+
+  it("renders the ID/IDREF badge before the ⚿ identity-constraint badge", () => {
+    const box = renderElement({
+      idRole: "id",
+      identityConstraintCount: 1,
+      identityConstraintTitle: "key k",
+    });
+    const text = box.textContent ?? "";
+    expect(text.indexOf("ID")).toBeLessThan(text.indexOf("⚿"));
+  });
+});
+
+describe("ElementNode attribute ID/IDREF marker", () => {
+  afterEach(() => cleanup());
+
+  it("shows a marker on an attribute row typed xs:IDREF", () => {
+    const box = renderElement({
+      attributes: [{ id: "a1", name: "ref", type_name: "xs:IDREF", id_role: "idref" }],
+    });
+    const marker = box.querySelector("[aria-label='xs:IDREF']");
+    expect(marker).not.toBeNull();
+  });
+
+  it("shows no marker on an attribute row without an id_role", () => {
+    const box = renderElement({
+      attributes: [{ id: "a1", name: "plain", type_name: "xs:string" }],
+    });
+    expect(box.querySelector("[aria-label='xs:ID']")).toBeNull();
+    expect(box.querySelector("[aria-label='xs:IDREF']")).toBeNull();
+    expect(box.querySelector("[aria-label='xs:IDREFS']")).toBeNull();
+  });
+});
+
 describe("CompositorNode border encodes cardinality", () => {
   afterEach(() => cleanup());
 
