@@ -13,6 +13,13 @@ import {
   measurementType,
   positiveCodeType,
 } from "./fixtures/assertionsModel";
+import {
+  constraintsModel,
+  libraryElement,
+  bookElement,
+  leafElement,
+} from "./fixtures/constraintsModel";
+import type { ElementDecl, SchemaModel } from "../src/types/schema";
 
 function selectId(id: string) {
   act(() => {
@@ -174,5 +181,86 @@ describe("ContentModelView assertions table", () => {
     selectId("element:{http://example.com/simple}Person");
     render(<ContentModelView />);
     expect(screen.queryByText("Assertions")).not.toBeInTheDocument();
+  });
+});
+
+describe("ContentModelView identity constraints table", () => {
+  beforeEach(() => {
+    useSelection.getState().clearSchema();
+  });
+
+  it("shows an identity-constraints table for an element with a complex type", () => {
+    act(() => {
+      useSelection.getState().setSchema("constraints", constraintsModel);
+      useSelection.getState().setSelected(libraryElement.id);
+    });
+    render(<ContentModelView />);
+    expect(screen.getByText("Identity constraints")).toBeInTheDocument();
+    expect(screen.getByText("bookKey")).toBeInTheDocument();
+    expect(screen.getByText("uniqueTitle")).toBeInTheDocument();
+    expect(screen.getByText("loanBookRef")).toBeInTheDocument();
+    expect(screen.getByText("danglingRef")).toBeInTheDocument();
+  });
+
+  it("shows an identity-constraints table for an element with a simple type", () => {
+    const keyedElement: ElementDecl = leafElement("Keyed", "", 200, {
+      id: "element:{http://example.com/keyed-simple}Keyed",
+      qname: "{http://example.com/keyed-simple}Keyed",
+      is_global: true,
+      type_name: null,
+      type_inline_simple: {
+        id: "simpleType:{http://example.com/keyed-simple}Keyed/anon",
+        name: null,
+        anonymous: true,
+        derivation: "atomic",
+        base: "xs:string",
+        item_type: null,
+        item_inline: null,
+        member_types: [],
+        member_inline: [],
+        facets: [],
+        annotation: null,
+        source_ref: null,
+      },
+      identity_constraints: [
+        {
+          id: "identityConstraint:{http://example.com/keyed-simple}kc",
+          kind: "unique",
+          name: "kc",
+          qname: "{http://example.com/keyed-simple}kc",
+          selector: ".",
+          fields: ["."],
+          refer: null,
+          refer_id: null,
+          xpath_default_namespace: null,
+          annotation: null,
+          source_ref: null,
+          version_constraints: null,
+        },
+      ],
+    });
+    const keyedModel: SchemaModel = { ...constraintsModel, elements: [keyedElement] };
+    act(() => {
+      useSelection.getState().setSchema("keyed-simple", keyedModel);
+      useSelection.getState().setSelected(keyedElement.id);
+    });
+    render(<ContentModelView />);
+    expect(screen.getByText("Identity constraints")).toBeInTheDocument();
+    expect(screen.getByText("kc")).toBeInTheDocument();
+  });
+
+  it("does not render an identity-constraints table for an element without constraints", () => {
+    act(() => {
+      useSelection.getState().setSchema("constraints", constraintsModel);
+      useSelection.getState().setSelected(bookElement.id);
+    });
+    render(<ContentModelView />);
+    expect(screen.queryByText("Identity constraints")).not.toBeInTheDocument();
+  });
+
+  it("does not render an identity-constraints table for a model without any constraints", () => {
+    selectId("element:{http://example.com/simple}Person");
+    render(<ContentModelView />);
+    expect(screen.queryByText("Identity constraints")).not.toBeInTheDocument();
   });
 });

@@ -139,6 +139,15 @@ export function TreeView() {
                 )}
                 <KindBadge kind={row.kind} />
                 <span className="font-mono truncate py-0.5">{row.label}</span>
+                {row.constraintCount ? (
+                  <span
+                    className="text-teal-600 dark:text-teal-400 text-[11px] shrink-0"
+                    title={row.constraintTitle ?? undefined}
+                    aria-label={row.constraintTitle ?? undefined}
+                  >
+                    ⚿
+                  </span>
+                ) : null}
                 {row.occurs && (
                   <span
                     className={

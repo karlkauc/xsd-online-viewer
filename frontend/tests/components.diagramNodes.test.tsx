@@ -64,6 +64,43 @@ describe("ElementNode border encodes cardinality", () => {
   });
 });
 
+describe("ElementNode identity-constraint badge", () => {
+  afterEach(() => cleanup());
+
+  it("shows the ⚿ badge with the count and title when constraints exist", () => {
+    const box = renderElement({
+      identityConstraintCount: 4,
+      identityConstraintTitle: "key bookKey, unique uniqueTitle, keyref loanBookRef, keyref danglingRef",
+    });
+    expect(box.textContent).toContain("⚿ 4");
+    const badge = box.querySelector("[aria-label]");
+    expect(badge).not.toBeNull();
+    expect(badge).toHaveAttribute(
+      "title",
+      "key bookKey, unique uniqueTitle, keyref loanBookRef, keyref danglingRef",
+    );
+    expect(badge).toHaveAttribute(
+      "aria-label",
+      "key bookKey, unique uniqueTitle, keyref loanBookRef, keyref danglingRef",
+    );
+  });
+
+  it("does not show the badge when there are no identity constraints", () => {
+    const box = renderElement({ identityConstraintCount: 0 });
+    expect(box.textContent).not.toContain("⚿");
+  });
+
+  it("renders the ⚿ badge before the ≷ alternatives badge", () => {
+    const box = renderElement({
+      identityConstraintCount: 1,
+      identityConstraintTitle: "key k",
+      alternativesCount: 2,
+    });
+    const text = box.textContent ?? "";
+    expect(text.indexOf("⚿")).toBeLessThan(text.indexOf("≷"));
+  });
+});
+
 describe("CompositorNode border encodes cardinality", () => {
   afterEach(() => cleanup());
 

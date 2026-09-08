@@ -27,6 +27,7 @@ import {
   makeIndexResolver,
 } from "../lib/assertions";
 import { AlternativesList } from "./AlternativesList";
+import { IdentityConstraintsList } from "./IdentityConstraintsList";
 import { openSampleXml } from "./SampleXmlDialog";
 import { CopyButton } from "./CopyButton";
 import { VersionBadge } from "./VersionBadge";
@@ -317,7 +318,7 @@ function renderSpecifics(node: SchemaNode, ctx: PanelCtx) {
 }
 
 function renderElement(element: ElementDecl, ctx: PanelCtx) {
-  const { index, setSelected } = ctx;
+  const { index, indexById, constraintsById, setSelected } = ctx;
   // An `<xs:element ref="…">` particle contributes only its cardinality —
   // type, flags and facets all live on the global declaration it points at,
   // which for an imported namespace sits in another file.
@@ -451,6 +452,14 @@ function renderElement(element: ElementDecl, ctx: PanelCtx) {
         />
       )}
       <AssertionsList groups={assertionGroups} />
+      <IdentityConstraintsList
+        constraints={declaration.identity_constraints ?? []}
+        host={declaration}
+        index={index}
+        indexById={indexById}
+        constraintsById={constraintsById}
+        setSelected={setSelected}
+      />
     </section>
   );
 }

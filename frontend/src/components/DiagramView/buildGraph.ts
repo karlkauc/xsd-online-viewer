@@ -176,6 +176,11 @@ function computeElementDisplay(
     collectElementAssertions(target, context.assertionResolver),
   );
   const alternativesCount = element.alternatives?.length ?? 0;
+  const identityConstraints = target.identity_constraints ?? [];
+  const identityConstraintCount = identityConstraints.length;
+  const identityConstraintTitle = identityConstraintCount
+    ? identityConstraints.map((c) => `${c.kind} ${c.name}`).join(", ")
+    : null;
 
   // Row counts that actually render in ElementNode.tsx.
   const attrRows =
@@ -205,6 +210,8 @@ function computeElementDisplay(
     documentationFull: docFull,
     assertCount,
     alternativesCount,
+    identityConstraintCount,
+    identityConstraintTitle,
   };
   return { data, height };
 }

@@ -19,6 +19,8 @@ interface ElementNodeData {
   documentationFull?: string | null;
   assertCount?: number;
   alternativesCount?: number;
+  identityConstraintCount?: number;
+  identityConstraintTitle?: string | null;
 }
 
 export function ElementNode({ data }: { data: ElementNodeData }) {
@@ -52,6 +54,15 @@ export function ElementNode({ data }: { data: ElementNodeData }) {
       <div className="flex items-center justify-between gap-1 px-2 py-1 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800">
         <span className="font-mono font-semibold truncate">{data.label}</span>
         <span className="flex items-center gap-1 shrink-0">
+          {data.identityConstraintCount && data.identityConstraintCount > 0 ? (
+            <span
+              className="inline-flex items-center gap-0.5 px-1 rounded text-[9.5px] font-mono font-medium border bg-teal-50 text-teal-800 border-teal-200 dark:bg-teal-900/30 dark:text-teal-200 dark:border-teal-800/60"
+              title={data.identityConstraintTitle ?? undefined}
+              aria-label={data.identityConstraintTitle ?? undefined}
+            >
+              ⚿ {data.identityConstraintCount}
+            </span>
+          ) : null}
           {data.alternativesCount && data.alternativesCount > 0 ? (
             <span
               className="inline-flex items-center gap-0.5 px-1 rounded text-[9.5px] font-mono font-medium border bg-violet-50 text-violet-800 border-violet-200 dark:bg-violet-900/30 dark:text-violet-200 dark:border-violet-800/60"

@@ -9,6 +9,12 @@ import {
 import { smallModel } from "./fixtures/smallModel";
 import { refModel, DOCUMENT_ID, SIGNATURE_REF_ID } from "./fixtures/refModel";
 import { assertionsModel } from "./fixtures/assertionsModel";
+import {
+  constraintsModel,
+  libraryElement,
+  bookElement,
+  NS as CONSTRAINTS_NS,
+} from "./fixtures/constraintsModel";
 
 const PERSON_ID = "element:{http://example.com/simple}Person";
 const ADDRESS_ID = "element:{http://example.com/simple}PersonType/Address";
@@ -361,6 +367,49 @@ describe("buildDiagramGraph assertion badge", () => {
     // plus the expand hint (21), regardless of how many assertions it has.
     const { nodes } = buildDiagramGraph(assertionsModel, new Set(), null);
     const node = elementByLabel(nodes, "Measurement")!;
+    expect(nodeHeight(node)).toBe(NODE_HEIGHT + 21);
+  });
+});
+
+describe("buildDiagramGraph identity-constraint badge", () => {
+  const BOOKS_ID = `element:{${CONSTRAINTS_NS}}Books`;
+
+  function elementByLabel(nodes: Node[], label: string): Node | undefined {
+    return nodes.find(
+      (n) => n.type === "element" && (n.data as { label: string }).label === label,
+    );
+  }
+  function constraintDataOf(label: string, expandedIds: Set<string> = new Set()) {
+    const { nodes } = buildDiagramGraph(constraintsModel, expandedIds, null);
+    const node = elementByLabel(nodes, label);
+    if (!node) throw new Error(`node ${label} missing`);
+    return node.data as { identityConstraintCount?: number; identityConstraintTitle?: string | null };
+  }
+
+  it("counts the identity constraints declared on an element", () => {
+    expect(constraintDataOf("Library").identityConstraintCount).toBe(4);
+  });
+
+  it("summarizes kind + name pairs in the title", () => {
+    const title = constraintDataOf("Library").identityConstraintTitle;
+    expect(title).toBe(
+      "key bookKey, unique uniqueTitle, keyref loanBookRef, keyref danglingRef",
+    );
+  });
+
+  it("is zero/absent for an element without identity constraints", () => {
+    const expanded = new Set([libraryElement.id, BOOKS_ID]);
+    const data = constraintDataOf("Book", expanded);
+    expect(data.identityConstraintCount ?? 0).toBe(0);
+    expect(bookElement.id).toBeTruthy();
+  });
+
+  it("does not change the height budget of the badge-carrying node", () => {
+    // Library is expandable (inline complex type) with no attributes/
+    // documentation of its own: NODE_HEIGHT + the expand hint (21),
+    // regardless of how many identity constraints it declares.
+    const { nodes } = buildDiagramGraph(constraintsModel, new Set(), null);
+    const node = elementByLabel(nodes, "Library")!;
     expect(nodeHeight(node)).toBe(NODE_HEIGHT + 21);
   });
 });

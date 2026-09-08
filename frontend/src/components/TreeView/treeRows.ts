@@ -5,6 +5,7 @@
 import type {
   ComplexType,
   ElementDecl,
+  IdentityConstraint,
   NodeIndexEntry,
   Particle,
   SchemaModel,
@@ -22,6 +23,16 @@ export interface TreeRow {
   hasChildren: boolean;
   occurs?: string | null;
   typeHint?: string | null;
+  /** Number of xs:key/xs:keyref/xs:unique constraints declared on this
+   *  (ref-resolved) element — see DetailPanel's IdentityConstraintsList. */
+  constraintCount?: number;
+  /** "key bookKey, keyref loanBookRef, …" — used as the ⚿ glyph's title. */
+  constraintTitle?: string | null;
+}
+
+function formatConstraintTitle(constraints: IdentityConstraint[]): string | null {
+  if (!constraints.length) return null;
+  return constraints.map((c) => `${c.kind} ${c.name}`).join(", ");
 }
 
 function formatOccurs(min: number, max: number | "unbounded"): string {
@@ -105,6 +116,7 @@ export function buildTreeRows(
       target.type_inline_complex != null ||
       target.type_inline_simple != null ||
       target.type_name != null;
+    const constraints: IdentityConstraint[] = target.identity_constraints ?? [];
     pushRow({
       id: rowId,
       depth,
@@ -115,6 +127,8 @@ export function buildTreeRows(
         ? formatOccurs(hostParticle.min_occurs, hostParticle.max_occurs)
         : null,
       typeHint,
+      constraintCount: constraints.length || undefined,
+      constraintTitle: formatConstraintTitle(constraints),
     });
 
     if (!expandedIds.has(rowId) || !filterKinds.has("element")) return;

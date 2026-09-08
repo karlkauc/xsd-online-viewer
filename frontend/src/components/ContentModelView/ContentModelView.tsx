@@ -18,10 +18,12 @@ import {
   makeIndexResolver,
   type AssertionGroup,
 } from "../../lib/assertions";
+import type { IdentityConstraint } from "../../types/schema";
 import { Header } from "./Header";
 import { ChildrenTable } from "./ChildrenTable";
 import { AttributesTable } from "./AttributesTable";
 import { AssertionsTable } from "./AssertionsTable";
+import { IdentityConstraintsTable } from "./IdentityConstraintsTable";
 import { SimpleTypeCard } from "./SimpleTypeCard";
 
 function resolveComplex(typeName: string | null, index: NodeIndexEntry[]): ComplexType | undefined {
@@ -45,6 +47,7 @@ export function ContentModelView() {
   const selectedId = useSelection((s) => s.selectedId);
   const indexById = useSelection((s) => s.indexById);
   const index = useSelection((s) => s.index);
+  const constraintsById = useSelection((s) => s.constraintsById);
   const setSelected = useSelection((s) => s.setSelected);
 
   const entry = selectedId ? indexById.get(selectedId) : undefined;
@@ -165,6 +168,19 @@ export function ContentModelView() {
     return [];
   }, [entry, index, indexById]);
 
+  // Identity constraints (xs:key/xs:keyref/xs:unique) only ever apply to
+  // elements — unlike assertions, there's no complexType/simpleType/
+  // attribute variant to fold in.
+  const identityConstraints = useMemo<{
+    constraints: IdentityConstraint[];
+    host: ElementDecl;
+  } | null>(() => {
+    if (!entry || entry.kind !== "element") return null;
+    const selectedElement = entry.node as ElementDecl;
+    const e = resolveElementRef(selectedElement, indexById) ?? selectedElement;
+    return { constraints: e.identity_constraints ?? [], host: e };
+  }, [entry, indexById]);
+
   if (!entry) return null;
 
   return (
@@ -172,6 +188,15 @@ export function ContentModelView() {
       <Header entry={entry} onSelectBase={onSelectBase} />
       {body}
       <AssertionsTable groups={assertionGroups} />
+      {identityConstraints && (
+        <IdentityConstraintsTable
+          constraints={identityConstraints.constraints}
+          host={identityConstraints.host}
+          index={index}
+          indexById={indexById}
+          constraintsById={constraintsById}
+        />
+      )}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { render, screen, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DetailPanel, FacetGroups } from "../src/components/DetailPanel";
 import { useSelection } from "../src/stores/selectionStore";
@@ -12,6 +13,12 @@ import {
   derivedAssertType,
   measurementElement,
 } from "./fixtures/assertionsModel";
+import {
+  constraintsModel,
+  libraryElement,
+  bookElement,
+  NS as CONSTRAINTS_NS,
+} from "./fixtures/constraintsModel";
 
 describe("DetailPanel", () => {
   beforeEach(() => {
@@ -284,5 +291,58 @@ describe("DetailPanel assertions contributed by types", () => {
     expect(screen.getByText("@derived-flag = 'ok'")).toBeInTheDocument();
     expect(screen.getByText("@base-flag = 'ok'")).toBeInTheDocument();
     expect(screen.getByText("BaseAssertType")).toBeInTheDocument();
+  });
+});
+
+describe("DetailPanel identity constraints", () => {
+  beforeEach(() => {
+    useSelection.getState().clearSchema();
+  });
+
+  it("shows the Library element's four identity constraints", () => {
+    act(() => {
+      useSelection.getState().setSchema("constraints", constraintsModel);
+      useSelection.getState().setSelected(libraryElement.id);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("Identity constraints")).toBeInTheDocument();
+    expect(
+      screen.getByText(/4 · xs:key \/ xs:keyref \/ xs:unique · display-only/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText("bookKey")).toBeInTheDocument();
+    expect(screen.getByText("uniqueTitle")).toBeInTheDocument();
+    expect(screen.getByText("loanBookRef")).toBeInTheDocument();
+    expect(screen.getByText("danglingRef")).toBeInTheDocument();
+  });
+
+  it("shows a nested element's own constraint (Loans -> loanKey)", () => {
+    act(() => {
+      useSelection.getState().setSchema("constraints", constraintsModel);
+      useSelection.getState().setSelected(`element:{${CONSTRAINTS_NS}}Loans`);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("Identity constraints")).toBeInTheDocument();
+    expect(screen.getByText("loanKey")).toBeInTheDocument();
+  });
+
+  it("does not show the section for an element without constraints", () => {
+    act(() => {
+      useSelection.getState().setSchema("constraints", constraintsModel);
+      useSelection.getState().setSelected(bookElement.id);
+    });
+    render(<DetailPanel />);
+    expect(screen.queryByText("Identity constraints")).not.toBeInTheDocument();
+  });
+
+  it("clicking a resolved selector step selects that element", async () => {
+    const user = userEvent.setup();
+    act(() => {
+      useSelection.getState().setSchema("constraints", constraintsModel);
+      useSelection.getState().setSelected(libraryElement.id);
+    });
+    render(<DetailPanel />);
+    const [bookStep] = screen.getAllByRole("button", { name: "tns:Book" });
+    await user.click(bookStep);
+    expect(useSelection.getState().selectedId).toBe(bookElement.id);
   });
 });
