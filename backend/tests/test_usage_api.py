@@ -134,3 +134,62 @@ def test_lifespan_with_disabled_settings() -> None:
     with TestClient(app) as c:
         assert c.app.state.usage.enabled is False
         assert c.get("/api/health").status_code == 200
+
+
+def _mock_fetch_transport(monkeypatch: pytest.MonkeyPatch, handler) -> None:
+    """Route ``fetch_schema_url`` through an httpx MockTransport, skipping DNS."""
+    import httpx
+
+    from app.parser import security as sec_module
+
+    monkeypatch.setattr(sec_module, "_verify_url", lambda url: None)
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.Client
+    monkeypatch.setattr(sec_module.httpx, "Client", lambda **kw: real_client(transport=transport, **kw))
+
+
+def test_url_network_failure_is_recorded_as_rejected(
+    client: TestClient, recorder: ListRecorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Name or service not known", request=request)
+
+    _mock_fetch_transport(monkeypatch, handler)
+    r = client.post("/api/schema/url", json={"url": "https://example.invalid/x.xsd"})
+    assert r.status_code == 400
+    assert "Name or service not known" in r.json()["detail"]
+    (ev,) = recorder.events
+    assert ev.status == "rejected" and ev.source == "url"
+    assert ev.schema_name == "https://example.invalid/x.xsd"
+
+
+def test_url_ok_is_recorded_from_worker_thread(
+    client: TestClient, recorder: ListRecorder, monkeypatch: pytest.MonkeyPatch, simple_xsd_bytes: bytes
+) -> None:
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=simple_xsd_bytes, headers={"content-type": "text/xml"})
+
+    _mock_fetch_transport(monkeypatch, handler)
+    r = client.post("/api/schema/url", json={"url": "example.org/simple.xsd"})
+    assert r.status_code == 200
+    (ev,) = recorder.events
+    assert ev.status == "ok" and ev.source == "url"
+    assert ev.schema_name == "https://example.org/simple.xsd"
+    assert ev.element_count
+
+
+def test_validate_url_reject_stores_the_document_url(
+    client: TestClient, recorder: ListRecorder, simple_xsd_bytes: bytes
+) -> None:
+    files = {"file": ("simple.xsd", simple_xsd_bytes, "application/xml")}
+    schema_id = client.post("/api/schema/upload", files=files).json()["schema_id"]
+    recorder.events.clear()
+    r = client.post(f"/api/schema/{schema_id}/validate/url", json={"url": "http://127.0.0.1/doc.xml?x=1"})
+    assert r.status_code == 400
+    (ev,) = recorder.events
+    assert ev.event_type == "validate" and ev.status == "rejected" and ev.source == "url"
+    assert ev.schema_name == "http://127.0.0.1/doc.xml"

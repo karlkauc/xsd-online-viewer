@@ -108,6 +108,32 @@ export function UploadError({ message, onUploadAnyway, schemaName, file }: Props
             </p>
           </>
         )}
+        {kind === "cross-stitch" && (
+          <>
+            <p>
+              This file is a cross-stitch pattern. <code>.xsd</code> is also the file extension of
+              patterns from Pattern Maker (HobbyWare), but those files have nothing to do with XML
+              Schema — this site displays XML Schema definitions, which are plain-text files
+              starting with <code>&lt;?xml</code> or <code>&lt;xs:schema</code>.
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Cross-stitch patterns can only be opened in the program that created them (or a
+              viewer made for that format); this viewer cannot display them.
+            </p>
+          </>
+        )}
+        {kind === "browser-copy" && (
+          <>
+            <p>
+              The text was copied from the browser's rendering of the XML file, which adds a
+              banner and fold markers that are not part of the file.
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Open the file with <strong>View page source</strong> (Ctrl+U) or download it
+              (Ctrl+S), then paste or upload the raw XML.
+            </p>
+          </>
+        )}
         {kind === "binary-file" && (
           <>
             <p>
@@ -117,8 +143,7 @@ export function UploadError({ message, onUploadAnyway, schemaName, file }: Props
             </p>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               Note: <code>.xsd</code> is also the file extension of cross-stitch patterns from
-              Pattern Maker (HobbyWare). Those patterns have nothing to do with XML Schema and can
-              only be opened in that program — this viewer cannot display them.
+              Pattern Maker (HobbyWare), which this viewer cannot display.
             </p>
           </>
         )}

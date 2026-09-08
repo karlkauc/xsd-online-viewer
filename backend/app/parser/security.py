@@ -22,6 +22,7 @@ from dataclasses import dataclass
 import httpx
 from lxml import etree
 
+from app import __version__
 from app.config import settings
 from app.parser.urls import normalize_schema_url
 
@@ -30,6 +31,23 @@ logger = logging.getLogger(__name__)
 
 class SecurityError(ValueError):
     """Raised when an upload or URL violates security policy."""
+
+
+class FetchError(SecurityError):
+    """A remote fetch failed at the transport level (DNS, TLS, timeout, refused).
+
+    Not a policy violation, but raised as a ``SecurityError`` subclass so every
+    caller that already turns policy rejections into a 400 / import warning
+    handles network failures the same way instead of surfacing a 500.
+    """
+
+
+# Some hosts (w3schools, for one) answer 403 to httpx's default User-Agent.
+USER_AGENT = f"xsd-viewer.online/{__version__} (+https://www.xsd-viewer.online)"
+FETCH_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "application/xml, text/xml;q=0.9, */*;q=0.5",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +225,14 @@ def _verify_url(url: str) -> None:
             )
 
 
+def _http_failure_message(url: str, status_code: int) -> str:
+    phrase = httpx.codes.get_reason_phrase(status_code)
+    message = f"fetching {url!r} failed with HTTP {status_code} {phrase}".rstrip()
+    if status_code == 403:
+        message += " — the server refuses automated downloads; download the file and upload it here instead"
+    return message
+
+
 def fetch_schema_url(url: str) -> FetchedResource:
     """Fetch a schema document by URL, enforcing all SSRF mitigations.
 
@@ -221,9 +247,13 @@ def fetch_schema_url(url: str) -> FetchedResource:
         follow_redirects=False,
         timeout=settings.fetch_timeout_seconds,
         limits=httpx.Limits(max_connections=4),
+        headers=FETCH_HEADERS,
     ) as client:
         while True:
-            response = client.get(current)
+            try:
+                response = client.get(current)
+            except httpx.HTTPError as exc:
+                raise FetchError(f"fetching {current!r} failed: {exc}") from exc
             if response.is_redirect:
                 if remaining_redirects <= 0:
                     raise SecurityError("too many HTTP redirects")
@@ -235,9 +265,7 @@ def fetch_schema_url(url: str) -> FetchedResource:
                 _verify_url(current)
                 continue
             if response.status_code >= 400:
-                raise SecurityError(
-                    f"fetching {current!r} failed with HTTP {response.status_code}"
-                )
+                raise FetchError(_http_failure_message(current, response.status_code))
             content = response.content
             if len(content) > settings.fetch_max_response_bytes:
                 raise SecurityError(

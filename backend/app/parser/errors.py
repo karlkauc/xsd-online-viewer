@@ -14,14 +14,22 @@ def _local_name(tag: object) -> str:
     return _XML_NAME_RE.sub("", str(tag))
 
 
-def _sniff_head(content: bytes) -> bytes:
+def _sniff_head(content: bytes, length: int = 12) -> bytes:
     head = content.lstrip(b"\xef\xbb\xbf \t\r\n")
-    return head[:12]
+    return head[:length]
 
 
 # File types users rename to .xsd, or that simply share the extension. Signatures
-# must stay within the 12 bytes _sniff_head keeps.
+# must stay within the 12 bytes _sniff_head keeps. Pattern Maker (HobbyWare)
+# cross-stitch patterns are by far the most common: a quarter of all failed
+# uploads in the first two weeks of usage stats.
 _BINARY_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (
+        b"\x10\x05\x80\x03\xb4Q",
+        "a Pattern Maker cross-stitch pattern (the .xsd extension is shared, the format is "
+        "unrelated to XML Schema)",
+    ),
+    (b"DIZE\x00", "a cross-stitch pattern (.dize)"),
     (b"PK\x03\x04", "a ZIP archive (or a .docx/.xlsx/.odt file)"),
     (b"%PDF-", "a PDF document"),
     (b"\x1f\x8b", "a gzip archive"),
@@ -41,7 +49,24 @@ def describe_binary_format(head: bytes) -> str | None:
     for signature, description in _BINARY_SIGNATURES:
         if head.startswith(signature):
             return description
+    # "#1.4  PAAAAD…": .xsb pattern files; the producer is unknown to us, so
+    # name only what is certain.
+    if head.startswith(b"#1.") and b"PAAAAD" in head:
+        return "a binary .xsb pattern file"
     return None
+
+
+# Text copied out of the browser's rendering of an XML file: Firefox/Chrome
+# prepend a "no style information" banner and mark collapsible elements with
+# a leading "-" (which also survives as "- schema" in outline copies).
+_BROWSER_COPY_RE = re.compile(rb"^(?:This XML file|-\s*<|-\s+\w)")
+
+BROWSER_COPY_HINT = (
+    "this looks like a copy of the browser's rendered XML view (fold markers or the "
+    "'This XML file does not appear to have any style information' banner), not the file "
+    "itself. Open the file with 'View page source' (Ctrl+U) or download it, then paste or "
+    "upload the raw XML"
+)
 
 
 def is_binary(head: bytes) -> bool:
@@ -67,6 +92,8 @@ def humanize_syntax_error(exc: etree.XMLSyntaxError, filename: str, content: byt
         known = describe_binary_format(head)
         if known:
             return f"{filename}: not an XML file — it looks like {known}, i.e. binary data, not text"
+        if _BROWSER_COPY_RE.match(_sniff_head(content, 64)):
+            return f"{filename}: {BROWSER_COPY_HINT}"
         if is_binary(head):
             return f"{filename}: not an XML file — it starts with binary data ({head!r}), not text"
         return f"{filename}: not an XML file (it starts with {head!r} instead of '<')"

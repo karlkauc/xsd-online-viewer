@@ -34,11 +34,85 @@ def test_known_binary_format_is_named() -> None:
 
 
 def test_unknown_binary_shows_the_bytes() -> None:
-    # A cross-stitch pattern from Pattern Maker: same .xsd extension, no XML.
+    data = b"\x01\x02\x03\x04garbage"
+    msg = humanize_syntax_error(_syntax_error(data), "blob.xsd", data)
+    assert msg.startswith("blob.xsd: not an XML file — it starts with binary data (b'\\x01\\x02")
+    assert msg.endswith("), not text")
+
+
+def test_pattern_maker_cross_stitch_file_is_named() -> None:
+    # The most common failed upload: Pattern Maker cross-stitch patterns share the extension.
     data = b"\x10\x05\x80\x03\xb4Q\x08\x00\x04\x00\x00\x00"
     msg = humanize_syntax_error(_syntax_error(data), "uyutnye_tykvy.xsd", data)
-    assert msg.startswith("uyutnye_tykvy.xsd: not an XML file — it starts with binary data (b'\\x10\\x05")
-    assert msg.endswith("), not text")
+    assert msg == (
+        "uyutnye_tykvy.xsd: not an XML file — it looks like a Pattern Maker cross-stitch pattern "
+        "(the .xsd extension is shared, the format is unrelated to XML Schema), i.e. binary data, not text"
+    )
+
+
+@pytest.mark.parametrize(
+    ("filename", "data", "expected"),
+    [
+        ("Ivanova 2026-08-05.xsb", b"#1.4  PAAAAD\x00\x01", "a binary .xsb pattern file"),
+        ("70-43.dize", b"DIZE\x00\x02\x00\x02PTRN", "a cross-stitch pattern (.dize)"),
+    ],
+)
+def test_other_pattern_formats_are_named(filename: str, data: bytes, expected: str) -> None:
+    msg = humanize_syntax_error(_syntax_error(data), filename, data)
+    assert msg == f"{filename}: not an XML file — it looks like {expected}, i.e. binary data, not text"
+
+
+BROWSER_COPY_HINT = (
+    "this looks like a copy of the browser's rendered XML view (fold markers or the "
+    "'This XML file does not appear to have any style information' banner), not the file "
+    "itself. Open the file with 'View page source' (Ctrl+U) or download it, then paste or "
+    "upload the raw XML"
+)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"This XML file does not appear to have any style information associated with it. "
+        b"The document tree is shown below.\n<schema xmlns=\"http://www.w3.org/2001/XMLSchema\"/>",
+        b"\xef\xbb\xbf  This XML file does not appear",
+        b"-<Form xmlns=\"urn:x\">\n  -<Row>",
+        b"- schema\n  - element",
+    ],
+)
+def test_browser_view_copy_is_explained(data: bytes) -> None:
+    msg = humanize_syntax_error(_syntax_error(data), "schema.xsd", data)
+    assert msg == f"schema.xsd: {BROWSER_COPY_HINT}"
+
+
+def test_plain_dash_text_is_not_mistaken_for_a_browser_copy() -> None:
+    data = b"-- comment --\n"
+    msg = humanize_syntax_error(_syntax_error(data), "n.xsd", data)
+    assert "rendered XML view" not in msg
+
+
+XSD = b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="a"/></xs:schema>'
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"```xml\n" + XSD + b"\n```",
+        b"```xml\r\n<?xml version=\"1.0\"?>\r\n" + XSD + b"\r\n```\r\n",
+        b"```\n" + XSD + b"\n```\n\n",
+        b"\n```xml\n\n<?xml version=\"1.0\"?>\n" + XSD + b"\n```",
+    ],
+)
+def test_markdown_code_fence_is_removed_with_a_warning(data: bytes) -> None:
+    model = parse_single(data, "schema.xsd")
+    assert [e.name for e in model.elements] == ["a"]
+    warnings = [d.message for d in model.diagnostics if d.severity == "warning"]
+    assert any("Markdown code fence" in w for w in warnings), warnings
+
+
+def test_unfenced_schema_gets_no_fence_warning() -> None:
+    model = parse_single(XSD, "schema.xsd")
+    assert not [d for d in model.diagnostics if "code fence" in d.message]
 
 
 def test_plain_text_that_is_not_xml_keeps_the_old_wording() -> None:

@@ -404,3 +404,24 @@ class TestLoadReleaseEndpoint:
         )
         assert response.status_code == 404
         assert "missing.xsd" in response.json()["detail"]
+
+
+def test_release_load_failures_emit_a_usage_event(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.usage.context import UsageTracker
+    from tests.test_usage_api import ListRecorder
+
+    recorder = ListRecorder()
+    app.state.usage = UsageTracker(recorder, geoip=None, hash_secret="test")
+    try:
+        _install_fake(monkeypatch, lambda: FakeResponse(200, json_body=_multi_asset_payload()))
+        response = client.post("/api/fundsxml/releases/nope/load", json={"main_filename": "Library.xsd"})
+        assert response.status_code == 404
+        (event,) = recorder.events
+        assert event.event_type == "schema_load" and event.source == "release"
+        assert event.status == "rejected" and event.status_code == 404
+        assert event.schema_name == "nope/Library.xsd"
+        assert "'nope'" in (event.error_detail or "")
+    finally:
+        del app.state.usage

@@ -21,6 +21,7 @@ from urllib.parse import urljoin, urlparse
 
 from lxml import etree
 
+from app.parser import w3c
 from app.parser.errors import (
     humanize_syntax_error,
     no_xsd_in_zip_message,
@@ -201,6 +202,17 @@ class UrlResolver(SchemaResolver):
         return fetched.url, fetched.content
 
 
+class W3cResolver(SchemaResolver):
+    """Serves the bundled W3C schemas (xml.xsd, xmldsig, xenc, xlink) by file name.
+
+    Sits between the ZIP and URL resolvers: a copy shipped by the user wins,
+    but nobody has to wait for (or be throttled by) w3.org.
+    """
+
+    def resolve(self, base_location: str | None, location: str) -> tuple[str, bytes] | None:
+        return w3c.bytes_for_location(location)
+
+
 @dataclass
 class ChainedResolver(SchemaResolver):
     resolvers: list[SchemaResolver]
@@ -214,6 +226,14 @@ class ChainedResolver(SchemaResolver):
             if result is not None:
                 return result
         return None
+
+
+def _build_resolver(files: dict[str, bytes], base_url: str | None) -> SchemaResolver:
+    """Standard chain: uploaded/fetched files, then bundled W3C schemas, then the network."""
+    resolvers: list[SchemaResolver] = [ZipResolver(files=files), W3cResolver()]
+    if base_url is not None:
+        resolvers.append(UrlResolver(base_url=base_url))
+    return ChainedResolver(resolvers=resolvers)
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +266,21 @@ def _namespace_and_local(tag: str) -> tuple[str | None, str]:
 # The spec requires ``<?xml`` at byte 0, and lxml enforces that; real-world
 # files on GitHub & co. frequently violate it with a stray leading newline.
 _LEADING_WS_BEFORE_DECL_RE = re.compile(rb"\A(?:\xef\xbb\xbf)?\s+(?=<\?xml)")
+
+
+# A Markdown code fence around the schema — what a chat assistant's answer
+# looks like when copied wholesale. The closing fence may be followed by
+# nothing but whitespace.
+_FENCE_OPEN_RE = re.compile(rb"\A(?:\xef\xbb\xbf)?\s*```[A-Za-z0-9_+-]*[ \t]*\r?\n")
+_FENCE_CLOSE_RE = re.compile(rb"\r?\n[ \t]*```\s*\Z")
+
+
+def _strip_markdown_fence(content: bytes) -> tuple[bytes, bool]:
+    """Remove a Markdown code fence around the content; report whether one was found."""
+    opening = _FENCE_OPEN_RE.match(content)
+    if opening is None:
+        return content, False
+    return _FENCE_CLOSE_RE.sub(b"", content[opening.end() :]), True
 
 
 def _strip_whitespace_before_xml_declaration(content: bytes) -> tuple[bytes, bool]:
@@ -337,6 +372,19 @@ class XsdParser:
         if key in self.state.by_key:
             return self.state.by_key[key]
         file_id = hashlib.sha1(filename.encode("utf-8")).hexdigest()[:12]
+        content, fenced = _strip_markdown_fence(content)
+        if fenced:
+            self.state.diagnostics.append(
+                Diagnostic(
+                    severity="warning",
+                    message=(
+                        f"{filename}: a Markdown code fence (```) around the content was "
+                        "removed. Paste the schema itself, not the code block it came in."
+                    ),
+                    file_id=file_id,
+                    line=1,
+                )
+            )
         content, stripped = _strip_whitespace_before_xml_declaration(content)
         if stripped:
             self.state.diagnostics.append(
@@ -397,9 +445,14 @@ class XsdParser:
         for tag, relationship in mapping:
             for elem in loaded.root.findall(f"{{{XSD_NS}}}{tag}"):
                 location = elem.get("schemaLocation")
-                if not location:
-                    continue
                 target_ns = elem.get("namespace") if tag == "import" else loaded.target_ns
+                if not location:
+                    # <xs:import namespace="…"/> without a location: only the
+                    # bundled W3C schemas can satisfy it.
+                    bundled = w3c.bytes_for_namespace(target_ns) if tag == "import" else None
+                    if bundled is not None:
+                        self._load(bundled[0], bundled[1], relationship, target_ns)
+                    continue
                 try:
                     resolved = self.inp.resolver.resolve(loaded.filename, location)
                 except SecurityError as exc:
@@ -414,6 +467,8 @@ class XsdParser:
                         )
                     )
                     continue
+                if resolved is None and tag == "import":
+                    resolved = w3c.bytes_for_namespace(target_ns)
                 if resolved is None:
                     self.state.diagnostics.append(
                         Diagnostic(
@@ -1232,7 +1287,7 @@ def _detect_xsd_version(files: list[_LoadedFile], main: _LoadedFile) -> XsdVersi
 
 def parse_single(content: bytes, filename: str = "schema.xsd") -> SchemaModel:
     """Parse a single XSD file (no imports / includes resolved)."""
-    resolver = ZipResolver(files={})
+    resolver = _build_resolver({}, None)
     parser = XsdParser(
         XsdParseInput(main_filename=filename, main_content=content, resolver=resolver)
     )
@@ -1299,7 +1354,7 @@ def parse_zip(zip_bytes: bytes, main_filename: str | None = None) -> SchemaModel
             raise ValueError(no_xsd_in_zip_message(list(files)))
     if main_filename not in files:
         raise ValueError(main_not_found_message(main_filename, files))
-    resolver = ZipResolver(files=files)
+    resolver = _build_resolver(files, None)
     parser = XsdParser(
         XsdParseInput(
             main_filename=main_filename,
@@ -1320,7 +1375,7 @@ def parse_files_map(files: dict[str, bytes], main_filename: str) -> SchemaModel:
     """
     if main_filename not in files:
         raise ValueError(main_not_found_message(main_filename, files))
-    resolver = ZipResolver(files=files)
+    resolver = _build_resolver(files, None)
     parser = XsdParser(
         XsdParseInput(
             main_filename=main_filename,
@@ -1334,9 +1389,7 @@ def parse_files_map(files: dict[str, bytes], main_filename: str) -> SchemaModel:
 def parse_url(url: str) -> SchemaModel:
     """Fetch the main XSD from a URL and resolve references via the same URL chain."""
     fetched = fetch_schema_url(url)
-    resolver = ChainedResolver(
-        resolvers=[ZipResolver(files={fetched.url: fetched.content}), UrlResolver(base_url=fetched.url)]
-    )
+    resolver = _build_resolver({fetched.url: fetched.content}, fetched.url)
     parser = XsdParser(
         XsdParseInput(
             main_filename=fetched.url,
@@ -1372,11 +1425,7 @@ def parse_with_url_fallback(
     if main_filename not in files:
         raise ValueError(main_not_found_message(main_filename, files))
 
-    zip_resolver = ZipResolver(files=files)
-    resolvers: list[SchemaResolver] = [zip_resolver]
-    if base_url is not None:
-        resolvers.append(UrlResolver(base_url=base_url))
-    resolver = ChainedResolver(resolvers=resolvers)
+    resolver = _build_resolver(files, base_url)
 
     parser = XsdParser(
         XsdParseInput(

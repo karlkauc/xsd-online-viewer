@@ -1,0 +1,13 @@
+The schema documents in this directory are unmodified copies of W3C
+Recommendations, Copyright (c) World Wide Web Consortium (W3C):
+
+  xml.xsd                  https://www.w3.org/2001/xml.xsd
+  xmldsig-core-schema.xsd  https://www.w3.org/TR/2002/REC-xmldsig-core-20020212/xmldsig-core-schema.xsd
+  xenc-schema.xsd          https://www.w3.org/TR/2002/REC-xmlenc-core-20021210/xenc-schema.xsd
+  xlink.xsd                https://www.w3.org/1999/xlink.xsd
+
+They are distributed under the W3C Software and Document License,
+https://www.w3.org/copyright/software-license/ — permission to copy,
+modify and distribute is granted provided the copyright notice and this
+license are retained. THE SOFTWARE AND DOCUMENTS ARE PROVIDED "AS IS"
+WITHOUT WARRANTY OF ANY KIND.

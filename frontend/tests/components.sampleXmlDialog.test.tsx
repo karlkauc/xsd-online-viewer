@@ -3,13 +3,34 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SampleXmlDialog, openSampleXml } from "../src/components/SampleXmlDialog";
 import { useSelection } from "../src/stores/selectionStore";
+import type { SchemaModel } from "../src/types/schema";
 
 const fetchMock = vi.fn();
+
+// The dialog validates samples only for document roots. With no "main" file
+// in the model every global element counts as a root (see computeRootElements),
+// so a bare element list is enough to mark these ids as roots.
+const ROOT_IDS = ["element:{ns}Person", "element:Person", "element:A", "element:B"];
+const MODEL = {
+  schema_id: "abc",
+  target_namespace: null,
+  namespaces: {},
+  element_form_default: "unqualified",
+  attribute_form_default: "unqualified",
+  elements: ROOT_IDS.map((id) => ({ id, name: id.split(/[}:]/).pop() })),
+  attributes: [],
+  simple_types: [],
+  complex_types: [],
+  groups: [],
+  attribute_groups: [],
+  files: [],
+  diagnostics: [],
+} as unknown as SchemaModel;
 
 beforeEach(() => {
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
-  useSelection.setState({ schemaId: "abc" });
+  useSelection.setState({ schemaId: "abc", model: MODEL });
 });
 afterEach(() => {
   cleanup();
@@ -62,6 +83,17 @@ describe("SampleXmlDialog", () => {
     expect(useSelection.getState().activeTab).toBe("validation");
     expect(useSelection.getState().validationResult?.errors).toHaveLength(1);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("does not validate a nested element's sample and says it is a fragment", async () => {
+    respondWith("<Address/>");
+    render(<SampleXmlDialog />);
+    act(() => openSampleXml({ elementId: "element:Address", name: "Address" }));
+    await waitForSample("<Address/>");
+    expect(await screen.findByTestId("sample-fragment-note")).toHaveTextContent(
+      "Fragment only — <Address> is not a document root",
+    );
+    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/validate/"))).toHaveLength(0);
   });
 
   it("refetches with optional content when the checkbox is toggled", async () => {

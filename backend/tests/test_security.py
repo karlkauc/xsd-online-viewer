@@ -124,3 +124,72 @@ class TestInternalDtdSubset:
     def test_entity_declaration_outside_doctype_rejected(self) -> None:
         with pytest.raises(SecurityError):
             parse_bytes(self.XS + b'<!ENTITY a "x">', "s.xsd")
+
+
+class TestFetchBehaviour:
+    """Transport-level behaviour of ``fetch_schema_url`` (headers, error mapping)."""
+
+    XSD = b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"/>'
+
+    @pytest.fixture(autouse=True)
+    def _no_dns(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.parser import security as sec_module
+
+        monkeypatch.setattr(sec_module, "_verify_url", lambda url: None)
+
+    def _mock(self, monkeypatch: pytest.MonkeyPatch, handler) -> None:
+        import httpx
+
+        from app.parser import security as sec_module
+
+        transport = httpx.MockTransport(handler)
+        real_client = httpx.Client
+
+        def client_factory(**kwargs):
+            return real_client(transport=transport, **kwargs)
+
+        monkeypatch.setattr(sec_module.httpx, "Client", client_factory)
+
+    def test_sends_descriptive_user_agent_and_accept(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import httpx
+
+        from app import __version__
+
+        seen: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.update(request.headers)
+            return httpx.Response(200, content=self.XSD, headers={"content-type": "text/xml"})
+
+        self._mock(monkeypatch, handler)
+        fetched = fetch_schema_url("https://example.org/a.xsd")
+        assert fetched.content == self.XSD
+        assert seen["user-agent"] == f"xsd-viewer.online/{__version__} (+https://www.xsd-viewer.online)"
+        assert seen["accept"].startswith("application/xml")
+
+    def test_http_error_names_the_reason_phrase(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import httpx
+
+        self._mock(monkeypatch, lambda request: httpx.Response(404, content=b"nope"))
+        with pytest.raises(SecurityError, match=r"failed with HTTP 404 Not Found"):
+            fetch_schema_url("https://example.org/missing.xsd")
+
+    def test_forbidden_suggests_uploading_instead(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import httpx
+
+        self._mock(monkeypatch, lambda request: httpx.Response(403, content=b"blocked"))
+        with pytest.raises(SecurityError, match=r"HTTP 403 Forbidden.*upload it here"):
+            fetch_schema_url("https://example.org/a.xsd")
+
+    def test_transport_errors_become_fetch_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import httpx
+
+        from app.parser.security import FetchError
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectTimeout("timed out", request=request)
+
+        self._mock(monkeypatch, handler)
+        with pytest.raises(FetchError, match=r"fetching 'https://example.org/slow.xsd' failed: .*timed out"):
+            fetch_schema_url("https://example.org/slow.xsd")
+        assert issubclass(FetchError, SecurityError)

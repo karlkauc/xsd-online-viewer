@@ -101,3 +101,21 @@ def test_fetch_normalises_github_blob_urls(monkeypatch: pytest.MonkeyPatch) -> N
     with pytest.raises(security.SecurityError):
         security.fetch_schema_url("https://github.com/o/r/blob/main/a.xsd")
     assert seen == ["https://raw.githubusercontent.com/o/r/main/a.xsd"]
+
+
+@pytest.mark.parametrize(
+    ("pasted", "expected"),
+    [
+        ("www.topografix.com/GPX/1/1/gpx.xsd", "https://www.topografix.com/GPX/1/1/gpx.xsd"),
+        ("example.org/a.xsd", "https://example.org/a.xsd"),
+        ("  example.org/a.xsd  ", "https://example.org/a.xsd"),
+        ("github.com/o/r/blob/main/a.xsd", "https://raw.githubusercontent.com/o/r/main/a.xsd"),
+    ],
+)
+def test_scheme_less_urls_get_https(pasted: str, expected: str) -> None:
+    assert normalize_schema_url(pasted) == expected
+
+
+@pytest.mark.parametrize("url", ["ftp://example.org/a.xsd", "file:///etc/passwd", "mailto:x@y.z"])
+def test_other_schemes_are_left_for_the_fetcher_to_reject(url: str) -> None:
+    assert normalize_schema_url(url) == url

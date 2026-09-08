@@ -33,8 +33,25 @@ from app.parser.model import (
     SimpleType,
 )
 from app.parser.security import inspect_dtd, make_parser
+from app.parser.w3c import bytes_for_location
 
 logger = logging.getLogger(__name__)
+
+
+class _BundledW3cResolver(etree.Resolver):
+    """Let libxml2 load imports of the bundled W3C schemas without network access.
+
+    Only kicks in for locations that do not exist on disk, so a copy the user
+    shipped (materialised into the temp dir) still wins.
+    """
+
+    def resolve(self, system_url: str | None, public_id: str | None, context):  # noqa: ANN001, ANN201
+        if not system_url or Path(system_url).exists():
+            return None
+        found = bytes_for_location(system_url)
+        if found is None:
+            return None
+        return self.resolve_string(found[1], context)
 
 
 class ValidationSetupError(ValueError):
@@ -153,7 +170,9 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
             raise ValidationSetupError("schema source is unavailable; cannot validate")
 
         try:
-            xsd_tree = etree.parse(str(main_on_disk), make_parser(internal_entities=main_has_entities))
+            parser = make_parser(internal_entities=main_has_entities)
+            parser.resolvers.add(_BundledW3cResolver())
+            xsd_tree = etree.parse(str(main_on_disk), parser)
             return etree.XMLSchema(xsd_tree)
         except etree.XMLSchemaParseError as exc:
             detail = str(exc)

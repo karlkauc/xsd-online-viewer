@@ -9,6 +9,9 @@ Backend:
   - uvicorn (BSD-3-Clause) — https://www.uvicorn.org/
   - pydantic (MIT) — https://docs.pydantic.dev/
   - httpx (BSD-3-Clause) — https://www.python-httpx.org/
+  - W3C schema documents xml.xsd, xmldsig-core-schema.xsd, xenc-schema.xsd,
+    xlink.xsd (W3C Software and Document License) — bundled unmodified in
+    backend/app/parser/w3c/, see LICENSE-W3C.txt there
 
 Frontend:
   - React (MIT) — https://react.dev/

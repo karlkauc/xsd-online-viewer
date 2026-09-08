@@ -17,14 +17,24 @@ _BITBUCKET_SRC_RE = re.compile(r"^/([^/]+)/([^/]+)/src/(.+)$")
 
 _HTML_HEAD_RE = re.compile(rb"^\s*(?:<!doctype\s+html|<html)", re.IGNORECASE)
 
+# "www.example.org/x.xsd" — an address copied without its scheme. Anything with
+# an explicit scheme (ftp:, file:, mailto:) is left alone so the fetcher can
+# reject it with the usual "only http(s)" message.
+_HAS_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+_BARE_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}(?::\d+)?(?:[/?#]|$)")
+
 
 def normalize_schema_url(url: str) -> str:
     """Return the raw-content URL for a GitHub/GitLab/Bitbucket *browse* URL.
 
+    A bare ``host/path`` without scheme gets ``https://`` prepended first.
     Any other URL is returned unchanged. Query strings are dropped on the
     rewritten forwards because the browse pages take view parameters
     (``?plain=1``) that mean nothing to the raw endpoints.
     """
+    url = url.strip()
+    if not _HAS_SCHEME_RE.match(url) and _BARE_HOST_RE.match(url):
+        url = "https://" + url
     try:
         parsed = URL(url)
     except Exception:  # noqa: BLE001 — leave malformed input to the fetcher

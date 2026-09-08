@@ -61,6 +61,8 @@ backend/               FastAPI app + parser
       xsd_parser.py    The lxml walker — the big one (~950 LOC)
       model.py         Pydantic models (SchemaModel et al.)
       security.py      SSRF guards for URL fetches
+      urls.py          GitHub/GitLab browse-URL → raw rewrite, scheme-less URLs, HTML sniffing
+      w3c/             bundled xml.xsd, xmldsig, xenc, xlink (offline imports for parse + validate)
   tests/               pytest
 
 frontend/              React SPA

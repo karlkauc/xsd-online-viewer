@@ -19,7 +19,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from app.api.schema import SchemaResponse, ingest_schema
+from app.api.schema import SchemaResponse, ingest_schema, reject
 from app.parser.security import SecurityError, fetch_schema_url
 from app.parser.xsd_parser import parse_files_map
 from app.rate_limit import WRITE_LIMIT, limiter
@@ -203,20 +203,22 @@ async def load_release_schema(
     in-memory file set, keyed by filename, so filename-based imports like
     ``<xs:import schemaLocation="xmldsig-core-schema.xsd"/>`` resolve.
     """
+    schema_name = f"{tag}/{payload.main_filename}"
     cached = await list_fundsxml_releases()
     release = next((r for r in cached.releases if r.tag_name == tag), None)
     if release is None:
-        raise HTTPException(status_code=404, detail=f"release {tag!r} not found")
+        raise reject("schema_load", "release", 404, f"release {tag!r} not found", schema_name=schema_name)
 
     main_asset = next(
         (a for a in release.assets if a.filename == payload.main_filename), None
     )
     if main_asset is None:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"asset {payload.main_filename!r} not found in release {tag!r}"
-            ),
+        raise reject(
+            "schema_load",
+            "release",
+            404,
+            f"asset {payload.main_filename!r} not found in release {tag!r}",
+            schema_name=schema_name,
         )
 
     files: dict[str, bytes] = {}
@@ -224,12 +226,12 @@ async def load_release_schema(
         try:
             fetched = await asyncio.to_thread(fetch_schema_url, asset.download_url)
         except SecurityError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise reject("schema_load", "release", 400, str(exc), schema_name=schema_name) from exc
         files[asset.filename] = fetched.content
 
     return ingest_schema(
         source="release",
-        schema_name=f"{tag}/{payload.main_filename}",
+        schema_name=schema_name,
         input_bytes=sum(len(content) for content in files.values()),
         parse=lambda: parse_files_map(files, main_filename=payload.main_filename),
     )

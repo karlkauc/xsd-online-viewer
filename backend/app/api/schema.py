@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import time
@@ -215,8 +216,11 @@ async def upload_schema(
 @router.post("/schema/url", response_model=SchemaResponse)
 @limiter.limit(WRITE_LIMIT)
 async def load_schema_from_url(request: Request, payload: UrlPayload) -> SchemaResponse:
+    # Fetch and parse off the event loop: both wait on the network (the parser
+    # resolves imports by URL). ``emit`` reads a ContextVar, which to_thread
+    # copies, so usage events still attach to this request.
     try:
-        fetched = fetch_schema_url(payload.url)
+        fetched = await asyncio.to_thread(fetch_schema_url, payload.url)
     except SecurityError as exc:
         raise reject(
             "schema_load", "url", 400, str(exc), schema_name=schema_display_name("url", payload.url)
@@ -230,7 +234,8 @@ async def load_schema_from_url(request: Request, payload: UrlPayload) -> SchemaR
             schema_name=schema_display_name("url", fetched.url),
         )
 
-    return ingest_schema(
+    return await asyncio.to_thread(
+        ingest_schema,
         source="url",
         schema_name=fetched.url,
         input_bytes=len(fetched.content),
@@ -325,7 +330,9 @@ async def validate_xml_url(
     request: Request, schema_id: str, payload: ValidateUrlPayload
 ) -> ValidationResponse:
     try:
-        fetched = fetch_schema_url(payload.url)
+        fetched = await asyncio.to_thread(fetch_schema_url, payload.url)
     except SecurityError as exc:
-        raise reject("validate", "url", 400, str(exc)) from exc
+        raise reject(
+            "validate", "url", 400, str(exc), schema_name=schema_display_name("url", payload.url)
+        ) from exc
     return _validate_xml_against_schema(schema_id, fetched.content, "url")
