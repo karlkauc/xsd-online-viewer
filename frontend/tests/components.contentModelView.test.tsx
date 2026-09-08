@@ -18,6 +18,9 @@ import {
   libraryElement,
   bookElement,
   leafElement,
+  archiveBookElement,
+  inlineExtensionElement,
+  NS as CONSTRAINTS_NS,
 } from "./fixtures/constraintsModel";
 import type { ElementDecl, SchemaModel } from "../src/types/schema";
 
@@ -262,5 +265,57 @@ describe("ContentModelView identity constraints table", () => {
     selectId("element:{http://example.com/simple}Person");
     render(<ContentModelView />);
     expect(screen.queryByText("Identity constraints")).not.toBeInTheDocument();
+  });
+});
+
+describe("ContentModelView content inherited through xs:extension", () => {
+  beforeEach(() => {
+    useSelection.getState().clearSchema();
+  });
+
+  it("shows the base's children/attributes and an inherited-from note for a named-type extension", () => {
+    act(() => {
+      useSelection.getState().setSchema("constraints", constraintsModel);
+      useSelection.getState().setSelected(archiveBookElement.id);
+    });
+    render(<ContentModelView />);
+    expect(screen.getByText("Children")).toBeInTheDocument();
+    expect(screen.getByText(/tns:BookCore/)).toBeInTheDocument();
+    expect(screen.getByText("Edition")).toBeInTheDocument();
+    expect(screen.getByText("Attributes")).toBeInTheDocument();
+    expect(screen.getByText(/^@title$/)).toBeInTheDocument();
+    expect(screen.getByText(/Content inherited from/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "BookType" })).toBeInTheDocument();
+  });
+
+  it("shows the base's content for an inline-complex extension too", () => {
+    act(() => {
+      useSelection.getState().setSchema("constraints", constraintsModel);
+      useSelection.getState().setSelected(inlineExtensionElement.id);
+    });
+    render(<ContentModelView />);
+    expect(screen.getByText(/tns:BookCore/)).toBeInTheDocument();
+    expect(screen.getByText("Edition")).toBeInTheDocument();
+    expect(screen.getByText(/^@title$/)).toBeInTheDocument();
+    expect(screen.getByText(/Content inherited from/)).toBeInTheDocument();
+  });
+
+  it("clicking the inherited-from link selects the base type", async () => {
+    act(() => {
+      useSelection.getState().setSchema("constraints", constraintsModel);
+      useSelection.getState().setSelected(archiveBookElement.id);
+    });
+    render(<ContentModelView />);
+    await userEvent.click(screen.getByRole("button", { name: "BookType" }));
+    expect(useSelection.getState().selectedId).toBe(`complexType:{${CONSTRAINTS_NS}}BookType`);
+  });
+
+  it("does not render the inherited-from note for a plain (non-extension) type", () => {
+    act(() => {
+      useSelection.getState().setSchema("constraints", constraintsModel);
+      useSelection.getState().setSelected(bookElement.id);
+    });
+    render(<ContentModelView />);
+    expect(screen.queryByText(/Content inherited from/)).not.toBeInTheDocument();
   });
 });

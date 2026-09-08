@@ -18,6 +18,11 @@ import {
   makeIndexResolver,
   type AssertionGroup,
 } from "../../lib/assertions";
+import {
+  effectiveAttributes,
+  effectiveParticle,
+  makeIndexComplexResolver,
+} from "../../lib/effectiveContent";
 import type { IdentityConstraint } from "../../types/schema";
 import { Header } from "./Header";
 import { ChildrenTable } from "./ChildrenTable";
@@ -25,6 +30,37 @@ import { AttributesTable } from "./AttributesTable";
 import { AssertionsTable } from "./AssertionsTable";
 import { IdentityConstraintsTable } from "./IdentityConstraintsTable";
 import { SimpleTypeCard } from "./SimpleTypeCard";
+
+// Small muted note rendered above the Children/Attributes tables when some
+// (or all) of a complex type's content comes from an `xs:extension` base
+// chain — mirrors SimpleTypeCard's "inherited from" styling. Each base name
+// is a clickable link (`onSelectBase`) so the base type is one click away.
+function InheritedFromNote({
+  names,
+  onSelectBase,
+}: {
+  names: string[];
+  onSelectBase: (qname: string) => void;
+}) {
+  if (!names.length) return null;
+  return (
+    <p className="px-4 md:px-6 pt-4 text-xs text-slate-500 dark:text-slate-400">
+      Content inherited from{" "}
+      {names.map((name, i) => (
+        <span key={name}>
+          {i > 0 && ", "}
+          <button
+            type="button"
+            className="text-accent hover:underline"
+            onClick={() => onSelectBase(name)}
+          >
+            {name}
+          </button>
+        </span>
+      ))}
+    </p>
+  );
+}
 
 function resolveComplex(typeName: string | null, index: NodeIndexEntry[]): ComplexType | undefined {
   if (!typeName) return undefined;
@@ -52,6 +88,8 @@ export function ContentModelView() {
 
   const entry = selectedId ? indexById.get(selectedId) : undefined;
 
+  const complexResolver = useMemo(() => makeIndexComplexResolver(index), [index]);
+
   const onSelectBase = (qname: string) => {
     const baseEntry =
       resolveReference(qname, index, ["complexType"]) ??
@@ -71,12 +109,18 @@ export function ContentModelView() {
       const namedComplex = !inlineComplex ? resolveComplex(e.type_name, index) : undefined;
       const complex = inlineComplex ?? namedComplex;
       if (complex) {
+        const particleResult = effectiveParticle(complex, complexResolver);
+        const attrsResult = effectiveAttributes(complex, complexResolver);
         return (
           <>
-            <ChildrenTable particle={complex.particle} />
+            <InheritedFromNote
+              names={particleResult.inheritedFrom}
+              onSelectBase={onSelectBase}
+            />
+            <ChildrenTable particle={particleResult.particle} />
             <AttributesTable
-              attributes={complex.attributes}
-              attributeGroupRefs={complex.attribute_group_refs}
+              attributes={attrsResult.attributes}
+              attributeGroupRefs={attrsResult.attributeGroupRefs}
             />
             {complex.content_kind === "simple" && (
               <SimpleTypeCard
@@ -98,12 +142,18 @@ export function ContentModelView() {
 
     if (entry.kind === "complexType") {
       const c = entry.node as ComplexType;
+      const particleResult = effectiveParticle(c, complexResolver);
+      const attrsResult = effectiveAttributes(c, complexResolver);
       return (
         <>
-          {c.particle && <ChildrenTable particle={c.particle} />}
+          <InheritedFromNote
+            names={particleResult.inheritedFrom}
+            onSelectBase={onSelectBase}
+          />
+          {particleResult.particle && <ChildrenTable particle={particleResult.particle} />}
           <AttributesTable
-            attributes={c.attributes}
-            attributeGroupRefs={c.attribute_group_refs}
+            attributes={attrsResult.attributes}
+            attributeGroupRefs={attrsResult.attributeGroupRefs}
           />
           {c.content_kind === "simple" && (
             <SimpleTypeCard
@@ -146,7 +196,9 @@ export function ContentModelView() {
     }
 
     return null;
-  }, [entry, index, indexById]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onSelectBase is
+    // a stable closure over setSelected/index, not worth memoising separately.
+  }, [entry, index, indexById, complexResolver]);
 
   const assertionGroups = useMemo<AssertionGroup[]>(() => {
     if (!entry) return [];

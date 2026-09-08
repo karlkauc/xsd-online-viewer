@@ -520,6 +520,67 @@ export const contactHolderType: ComplexType = {
 };
 export const contactHolderElement = leafElement("Contact", "tns:ContactHolderType", 112);
 
+// --- Fixtures for the effectiveContent.ts base-chain fix -------------------
+// xs:element name="Archive" — mirrors backend/tests/fixtures/identity_constraints.xsd's
+// Archive/Book, whose Book is typed SpecialBookType (an extension with no
+// particle of its own). Expanding it must show BookType's inherited
+// ISBN/Edition/@title content, not an empty children table.
+export const archiveBookElement = leafElement("Book", "tns:SpecialBookType", 121, {
+  id: `element:{${NS}}Archive/Book`,
+  max_occurs: "unbounded",
+});
+const archiveInlineType: ComplexType = {
+  id: `complexType:{${NS}}Archive/anon`,
+  name: null,
+  anonymous: true,
+  abstract: false,
+  mixed: false,
+  content_kind: "complex",
+  derivation: "none",
+  base: null,
+  particle: sequence([elementParticle(archiveBookElement)]),
+  attributes: [],
+  attribute_group_refs: [],
+  simple_content_base: null,
+  simple_content_facets: [],
+  annotation: null,
+  source_ref: { file_id: "f1", line: 120 },
+};
+export const archiveElement: ElementDecl = {
+  ...leafElement("Archive", "", 119),
+  is_global: true,
+  type_name: null,
+  type_inline_complex: archiveInlineType,
+};
+
+// An element whose *inline* complex type (not a named one) is itself an
+// extension with no particle of its own — exercises the inline-complex path
+// of effectiveParticle/effectiveAttributes (as opposed to Archive/Book,
+// which goes through a named type).
+export const inlineExtensionType: ComplexType = {
+  id: `complexType:{${NS}}InlineExtensionItem/anon`,
+  name: null,
+  anonymous: true,
+  abstract: false,
+  mixed: false,
+  content_kind: "complex",
+  derivation: "extension",
+  base: "tns:BookType",
+  particle: null,
+  attributes: [],
+  attribute_group_refs: [],
+  simple_content_base: null,
+  simple_content_facets: [],
+  annotation: null,
+  source_ref: { file_id: "f1", line: 125 },
+};
+export const inlineExtensionElement: ElementDecl = {
+  ...leafElement("InlineExtensionItem", "", 124),
+  is_global: true,
+  type_name: null,
+  type_inline_complex: inlineExtensionType,
+};
+
 export const constraintsModel: SchemaModel = {
   schema_id: "test-constraints",
   target_namespace: NS,
@@ -530,7 +591,7 @@ export const constraintsModel: SchemaModel = {
   },
   element_form_default: "qualified",
   attribute_form_default: "unqualified",
-  elements: [libraryElement],
+  elements: [libraryElement, archiveElement, inlineExtensionElement],
   attributes: [],
   simple_types: [],
   complex_types: [

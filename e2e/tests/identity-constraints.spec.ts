@@ -68,6 +68,20 @@ test("identity constraints: detail cards, tree glyph, centre table, and step nav
     "true",
   );
 
+  // Archive/Book: Book's type (SpecialBookType) is a complexContent
+  // extension with no particle of its own — its content lives entirely on
+  // its extension base, BookType. Expanding/selecting it must show BookType's
+  // content, not an empty "No child elements declared." table.
+  const archiveRow = page.getByRole("treeitem").filter({ hasText: "Archive" }).first();
+  await archiveRow.getByRole("button", { name: "Expand" }).click();
+  await page.getByRole("treeitem").filter({ hasText: "Book" }).first().click();
+  const centrePane = page.locator("main > section > section").filter({ hasText: "Children" });
+  await expect(centrePane.getByText("Edition")).toBeVisible();
+  await expect(centrePane.getByText(/@title/)).toBeVisible();
+  await expect(centrePane.getByText(/Content inherited from/)).toBeVisible();
+  await centrePane.getByRole("button", { name: "BookType", exact: true }).click();
+  await expect(centrePane.getByRole("heading", { name: "BookType" })).toBeVisible();
+
   // Diagram badge: teal "⚿ N" with a title listing every constraint.
   await page.getByRole("button", { name: "Diagram" }).click();
   const libraryNode = page.locator(".react-flow__node-element").filter({ hasText: "Library" }).first();

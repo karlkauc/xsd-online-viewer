@@ -14,6 +14,7 @@ import type {
 } from "../../types/schema";
 import { resolveElementRef, resolveReference } from "../../lib/indexSchema";
 import { computeRootElements } from "../../lib/rootElements";
+import { effectiveAttributes, effectiveParticle, makeIndexComplexResolver } from "../../lib/effectiveContent";
 
 export interface TreeRow {
   id: string;
@@ -53,6 +54,11 @@ export function buildTreeRows(
   // Keep track of types visited during the current descent so a self-referencing
   // complex type (possible via xs:extension chains) doesn't blow the stack.
   const stackSeen: string[] = [];
+  // Built once per call and memoised per qname — an "expand all" walks the
+  // same base chain for many nodes, and this resolver backs both the extension
+  // base lookups below and effectiveParticle/effectiveAttributes' own cycle
+  // guards.
+  const complexResolver = makeIndexComplexResolver(Array.from(indexById.values()));
 
   const pushRow = (row: TreeRow) => {
     if (!filterKinds.has(row.kind)) return;
@@ -165,10 +171,12 @@ export function buildTreeRows(
   };
 
   const descendComplex = (complex: ComplexType, depth: number) => {
-    if (complex.particle && particleHasVisible(complex.particle)) {
-      expandParticle(complex.particle, depth);
+    const { particle } = effectiveParticle(complex, complexResolver);
+    if (particle && particleHasVisible(particle)) {
+      expandParticle(particle, depth);
     }
-    for (const attr of complex.attributes) {
+    const { attributes } = effectiveAttributes(complex, complexResolver);
+    for (const attr of attributes) {
       pushRow({
         id: attr.id,
         depth,

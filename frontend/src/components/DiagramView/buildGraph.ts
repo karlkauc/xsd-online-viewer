@@ -28,6 +28,7 @@ import {
   makeModelResolver,
   type TypeResolver,
 } from "../../lib/assertions";
+import { effectiveAttributes, effectiveParticle, type ComplexResolver } from "../../lib/effectiveContent";
 
 export const NODE_WIDTH = 220;
 export const COMPOSITOR_WIDTH = 70;
@@ -80,11 +81,25 @@ interface BuildContext {
   // Resolves a type's assertions (own + extension/restriction base chain,
   // including simple types) for the ⚖ badge — see lib/assertions.ts.
   assertionResolver: TypeResolver;
+  // Resolves a complexType QName against `typeIndex`, for
+  // effectiveParticle/effectiveAttributes' base-chain walk (extension content
+  // = sequence(base content, own content) — see lib/effectiveContent.ts).
+  complexResolver: ComplexResolver;
 }
 
 function nextId(context: BuildContext): string {
   context.idCounter += 1;
   return `node-${context.idCounter}`;
+}
+
+function makeComplexResolver(typeIndex: Map<string, ComplexType>): ComplexResolver {
+  return (typeRef) => {
+    if (!typeRef) return undefined;
+    const direct = typeIndex.get(typeRef);
+    if (direct) return direct;
+    const local = typeRef.includes(":") ? typeRef.split(":").pop()! : typeRef;
+    return typeIndex.get(local);
+  };
 }
 
 function buildTypeIndex(model: SchemaModel): Map<string, ComplexType> {
@@ -165,7 +180,9 @@ function computeElementDisplay(
   const namedComplex = !inlineComplex ? resolveComplex(target.type_name, context) : undefined;
   const resolvedComplex = inlineComplex ?? namedComplex ?? null;
 
-  const attrs = inlineComplex?.attributes ?? [];
+  const attrs = inlineComplex
+    ? effectiveAttributes(inlineComplex, context.complexResolver).attributes
+    : [];
   const docFull = collectDocumentation(element) ?? collectDocumentation(target);
   const docLines = truncateDocLines(docFull);
   const expandable = resolvedComplex != null;
@@ -276,7 +293,8 @@ function getExpandedParticle(
   if (!context.expandedIds.has(element.id)) return null;
   const target = resolveRefTarget(element, context);
   const complex = target.type_inline_complex ?? resolveComplex(target.type_name, context);
-  return complex?.particle ?? null;
+  if (!complex) return null;
+  return effectiveParticle(complex, context.complexResolver).particle;
 }
 
 function getOpenContentMode(
@@ -487,6 +505,7 @@ export function buildDiagramGraph(
   expandedIds: Set<string>,
   selectedId: string | null,
 ): { nodes: Node[]; edges: Edge[] } {
+  const typeIndex = buildTypeIndex(model);
   const context: BuildContext = {
     model,
     expandedIds,
@@ -494,10 +513,11 @@ export function buildDiagramGraph(
     nodes: [],
     edges: [],
     idCounter: 0,
-    typeIndex: buildTypeIndex(model),
+    typeIndex,
     elementIndex: buildElementIndex(model),
     pathIds: new Set(),
     assertionResolver: makeModelResolver(model),
+    complexResolver: makeComplexResolver(typeIndex),
   };
 
   let nextTopY = 0;

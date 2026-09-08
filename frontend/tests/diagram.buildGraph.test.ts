@@ -13,6 +13,9 @@ import {
   constraintsModel,
   libraryElement,
   bookElement,
+  archiveElement,
+  archiveBookElement,
+  inlineExtensionElement,
   NS as CONSTRAINTS_NS,
 } from "./fixtures/constraintsModel";
 import { idRolesModel, holderElement } from "./fixtures/idRolesModel";
@@ -443,5 +446,50 @@ describe("buildDiagramGraph ID/IDREF badge", () => {
     // height stays NODE_HEIGHT regardless of id_role.
     expect(nodeHeight(nodeFor("UniqueID"))).toBe(NODE_HEIGHT);
     expect(nodeHeight(nodeFor("Plain"))).toBe(NODE_HEIGHT);
+  });
+});
+
+describe("buildDiagramGraph content inherited through xs:extension", () => {
+  function elementByLabel(nodes: Node[], label: string): Node | undefined {
+    return nodes.find(
+      (n) => n.type === "element" && (n.data as { label: string }).label === label,
+    );
+  }
+
+  it("marks a named-type extension with no own particle as expandable", () => {
+    const { nodes } = buildDiagramGraph(constraintsModel, new Set([archiveElement.id]), null);
+    const book = elementByLabel(nodes, "Book");
+    expect(book).toBeDefined();
+    expect((book!.data as { expandable: boolean }).expandable).toBe(true);
+  });
+
+  it("expands a named-type extension into the base's children", () => {
+    const expanded = new Set([archiveElement.id, archiveBookElement.id]);
+    const { nodes } = buildDiagramGraph(constraintsModel, expanded, null);
+    // BookType's own content: the BookCore group ref and Edition — neither
+    // of which SpecialBookType (Book's actual type) declares itself.
+    const groupRef = nodes.find(
+      (n) => n.type === "compositor" && (n.data as { label: string }).label === "tns:BookCore",
+    );
+    expect(groupRef).toBeDefined();
+    expect(elementByLabel(nodes, "Edition")).toBeDefined();
+  });
+
+  it("expands an inline-complex extension with no own particle into the base's children", () => {
+    const expanded = new Set([inlineExtensionElement.id]);
+    const { nodes } = buildDiagramGraph(constraintsModel, expanded, null);
+    const groupRef = nodes.find(
+      (n) => n.type === "compositor" && (n.data as { label: string }).label === "tns:BookCore",
+    );
+    expect(groupRef).toBeDefined();
+    expect(elementByLabel(nodes, "Edition")).toBeDefined();
+  });
+
+  it("shows the base's attributes inline for an inline-complex extension", () => {
+    const { nodes } = buildDiagramGraph(constraintsModel, new Set(), null);
+    const item = elementByLabel(nodes, "InlineExtensionItem");
+    expect(item).toBeDefined();
+    const attrs = (item!.data as { attributes: { name: string | null }[] }).attributes;
+    expect(attrs.map((a) => a.name)).toContain("title");
   });
 });

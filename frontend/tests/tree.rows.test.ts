@@ -3,7 +3,13 @@ import { buildTreeRows } from "../src/components/TreeView/treeRows";
 import { buildIndex } from "../src/lib/indexSchema";
 import { smallModel } from "./fixtures/smallModel";
 import { refModel, DOCUMENT_ID, SIGNATURE_REF_ID } from "./fixtures/refModel";
-import { constraintsModel, libraryElement } from "./fixtures/constraintsModel";
+import {
+  constraintsModel,
+  libraryElement,
+  archiveElement,
+  archiveBookElement,
+  inlineExtensionElement,
+} from "./fixtures/constraintsModel";
 import type { SchemaNodeKind } from "../src/types/schema";
 
 const ALL: SchemaNodeKind[] = [
@@ -82,5 +88,30 @@ describe("buildTreeRows identity constraints", () => {
     const books = rows.find((r) => r.label === "Books");
     expect(books).toBeDefined();
     expect(books!.constraintCount ?? 0).toBe(0);
+  });
+});
+
+describe("buildTreeRows content inherited through xs:extension", () => {
+  it("shows the extension base's rows for a named-type extension with no own particle", () => {
+    const { indexById } = buildIndex(constraintsModel);
+    const expanded = new Set([archiveElement.id, archiveBookElement.id]);
+    const rows = buildTreeRows(constraintsModel, expanded, new Set(ALL), indexById);
+    const labels = rows.map((r) => r.label);
+    // BookType's own content: the BookCore group ref (holding ISBN), Edition,
+    // and @title — none of which SpecialBookType (Book's actual type)
+    // declares itself.
+    expect(labels).toContain("tns:BookCore");
+    expect(labels).toContain("Edition");
+    expect(labels).toContain("@title");
+  });
+
+  it("shows the extension base's rows for an inline-complex extension with no own particle", () => {
+    const { indexById } = buildIndex(constraintsModel);
+    const expanded = new Set([inlineExtensionElement.id]);
+    const rows = buildTreeRows(constraintsModel, expanded, new Set(ALL), indexById);
+    const labels = rows.map((r) => r.label);
+    expect(labels).toContain("tns:BookCore");
+    expect(labels).toContain("Edition");
+    expect(labels).toContain("@title");
   });
 });

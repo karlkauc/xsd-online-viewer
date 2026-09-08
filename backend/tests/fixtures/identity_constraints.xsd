@@ -83,4 +83,14 @@
     </xs:keyref>
   </xs:element>
 
+  <!-- Archive/Book: exercises reading a SpecialBookType-typed element's
+       content, which lives entirely on its extension base (BookType). -->
+  <xs:element name="Archive">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Book" type="tns:SpecialBookType" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
 </xs:schema>
