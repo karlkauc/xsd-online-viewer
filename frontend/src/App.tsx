@@ -13,7 +13,6 @@ import { TextView } from "./components/TextView/TextView";
 import { ValidationPanel } from "./components/ValidationPanel/ValidationPanel";
 import { ContentModelView } from "./components/ContentModelView/ContentModelView";
 import { Breadcrumb } from "./components/Breadcrumb";
-import { XPathBar } from "./components/XPathBar";
 import { Diagnostics } from "./components/Diagnostics";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { FREEXMLTOOLKIT_GO, XML_VIEWER_URL } from "./lib/links";
@@ -445,7 +444,6 @@ export default function App() {
                 (mobilePane === "view" ? "flex flex-1" : "hidden")
               }
             >
-              {activeTab === "tree" && <XPathBar />}
               <div className="flex-1 min-h-0">
                 {activeTab === "tree" && (selectedId ? <ContentModelView /> : <EmptyOverview />)}
                 {activeTab === "diagram" && <DiagramView />}

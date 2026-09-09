@@ -53,34 +53,37 @@ export function XPathBar() {
   return (
     <nav
       aria-label="XPath"
-      className="flex items-center gap-0.5 px-3 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-xs font-mono text-slate-600 dark:text-slate-300 overflow-x-auto whitespace-nowrap"
+      title="Document-instance XPath of the selected node; click a step to select it"
+      className="mt-2 flex items-start gap-1 min-w-0"
     >
-      <span className="text-slate-400 dark:text-slate-500 shrink-0">/</span>
-      {segments.map((seg, idx) => {
-        const isLast = idx === segments.length - 1;
-        return (
-          <span key={`${seg.id}:${idx}`} className="flex items-center">
-            <button
-              type="button"
-              onClick={() => onClickSegment(idx)}
-              title={seg.label}
-              className={
-                "px-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 " +
-                (isLast
-                  ? "text-slate-900 dark:text-slate-100 font-semibold"
-                  : "text-slate-600 dark:text-slate-300")
-              }
-            >
-              {seg.label}
-            </button>
-            {!isLast && (
-              <span className="text-slate-400 dark:text-slate-500 shrink-0">/</span>
-            )}
-          </span>
-        );
-      })}
+      <div className="flex flex-wrap items-center gap-y-0.5 min-w-0 text-[11px] font-mono leading-snug text-slate-500 dark:text-slate-400">
+        <span className="text-slate-400 dark:text-slate-500">/</span>
+        {segments.map((seg, idx) => {
+          const isLast = idx === segments.length - 1;
+          return (
+            <span key={`${seg.id}:${idx}`} className="flex items-center">
+              <button
+                type="button"
+                onClick={() => onClickSegment(idx)}
+                title={seg.label}
+                className={
+                  "px-0.5 rounded break-all text-left hover:bg-slate-200 dark:hover:bg-slate-800 " +
+                  (isLast
+                    ? "text-slate-900 dark:text-slate-100 font-semibold"
+                    : "text-slate-500 dark:text-slate-400")
+                }
+              >
+                {seg.label}
+              </button>
+              {!isLast && (
+                <span className="text-slate-400 dark:text-slate-500">/</span>
+              )}
+            </span>
+          );
+        })}
+      </div>
       <CopyButton
-        className="ml-1 shrink-0"
+        className="-mt-0.5 shrink-0"
         label="Copy XPath"
         text={() => "/" + segments.map((seg) => seg.label).join("/")}
       />

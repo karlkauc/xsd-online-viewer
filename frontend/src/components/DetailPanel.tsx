@@ -30,6 +30,7 @@ import { AlternativesList } from "./AlternativesList";
 import { IdentityConstraintsList } from "./IdentityConstraintsList";
 import { openSampleXml } from "./SampleXmlDialog";
 import { CopyButton } from "./CopyButton";
+import { XPathBar } from "./XPathBar";
 import { VersionBadge } from "./VersionBadge";
 import { UsageRow } from "./UsageRow";
 import {
@@ -259,6 +260,7 @@ function Header({
             <CopyButton label="Copy qualified name" text={entry.qname} className="-mt-0.5 shrink-0" />
           </div>
         )}
+        <XPathBar />
         {entry.source_ref && (
           <button
             type="button"
