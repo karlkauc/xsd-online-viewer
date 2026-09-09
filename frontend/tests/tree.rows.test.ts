@@ -11,8 +11,15 @@ import {
   inlineExtensionElement,
   specialBookType,
   extendedBookType,
+  leafElement,
 } from "./fixtures/constraintsModel";
-import type { SchemaNodeKind } from "../src/types/schema";
+import type {
+  AttributeDecl,
+  ComplexType,
+  ElementDecl,
+  SchemaModel,
+  SchemaNodeKind,
+} from "../src/types/schema";
 
 const ALL: SchemaNodeKind[] = [
   "element",
@@ -144,5 +151,88 @@ describe("buildTreeRows content inherited through xs:extension", () => {
     expect(labels).toContain("Edition");
     expect(labels).toContain("@title");
     expect(labels).toContain("Publisher");
+  });
+});
+
+describe("buildTreeRows leaf elements", () => {
+  const personId = "element:{http://example.com/simple}Person";
+
+  it("does not mark elements of a built-in or named simple type as expandable", () => {
+    const { indexById } = buildIndex(smallModel);
+    const rows = buildTreeRows(smallModel, new Set([personId]), new Set(ALL), indexById);
+    const firstName = rows.find((r) => r.label === "FirstName");
+    const age = rows.find((r) => r.label === "Age");
+    const address = rows.find((r) => r.label === "Address");
+    expect(firstName).toBeDefined();
+    expect(age).toBeDefined();
+    expect(address).toBeDefined();
+    // xs:string / tns:AgeType have nothing to drill into — expanding them
+    // would render no rows, so the row must not offer an expand toggle.
+    expect(firstName!.hasChildren).toBe(false);
+    expect(age!.hasChildren).toBe(false);
+    // Inline complex type with a sequence stays drillable.
+    expect(address!.hasChildren).toBe(true);
+  });
+
+  it("marks a simpleContent element as expandable only when it carries attributes", () => {
+    const simpleContent = (id: string, attributes: AttributeDecl[]): ComplexType => ({
+      id: `complexType:${id}/anon`,
+      name: null,
+      anonymous: true,
+      abstract: false,
+      mixed: false,
+      content_kind: "simple",
+      derivation: "extension",
+      base: "xs:string",
+      particle: null,
+      attributes,
+      attribute_group_refs: [],
+      simple_content_base: "xs:string",
+      simple_content_facets: [],
+      annotation: null,
+      source_ref: null,
+    });
+    const langAttr: AttributeDecl = {
+      id: "attribute:Label/@lang",
+      name: "lang",
+      qname: null,
+      ref: null,
+      type_name: "xs:language",
+      type_inline: null,
+      use: "optional",
+      default: null,
+      fixed: null,
+      form: null,
+      target_namespace: null,
+      is_global: false,
+      annotation: null,
+      source_ref: null,
+    };
+    const info: ElementDecl = {
+      ...leafElement("Info", "", 1),
+      type_name: null,
+      type_inline_complex: simpleContent("Info", []),
+    };
+    const label: ElementDecl = {
+      ...leafElement("Label", "", 2),
+      type_name: null,
+      type_inline_complex: simpleContent("Label", [langAttr]),
+    };
+    const model: SchemaModel = {
+      ...constraintsModel,
+      elements: [info, label],
+      complex_types: [],
+      simple_types: [],
+      groups: [],
+      attribute_groups: [],
+      attributes: [],
+    };
+    const { indexById } = buildIndex(model);
+    const rows = buildTreeRows(model, new Set(), new Set(ALL), indexById);
+    // `<xs:simpleContent><xs:extension base="xs:string"/>` — text only, no
+    // child rows to show (the OeNBCheck Infos/Info shape).
+    expect(rows.find((r) => r.label === "Info")!.hasChildren).toBe(false);
+    // …but an attribute on the extension is a child row.
+    expect(rows.find((r) => r.label === "Label")!.hasChildren).toBe(true);
   });
 });

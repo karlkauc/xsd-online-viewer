@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Mit XMLSpy v2013 (http://www.altova.com) von Oesterreichische Kontrollbank AG (Oesterreichische Kontrollbank AG) bearbeitet -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" elementFormDefault="qualified" attributeFormDefault="unqualified" version="1.0">
+	<xs:element name="OeNBCheck">
+		<xs:annotation>
+			<xs:documentation>OeNB Aggregierungscheck</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element name="Stichtag" type="xs:date">
+					<xs:annotation>
+						<xs:documentation>Stichtag für den der OeNB Aggregierungscheck durchgefuehrt wird.</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element name="Erstellungszeitpunkt" type="xs:dateTime">
+					<xs:annotation>
+						<xs:documentation>Timestamp der Dokumenterstellung</xs:documentation>
+					</xs:annotation>
+				</xs:element>
+				<xs:element name="Eintraege" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>OeNB Check Eintraege</xs:documentation>
+					</xs:annotation>
+					<xs:complexType>
+						<xs:sequence>
+							<xs:element name="Eintrag" maxOccurs="unbounded">
+								<xs:annotation>
+									<xs:documentation>OeNB Check Eintraege pro Fonds (OeNB-Identnummer)</xs:documentation>
+								</xs:annotation>
+								<xs:complexType>
+									<xs:sequence>
+										<xs:element name="OeNB_Identnr" type="IdentnummerType">
+											<xs:annotation>
+												<xs:documentation>Identnummer der Oesterreichischen Nationalbank</xs:documentation>
+											</xs:annotation>
+										</xs:element>
+										<xs:element name="InnerhalbToleranz" type="xs:boolean">
+											<xs:annotation>
+												<xs:documentation>Flag, ob innerhalb der Toleranz</xs:documentation>
+											</xs:annotation>
+										</xs:element>
+										<xs:element name="UploadDatum" type="xs:dateTime">
+											<xs:annotation>
+												<xs:documentation>Datum des Uploads</xs:documentation>
+											</xs:annotation>
+										</xs:element>
+										<xs:element name="DataSupplier" type="OeNBCheckDataSupplierType">
+											<xs:annotation>
+												<xs:documentation>Das Element bezeichnet den Namen der Gesellschaft, die dieses Dokument erstellt hat.</xs:documentation>
+											</xs:annotation>
+										</xs:element>
+										<xs:element name="User" type="Text64Type">
+											<xs:annotation>
+												<xs:documentation>User-ID mid der der Upload der Daten erfolgt ist</xs:documentation>
+											</xs:annotation>
+										</xs:element>
+										<xs:element name="UniqueDocumentID" type="Text128Type">
+											<xs:annotation>
+												<xs:documentation xml:lang="de">Dieses Element definiert die eindeutige Identifikation des  Upload - Dokuments.</xs:documentation>
+												<xs:documentation xml:lang="en">This Element contains the unique identication of this document for this data and this datasupplier.</xs:documentation>
+											</xs:annotation>
+										</xs:element>
+										<xs:element name="Aggregierung">
+											<xs:annotation>
+												<xs:documentation>Check der Aggregierung (Aktiva/Passiva)</xs:documentation>
+											</xs:annotation>
+											<xs:complexType>
+												<xs:sequence>
+													<xs:element name="Aktiva" type="xs:decimal" minOccurs="0">
+														<xs:annotation>
+															<xs:documentation>Summe der Aktiva (Pos. 2000000)</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+													<xs:element name="Passiva" type="xs:decimal" minOccurs="0">
+														<xs:annotation>
+															<xs:documentation>Summer der Passiva (Pos. 4000000)</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+													<xs:element name="Differenz" type="xs:decimal" minOccurs="0">
+														<xs:annotation>
+															<xs:documentation>Differenz von Aktiva und Passiva</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+													<xs:element name="InnerhalbToleranz" type="xs:boolean" minOccurs="0">
+														<xs:annotation>
+															<xs:documentation>Flag, ob innerhalb der Toleranz</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+												</xs:sequence>
+											</xs:complexType>
+										</xs:element>
+										<xs:element name="Schuldverschreibungen" minOccurs="0">
+											<xs:annotation>
+												<xs:documentation>Check der Schuldverschreibungen</xs:documentation>
+											</xs:annotation>
+											<xs:complexType>
+												<xs:sequence>
+													<xs:element name="Pos0300000" type="xs:decimal" nillable="true">
+														<xs:annotation>
+															<xs:documentation>Pos. 0300000 Schuldverschreibungen</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+													<xs:element name="SummeSecBySec" type="xs:decimal" nillable="true">
+														<xs:annotation>
+															<xs:documentation>Summe sec-by-sec Schuldverschreibungen</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+													<xs:element name="Differenz" type="xs:decimal" nillable="true">
+														<xs:annotation>
+															<xs:documentation>Differenz</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+													<xs:element name="InnerhalbToleranz" type="xs:boolean">
+														<xs:annotation>
+															<xs:documentation>Flag, ob innerhalb der Toleranz</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+												</xs:sequence>
+											</xs:complexType>
+										</xs:element>
+										<xs:element name="Anteilspapiere" minOccurs="0">
+											<xs:annotation>
+												<xs:documentation>Check der Anteilspapiere</xs:documentation>
+											</xs:annotation>
+											<xs:complexType>
+												<xs:sequence>
+													<xs:element name="Pos0500000" type="xs:decimal" nillable="true">
+														<xs:annotation>
+															<xs:documentation>Pos. 0500000 Anteilspapiere</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+													<xs:element name="SummeSecBySec" type="xs:decimal" nillable="true">
+														<xs:annotation>
+															<xs:documentation>Summe sec-by-sec Anteilspapiere</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+													<xs:element name="Differenz" type="xs:decimal" nillable="true">
+														<xs:annotation>
+															<xs:documentation>Differenz</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+													<xs:element name="InnerhalbToleranz" type="xs:boolean">
+														<xs:annotation>
+															<xs:documentation>Flag, ob innerhalb der Toleranz</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+												</xs:sequence>
+											</xs:complexType>
+										</xs:element>
+									</xs:sequence>
+								</xs:complexType>
+							</xs:element>
+						</xs:sequence>
+					</xs:complexType>
+				</xs:element>
+				<xs:element name="Infos" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>Optional Informationen zum OeNB Aggregierungcheck</xs:documentation>
+					</xs:annotation>
+					<xs:complexType>
+						<xs:sequence>
+							<xs:element name="Info" maxOccurs="unbounded">
+								<xs:annotation>
+									<xs:documentation>Info</xs:documentation>
+								</xs:annotation>
+								<xs:complexType>
+									<xs:simpleContent>
+										<xs:extension base="xs:string"/>
+									</xs:simpleContent>
+								</xs:complexType>
+							</xs:element>
+						</xs:sequence>
+					</xs:complexType>
+				</xs:element>
+			</xs:sequence>
+		</xs:complexType>
+	</xs:element>
+	<xs:complexType name="OeNBCheckDataSupplierType">
+		<xs:annotation>
+			<xs:documentation>Der DataSupplierTyp enthält die Daten eines Datenlieferanten bzw. -beziehers.</xs:documentation>
+		</xs:annotation>
+		<xs:sequence>
+			<xs:element name="SystemCountry" type="ISOCountryCodeType" minOccurs="0">
+				<xs:annotation>
+					<xs:documentation>Country of authority defining the list of valid data suppliers (e.g. AT, DE, ...)</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="Short" type="Text64Type">
+				<xs:annotation>
+					<xs:documentation>Code of supplier (unique per country); wenn das Upload-File nicht valide ist wird OeKB angegeben.</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="Name" type="Text256Type" minOccurs="0">
+				<xs:annotation>
+					<xs:documentation>Name of data supplier</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="Type" type="Text64Type" minOccurs="0">
+				<xs:annotation>
+					<xs:documentation>Type of data supplier (e.g. IC, CB, NB, Vendor, ...)</xs:documentation>
+				</xs:annotation>
+			</xs:element>
+			<xs:element name="Contact" minOccurs="0">
+				<xs:annotation>
+					<xs:documentation>Contact details (name, phone, email)</xs:documentation>
+				</xs:annotation>
+				<xs:complexType>
+					<xs:sequence>
+						<xs:element name="Name" type="Text256Type" minOccurs="0"/>
+						<xs:element name="Phone" type="Text64Type" minOccurs="0"/>
+						<xs:element name="Email" type="Text256Type" minOccurs="0"/>
+					</xs:sequence>
+				</xs:complexType>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:simpleType name="ISOCountryCodeType">
+		<xs:annotation>
+			<xs:documentation xml:lang="en">The ISOCountryCodeType is a type for decoding ISO-CountryCodes. It is used the two-letter ISO-CountryCodes (ISO 3166-1alpha-2). It is of the type string and has a length from exactly two letters.</xs:documentation>
+			<xs:documentation xml:lang="de">Der ISOCountryCodeType stellt einen einfachen Typ zur Verarbeitung von ISO-Laendercodes bereit. Verwendet werden die zweistelligen ISO-Waehrungscodes (ISO 3166-1alpha-2). Er ist vom Typ string und hat eine Laenge von zwei Zeichen.</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:maxLength value="2"/>
+			<xs:minLength value="2"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="IdentnummerType" final="restriction">
+		<xs:annotation>
+			<xs:documentation>Identnummer der Oesterreichischen Nationalbank: maximal 8 stellig nummerisch mit Prüfziffer</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:maxLength value="8"/>
+			<xs:minLength value="2"/>
+			<xs:pattern value="[0-9]{2,8}"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="Text64Type">
+		<xs:annotation>
+			<xs:documentation>Text (max. 64 characters)</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:maxLength value="64"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="Text128Type">
+		<xs:annotation>
+			<xs:documentation>Text (max. 128 characters)</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:maxLength value="128"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="Text256Type">
+		<xs:annotation>
+			<xs:documentation>Text (max. 256 characters)</xs:documentation>
+		</xs:annotation>
+		<xs:restriction base="xs:string">
+			<xs:maxLength value="256"/>
+		</xs:restriction>
+	</xs:simpleType>
+</xs:schema>

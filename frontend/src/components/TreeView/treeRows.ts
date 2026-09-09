@@ -111,6 +111,27 @@ export function buildTreeRows(
     }
   };
 
+  // Whether descendComplex() would emit at least one row for this type —
+  // the effective (base-merged) particle must contain something visible, or
+  // there must be effective attributes. A `<xs:simpleContent>` extension of
+  // xs:string with no attributes has neither and must not get a toggle.
+  const complexHasVisible = (complex: ComplexType): boolean => {
+    const { particle } = effectiveParticle(complex, complexResolver);
+    if (particle && particleHasVisible(particle)) return true;
+    return effectiveAttributes(complex, complexResolver).attributes.length > 0;
+  };
+
+  // Mirrors descendElementBody(): only a complex type (inline or resolved)
+  // with visible content yields child rows. A built-in (xs:date), a named
+  // simple type, an inline simple type or an unresolvable type all render
+  // as leaves — expanding them would show nothing.
+  const elementHasVisible = (element: ElementDecl): boolean => {
+    if (element.type_inline_complex) return complexHasVisible(element.type_inline_complex);
+    if (!element.type_name) return false;
+    const complex = complexResolver(element.type_name);
+    return complex ? complexHasVisible(complex) : false;
+  };
+
   const descendElement = (element: ElementDecl, depth: number, hostParticle?: Particle) => {
     const rowId = element.id;
     // An `<xs:element ref="…">` particle carries no content of its own — the
@@ -118,10 +139,7 @@ export function buildTreeRows(
     // ref into an imported namespace (ds:Signature) is drillable too.
     const target = resolveElementRef(element, indexById) ?? element;
     const typeHint = target.type_name ?? null;
-    const hasChildren =
-      target.type_inline_complex != null ||
-      target.type_inline_simple != null ||
-      target.type_name != null;
+    const hasChildren = elementHasVisible(target);
     const constraints: IdentityConstraint[] = target.identity_constraints ?? [];
     pushRow({
       id: rowId,
@@ -201,15 +219,12 @@ export function buildTreeRows(
   }
   if (filterKinds.has("complexType")) {
     for (const complex of model.complex_types) {
-      const hasChildren =
-        effectiveParticle(complex, complexResolver).particle != null ||
-        effectiveAttributes(complex, complexResolver).attributes.length > 0;
       pushRow({
         id: complex.id,
         depth: 0,
         kind: "complexType",
         label: complex.name ?? "(anonymous)",
-        hasChildren,
+        hasChildren: complexHasVisible(complex),
       });
       if (expandedIds.has(complex.id)) {
         descendComplex(complex, 1);
