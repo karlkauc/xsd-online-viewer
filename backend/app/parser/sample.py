@@ -236,16 +236,21 @@ class _Context:
             return self.namespace_of_prefix(None), qname
         return self.namespace_of_prefix(prefix), local
 
-    def lookup(self, table: dict[Key, T], qname: str) -> T | None:
-        ns, local = self.split_qname(qname)
-        hit = table.get((ns, local))
-        if hit is not None:
-            return hit
-        # Fall back to the local name alone (prefix undeclared / chameleon include).
+    def lookup_exact(self, table: dict[Key, T], qname: str) -> T | None:
+        """Only a real ``(namespace, name)`` hit — no local-name guessing."""
+        return table.get(self.split_qname(qname))
+
+    def lookup_loose(self, table: dict[Key, T], qname: str) -> T | None:
+        """The local name alone, in any namespace (prefix undeclared / chameleon include)."""
+        _, local = self.split_qname(qname)
         for (_, name), value in table.items():
             if name == local:
                 return value
         return None
+
+    def lookup(self, table: dict[Key, T], qname: str) -> T | None:
+        hit = self.lookup_exact(table, qname)
+        return hit if hit is not None else self.lookup_loose(table, qname)
 
     def declared_namespace(self, decl_file_id: str | None) -> str | None:
         if decl_file_id is not None and decl_file_id in self.file_namespaces:
@@ -274,7 +279,7 @@ class _Context:
 
 
 def _resolve_type(
-    ctx: _Context, type_name: str
+    ctx: _Context, type_name: str, decl: object | None = None
 ) -> tuple[str, str] | tuple[str, SimpleType] | tuple[str, ComplexType] | None:
     """Classify a type reference: ("builtin", local) | ("simple", st) | ("complex", ct).
 
@@ -282,19 +287,31 @@ def _resolve_type(
     the XSD namespace) is tried against the schema's own types first and
     falls back to the built-in type of that name, because the merged
     prefix map cannot tell per-file default namespaces apart.
+
+    Both tables are searched exactly *before* either is searched by local name:
+    the local-name fallback is a guess for undeclared prefixes and chameleon
+    includes, and letting it run inside the simpleType lookup first let a
+    same-named simpleType in any other namespace beat the correctly referenced
+    complexType — which put a text placeholder into an element-only element.
     """
     ns, local = ctx.split_qname(type_name)
     if ns == XSD_NS:
         return ("builtin", local)
-    simple = ctx.lookup(ctx.simple_by_key, type_name)
+    simple = ctx.lookup_exact(ctx.simple_by_key, type_name)
     if simple is not None:
         return ("simple", simple)
-    complex_type = ctx.lookup(ctx.complex_by_key, type_name)
+    complex_type = ctx.lookup_exact(ctx.complex_by_key, type_name)
     if complex_type is not None:
         return ("complex", complex_type)
     if ":" not in type_name and not type_name.startswith("{") and local in _BUILTIN_VALUES:
         return ("builtin", local)
-    return None
+    # Nothing matched exactly; guess by local name, and say that we guessed.
+    simple = ctx.lookup_loose(ctx.simple_by_key, type_name)
+    complex_type = None if simple is not None else ctx.lookup_loose(ctx.complex_by_key, type_name)
+    if simple is None and complex_type is None:
+        return None
+    ctx.note("type_resolved_by_local_name", GENERATOR_LIMIT, type_name, decl)
+    return ("simple", simple) if simple is not None else ("complex", complex_type)
 
 
 def _build_context(model: SchemaModel, options: SampleOptions) -> _Context:
@@ -436,7 +453,7 @@ def _fill_element(
         if element.default is not None:
             node.text = element.default
         return
-    resolved = _resolve_type(ctx, element.type_name)
+    resolved = _resolve_type(ctx, element.type_name, element)
     if resolved is None:
         node.append(etree.Comment(f" type {element.type_name} not found in schema "))
         ctx.note("type_not_found", SCHEMA_INCOMPLETE, element.type_name, element)

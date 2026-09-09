@@ -9,9 +9,15 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
-from app.parser.sample import SampleOptions, find_element, generate_sample
+from app.parser.sample import (
+    GENERATOR_LIMIT,
+    SampleOptions,
+    find_element,
+    generate_sample,
+    generate_sample_with_report,
+)
 from app.parser.validation import validate_xml
-from app.parser.xsd_parser import parse_single, parse_zip
+from app.parser.xsd_parser import parse_files_map, parse_single, parse_zip
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -208,3 +214,67 @@ def test_optional_recursive_elements_are_left_out() -> None:
     assert root.find("Name") is not None
     assert root.find("Parent") is None  # would have been empty, hence invalid
     assert validate_xml(model, xml.encode("utf-8")).is_valid
+
+
+# A type name that exists as a complexType in the referenced namespace and as a
+# simpleType in another one — the shape that made the generator write text into
+# an element-only element (seen in the wild on a 10-file customs schema).
+_AMBIGUOUS_FILES = {
+    "main.xsd": b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:cat="urn:c:agg:5.24.0"
+           xmlns="urn:c:doc" targetNamespace="urn:c:doc" elementFormDefault="qualified">
+  <xs:import namespace="urn:c:agg:5.24.0" schemaLocation="new.xsd"/>
+  <xs:import namespace="urn:c:agg:5.23.0" schemaLocation="old.xsd"/>
+  <xs:element name="Doc"><xs:complexType><xs:sequence>
+    <xs:element name="GTDNumber" type="cat:GTDIDType"/>
+  </xs:sequence></xs:complexType></xs:element>
+</xs:schema>""",
+    "new.xsd": b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="urn:c:agg:5.24.0"
+           targetNamespace="urn:c:agg:5.24.0" elementFormDefault="qualified">
+  <xs:complexType name="GTDIDType"><xs:sequence>
+    <xs:element name="CustomsCode" type="xs:string"/></xs:sequence></xs:complexType>
+</xs:schema>""",
+    "old.xsd": b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="urn:c:agg:5.23.0"
+           targetNamespace="urn:c:agg:5.23.0" elementFormDefault="qualified">
+  <xs:simpleType name="GTDIDType"><xs:restriction base="xs:string"/></xs:simpleType>
+</xs:schema>""",
+}
+
+
+def test_exact_namespace_beats_a_same_named_type_elsewhere() -> None:
+    """An exact ``(namespace, name)`` hit must win over the local-name fallback.
+
+    The fallback exists for undeclared prefixes and chameleon includes, but it
+    used to run inside the simpleType lookup *before* the complexType table was
+    tried at all. A same-named simpleType in any other namespace then beat the
+    correctly referenced complexType, and the generator wrote a text placeholder
+    into an element-only element — invalid, and silently so.
+    """
+    model = parse_files_map(_AMBIGUOUS_FILES, "main.xsd")
+    xml, root = _sample(model, "element:{urn:c:doc}Doc")
+    number = root.find("{urn:c:doc}GTDNumber")
+    assert number is not None
+    assert (number.text or "").strip() == ""
+    assert [c.tag for c in number] == ["{urn:c:agg:5.24.0}CustomsCode"]
+    assert validate_xml(model, xml.encode("utf-8")).is_valid
+
+
+def test_a_type_found_only_by_local_name_is_reported() -> None:
+    """Resolving through the fallback is a guess, so it must not stay silent.
+
+    The prefix is undeclared here, so only the local name can match. The output
+    is still the best guess, but the report has to say so — otherwise a wrong
+    guess looks like a clean run and never reaches the triage list.
+    """
+    files = dict(_AMBIGUOUS_FILES)
+    files["main.xsd"] = files["main.xsd"].replace(
+        b'type="cat:GTDIDType"', b'type="undeclared:GTDIDType"'
+    )
+    model = parse_files_map(files, "main.xsd")
+    element = find_element(model, "element:{urn:c:doc}Doc")
+    _, report = generate_sample_with_report(model, element, SampleOptions())
+    assert report.counts.get("type_resolved_by_local_name") == 1
+    assert [e.category for e in report.entries] == [GENERATOR_LIMIT]
+    assert report.entries[0].where == "undeclared:GTDIDType"
