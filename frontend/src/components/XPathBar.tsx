@@ -1,40 +1,13 @@
 import { useMemo } from "react";
 import { useSelection } from "../stores/selectionStore";
-import { computeXPath, type XPathSegment } from "../lib/xpath";
+import { computeXPath } from "../lib/xpath";
 import { CopyButton } from "./CopyButton";
-
-// Collects all IDs that must be expanded in the tree so that navigating to
-// `targetIdx` reveals its row. Each XPath segment is the id of an element
-// (or attribute leaf), but the tree descent passes through the enclosing
-// named complexType too — we add each element's direct `parentById` entry
-// to cover that (treeRows.ts resolves type references on the fly when
-// expanding, so the intermediate complexType must be expanded as well).
-function collectExpansionIds(
-  segments: XPathSegment[],
-  targetIdx: number,
-  parentById: Map<string, string>,
-): string[] {
-  const ids = new Set<string>();
-  for (let i = 0; i < targetIdx; i++) {
-    const seg = segments[i];
-    ids.add(seg.id);
-    const parent = parentById.get(seg.id);
-    if (parent) ids.add(parent);
-  }
-  // For attribute targets, expand the parent element too.
-  const target = segments[targetIdx];
-  if (target?.isAttribute && targetIdx > 0) {
-    ids.add(segments[targetIdx - 1].id);
-  }
-  return Array.from(ids);
-}
 
 export function XPathBar() {
   const selectedId = useSelection((s) => s.selectedId);
   const indexById = useSelection((s) => s.indexById);
   const parentById = useSelection((s) => s.parentById);
-  const setSelected = useSelection((s) => s.setSelected);
-  const setExpanded = useSelection((s) => s.setExpanded);
+  const selectAndReveal = useSelection((s) => s.selectAndReveal);
 
   const segments = useMemo(
     () => computeXPath(selectedId, indexById, parentById),
@@ -43,12 +16,9 @@ export function XPathBar() {
 
   if (!segments || segments.length === 0) return null;
 
-  const onClickSegment = (idx: number) => {
-    const target = segments[idx];
-    const toExpand = collectExpansionIds(segments, idx, parentById);
-    for (const id of toExpand) setExpanded(id, true);
-    setSelected(target.id);
-  };
+  // Expands the ancestors of the clicked step so the tree and diagram can
+  // show it (lib/revealPath.ts), then selects it.
+  const onClickSegment = (idx: number) => selectAndReveal(segments[idx].id);
 
   return (
     <nav

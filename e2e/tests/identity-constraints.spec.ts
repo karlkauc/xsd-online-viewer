@@ -74,7 +74,14 @@ test("identity constraints: detail cards, tree glyph, centre table, and step nav
   // content, not an empty "No child elements declared." table.
   const archiveRow = page.getByRole("treeitem").filter({ hasText: "Archive" }).first();
   await archiveRow.getByRole("button", { name: "Expand" }).click();
-  await page.getByRole("treeitem").filter({ hasText: "Book" }).first().click();
+  // Two rows are labelled exactly "Book": Library/Books/Book (revealed by the
+  // "tns:Book" step click above) and Archive/Book. Archive is declared after
+  // Library, so its Book row is the last one.
+  await page
+    .getByRole("treeitem")
+    .filter({ has: page.getByText("Book", { exact: true }) })
+    .last()
+    .click();
   const centrePane = page.locator("main > section > section").filter({ hasText: "Children" });
   await expect(centrePane.getByText("Edition")).toBeVisible();
   await expect(centrePane.getByText(/@title/)).toBeVisible();

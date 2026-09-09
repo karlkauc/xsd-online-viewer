@@ -64,6 +64,7 @@ export function DetailPanel() {
   const idDeclarations = useSelection((s) => s.idDeclarations);
   const idrefDeclarations = useSelection((s) => s.idrefDeclarations);
   const setSelected = useSelection((s) => s.setSelected);
+  const selectAndReveal = useSelection((s) => s.selectAndReveal);
   const setActiveTab = useSelection((s) => s.setActiveTab);
   const jumpToSource = useSelection((s) => s.jumpToSource);
   const model = useSelection((s) => s.model);
@@ -82,6 +83,7 @@ export function DetailPanel() {
     idDeclarations,
     idrefDeclarations,
     setSelected,
+    selectAndReveal,
     jumpToSource,
     model,
   };
@@ -312,6 +314,9 @@ export interface PanelCtx {
   idDeclarations: NodeIndexEntry[];
   idrefDeclarations: NodeIndexEntry[];
   setSelected: SetSelected;
+  /** Like setSelected, but also expands the ancestors of the target so
+   *  the tree and diagram reveal it — for links into collapsed subtrees. */
+  selectAndReveal: SetSelected;
   jumpToSource: (ref: SourceRef) => void;
   model: SchemaModel | null;
 }
@@ -325,7 +330,16 @@ function renderSpecifics(node: SchemaNode, ctx: PanelCtx) {
 }
 
 function renderElement(element: ElementDecl, ctx: PanelCtx) {
-  const { index, indexById, parentById, constraintsById, idDeclarations, idrefDeclarations, setSelected } = ctx;
+  const {
+    index,
+    indexById,
+    parentById,
+    constraintsById,
+    idDeclarations,
+    idrefDeclarations,
+    setSelected,
+    selectAndReveal,
+  } = ctx;
   // An `<xs:element ref="…">` particle contributes only its cardinality —
   // type, flags and facets all live on the global declaration it points at,
   // which for an imported namespace sits in another file.
@@ -471,7 +485,9 @@ function renderElement(element: ElementDecl, ctx: PanelCtx) {
         index={index}
         indexById={indexById}
         constraintsById={constraintsById}
-        setSelected={setSelected}
+        // Constraint steps can point deep into collapsed subtrees; reveal
+        // them so the tree and diagram actually show the target.
+        setSelected={selectAndReveal}
       />
       {(idRole === "idref" || idRole === "idrefs") && (
         <IdReferenceSection

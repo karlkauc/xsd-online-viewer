@@ -103,3 +103,45 @@ describe("selectionStore", () => {
     });
   });
 });
+
+describe("selectAndReveal", () => {
+  const NS = "{http://example.com/simple}";
+  const PERSON = `element:${NS}Person`;
+  const PERSON_TYPE = `complexType:${NS}PersonType`;
+  const ADDRESS = `element:${NS}PersonType/Address`;
+  const STREET = `element:${NS}PersonType/Street`;
+
+  beforeEach(() => {
+    useSelection.getState().clearSchema();
+    useSelection.getState().setSchema("id", smallModel);
+  });
+
+  it("expands the ancestor chain and selects the target in one update", () => {
+    useSelection.getState().selectAndReveal(STREET);
+    const state = useSelection.getState();
+    expect(state.selectedId).toBe(STREET);
+    expect(state.expandedIds.has(PERSON)).toBe(true);
+    expect(state.expandedIds.has(ADDRESS)).toBe(true);
+    expect(state.expandedIds.has(PERSON_TYPE)).toBe(true);
+    expect(state.expandedIds.has(STREET)).toBe(false);
+  });
+
+  it("keeps previously expanded ids", () => {
+    useSelection.getState().toggleExpanded("keep-me");
+    useSelection.getState().selectAndReveal(STREET);
+    expect(useSelection.getState().expandedIds.has("keep-me")).toBe(true);
+  });
+
+  it("degrades to a plain selection when no path can be derived", () => {
+    useSelection.getState().selectAndReveal(PERSON_TYPE);
+    const state = useSelection.getState();
+    expect(state.selectedId).toBe(PERSON_TYPE);
+    expect(state.expandedIds.size).toBe(0);
+  });
+
+  it("clears a pending source jump like setSelected does", () => {
+    useSelection.getState().jumpToSource({ file_id: "f1", line: 42 });
+    useSelection.getState().selectAndReveal(STREET);
+    expect(useSelection.getState().sourceJump).toBeNull();
+  });
+});

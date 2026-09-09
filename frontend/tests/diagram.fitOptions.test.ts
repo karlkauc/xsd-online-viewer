@@ -8,10 +8,22 @@ const nodes = [
 ] as Node[];
 
 describe("initialFitOptions", () => {
-  it("fits the whole graph on wide viewports", () => {
-    const opts = initialFitOptions(nodes, "element:B", false);
+  it("fits the whole graph on wide viewports when nothing is selected", () => {
+    const opts = initialFitOptions(nodes, null, false);
     expect(opts.nodes).toBeUndefined();
     expect(opts.padding).toBe(0.2);
+    expect(opts.maxZoom).toBe(1.2);
+  });
+
+  it("fits the whole graph on wide viewports when the selection has no node", () => {
+    const opts = initialFitOptions(nodes, "element:Missing", false);
+    expect(opts.nodes).toBeUndefined();
+  });
+
+  it("centres on the selected node on wide viewports (tab switch keeps context)", () => {
+    const opts = initialFitOptions(nodes, "element:B", false);
+    expect(opts.nodes).toEqual([{ id: "n2" }]);
+    expect(opts.minZoom).toBeGreaterThanOrEqual(0.75);
     expect(opts.maxZoom).toBe(1.2);
   });
 

@@ -26,7 +26,9 @@ export function IdentityConstraintsTable({
   indexById,
   constraintsById,
 }: IdentityConstraintsTableProps) {
-  const setSelected = useSelection((s) => s.setSelected);
+  // Reveal (expand ancestors) rather than plain-select: constraint steps
+  // often point into collapsed subtrees.
+  const setSelected = useSelection((s) => s.selectAndReveal);
   if (!constraints.length) return null;
   const ctx: ResolveContext = { index, indexById };
 

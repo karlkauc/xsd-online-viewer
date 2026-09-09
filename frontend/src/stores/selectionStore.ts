@@ -11,6 +11,7 @@ import type {
   ValidationResponse,
 } from "../types/schema";
 import { buildIndex } from "../lib/indexSchema";
+import { collectRevealIds } from "../lib/revealPath";
 import type { SchemaSource } from "../lib/schemaSource";
 import { MD_QUERY, matchesMediaQuery } from "../lib/useMediaQuery";
 
@@ -53,6 +54,10 @@ interface SelectionState {
   clearSchema: () => void;
   setActiveTab: (tab: ViewTab) => void;
   setSelected: (id: string | null) => void;
+  /** Select `id` and expand every ancestor needed to make it visible in the
+   *  tree and the diagram (see lib/revealPath.ts). Used by navigation links
+   *  such as the XPath breadcrumb and constraint selector steps. */
+  selectAndReveal: (id: string) => void;
   /** Switch to the Text tab and scroll/highlight an arbitrary source line,
    *  independent of the current selection. */
   jumpToSource: (ref: SourceRef) => void;
@@ -168,6 +173,13 @@ export const useSelection = create<SelectionState>((set, get) => ({
 
   setSelected: (id) => {
     set({ selectedId: id, sourceJump: null });
+  },
+
+  selectAndReveal: (id) => {
+    const { indexById, parentById, expandedIds } = get();
+    const toExpand = collectRevealIds(id, indexById, parentById);
+    const next = toExpand.length ? new Set([...expandedIds, ...toExpand]) : expandedIds;
+    set({ expandedIds: next, selectedId: id, sourceJump: null });
   },
 
   jumpToSource: (ref) => {

@@ -26,7 +26,12 @@ import { collectExpandableElementIds } from "../../lib/expandAll";
 import { computeAnchoredViewport } from "./anchorViewport";
 import { DiagramToolbar } from "./DiagramToolbar";
 import { initialFitOptions } from "./fitOptions";
+import { findNodeForSelection, nodeCenter } from "./revealNode";
 import { MD_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
+
+// Zoom floor when panning onto a node revealed from outside the diagram;
+// matches the single-node fit in fitOptions.ts so both paths look alike.
+const REVEAL_MIN_ZOOM = 0.75;
 
 const NODE_TYPES = {
   element: ElementNode as unknown as React.ComponentType<NodeProps>,
@@ -75,6 +80,7 @@ function DiagramInner() {
   const model = useSelection((s) => s.model);
   const selectedId = useSelection((s) => s.selectedId);
   const expandedIds = useSelection((s) => s.expandedIds);
+  const parentById = useSelection((s) => s.parentById);
   const setSelected = useSelection((s) => s.setSelected);
   const toggleExpanded = useSelection((s) => s.toggleExpanded);
   const setExpandedIds = useSelection((s) => s.setExpandedIds);
@@ -130,6 +136,37 @@ function DiagramInner() {
     return () => observer.disconnect();
   }, [flow, nodes.length]);
 
+  // Follow selections made outside the diagram (XPath breadcrumb, constraint
+  // links, tree, search): pan onto the target node, keeping the user's zoom
+  // but never below a legible floor. Clicks on diagram nodes are excluded —
+  // they go through the anchor logic below, which keeps the clicked node
+  // fixed instead of centring it. The mount case is handled by the fit
+  // effect above via initialFitOptions.
+  const lastDiagramSelectRef = useRef<string | null>(null);
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const parentByIdRef = useRef(parentById);
+  parentByIdRef.current = parentById;
+  const followMountedRef = useRef(false);
+  useEffect(() => {
+    if (!followMountedRef.current) {
+      followMountedRef.current = true;
+      return;
+    }
+    if (selectedId === lastDiagramSelectRef.current) {
+      lastDiagramSelectRef.current = null;
+      return;
+    }
+    const target = findNodeForSelection(nodesRef.current, selectedId, parentByIdRef.current);
+    if (!target) return;
+    const { x, y } = nodeCenter(target);
+    requestAnimationFrame(() => {
+      const zoom = Math.max(flow.getViewport().zoom, REVEAL_MIN_ZOOM);
+      void flow.setCenter(x, y, { zoom, duration: 250 });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
   useLayoutEffect(() => {
     const anchor = pendingAnchorRef.current;
     if (!anchor) return;
@@ -150,6 +187,7 @@ function DiagramInner() {
     (_e: unknown, node: Node) => {
       const data = node.data as { schemaId?: string; expandable?: boolean } | undefined;
       if (!data?.schemaId) return;
+      lastDiagramSelectRef.current = data.schemaId;
       setSelected(data.schemaId);
       if (data.expandable) {
         pendingAnchorRef.current = {
