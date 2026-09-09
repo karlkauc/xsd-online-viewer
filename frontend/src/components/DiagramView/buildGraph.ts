@@ -185,7 +185,13 @@ function computeElementDisplay(
     : [];
   const docFull = collectDocumentation(element) ?? collectDocumentation(target);
   const docLines = truncateDocLines(docFull);
-  const expandable = resolvedComplex != null;
+  // Expanding reveals the effective (base-merged) particle as compositor /
+  // child nodes; attributes are already drawn inline on this node. So only a
+  // particle makes the node expandable — a `<xs:simpleContent>` extension of
+  // xs:string (OeNBCheck's Infos/Info) or an attribute-only type is a leaf.
+  const expandable =
+    resolvedComplex != null &&
+    effectiveParticle(resolvedComplex, context.complexResolver).particle != null;
   const { optional, repeating } = hostParticle
     ? occursStyle(hostParticle.min_occurs, hostParticle.max_occurs)
     : { optional: false, repeating: false };

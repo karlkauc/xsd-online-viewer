@@ -16,8 +16,10 @@ import {
   archiveElement,
   archiveBookElement,
   inlineExtensionElement,
+  leafElement,
   NS as CONSTRAINTS_NS,
 } from "./fixtures/constraintsModel";
+import type { AttributeDecl, ComplexType, ElementDecl } from "../src/types/schema";
 import { idRolesModel, holderElement } from "./fixtures/idRolesModel";
 
 const PERSON_ID = "element:{http://example.com/simple}Person";
@@ -366,12 +368,14 @@ describe("buildDiagramGraph assertion badge", () => {
   });
 
   it("does not change the height budget of the badge-carrying nodes", () => {
-    // Measurement is expandable (has a resolved complex type) but has no
-    // attributes/documentation of its own: header+type row (NODE_HEIGHT)
-    // plus the expand hint (21), regardless of how many assertions it has.
+    // Measurement's named complex type has no particle and no attributes,
+    // so the node is a leaf (no expand hint) with no attribute/documentation
+    // rows: exactly the header+type row (NODE_HEIGHT), regardless of how
+    // many assertions it carries.
     const { nodes } = buildDiagramGraph(assertionsModel, new Set(), null);
     const node = elementByLabel(nodes, "Measurement")!;
-    expect(nodeHeight(node)).toBe(NODE_HEIGHT + 21);
+    expect((node.data as { expandable: boolean }).expandable).toBe(false);
+    expect(nodeHeight(node)).toBe(NODE_HEIGHT);
   });
 });
 
@@ -461,6 +465,68 @@ describe("buildDiagramGraph content inherited through xs:extension", () => {
     const book = elementByLabel(nodes, "Book");
     expect(book).toBeDefined();
     expect((book!.data as { expandable: boolean }).expandable).toBe(true);
+  });
+
+  it("does not mark a simpleContent extension without a particle as expandable", () => {
+    const simpleContent = (id: string, attributes: AttributeDecl[]): ComplexType => ({
+      id: `complexType:${id}/anon`,
+      name: null,
+      anonymous: true,
+      abstract: false,
+      mixed: false,
+      content_kind: "simple",
+      derivation: "extension",
+      base: "xs:string",
+      particle: null,
+      attributes,
+      attribute_group_refs: [],
+      simple_content_base: "xs:string",
+      simple_content_facets: [],
+      annotation: null,
+      source_ref: null,
+    });
+    const langAttr: AttributeDecl = {
+      id: "attribute:Label/@lang",
+      name: "lang",
+      qname: null,
+      ref: null,
+      type_name: "xs:language",
+      type_inline: null,
+      use: "optional",
+      default: null,
+      fixed: null,
+      form: null,
+      target_namespace: null,
+      is_global: false,
+      annotation: null,
+      source_ref: null,
+    };
+    const info: ElementDecl = {
+      ...leafElement("Info", "", 1),
+      type_name: null,
+      type_inline_complex: simpleContent("Info", []),
+    };
+    const label: ElementDecl = {
+      ...leafElement("Label", "", 2),
+      type_name: null,
+      type_inline_complex: simpleContent("Label", [langAttr]),
+    };
+    const model = {
+      ...constraintsModel,
+      elements: [info, label],
+      complex_types: [],
+      simple_types: [],
+      groups: [],
+      attribute_groups: [],
+      attributes: [],
+    };
+    const { nodes } = buildDiagramGraph(model, new Set(), null);
+    // `<xs:simpleContent><xs:extension base="xs:string"/>` (OeNBCheck's
+    // Infos/Info): text only, nothing to reveal — no "click to expand".
+    expect((elementByLabel(nodes, "Info")!.data as { expandable: boolean }).expandable).toBe(false);
+    // Attributes are drawn inline on the node itself, so an attribute-only
+    // extension has nothing left to reveal by expanding either.
+    expect((elementByLabel(nodes, "Label")!.data as { expandable: boolean }).expandable).toBe(false);
   });
 
   it("expands a named-type extension into the base's children", () => {
