@@ -9,6 +9,8 @@ import {
   archiveElement,
   archiveBookElement,
   inlineExtensionElement,
+  specialBookType,
+  extendedBookType,
 } from "./fixtures/constraintsModel";
 import type { SchemaNodeKind } from "../src/types/schema";
 
@@ -113,5 +115,34 @@ describe("buildTreeRows content inherited through xs:extension", () => {
     expect(labels).toContain("tns:BookCore");
     expect(labels).toContain("Edition");
     expect(labels).toContain("@title");
+  });
+
+  it("marks a flat complexType-filter row for an extension with no own content as expandable, and shows the base's rows", () => {
+    const { indexById } = buildIndex(constraintsModel);
+    const expanded = new Set([specialBookType.id]);
+    const rows = buildTreeRows(constraintsModel, expanded, new Set(ALL), indexById);
+    const row = rows.find((r) => r.id === specialBookType.id);
+    expect(row).toBeDefined();
+    // Before the fix this was false (SpecialBookType's own particle/attributes
+    // are both empty), so the row rendered as a non-expandable leaf even
+    // though its extension base has content.
+    expect(row!.hasChildren).toBe(true);
+    const labels = rows.map((r) => r.label);
+    expect(labels).toContain("tns:BookCore");
+    expect(labels).toContain("Edition");
+    expect(labels).toContain("@title");
+  });
+
+  it("interleaves base-then-own content for an extension that adds its own particle too", () => {
+    const { indexById } = buildIndex(constraintsModel);
+    const expanded = new Set([extendedBookType.id]);
+    const rows = buildTreeRows(constraintsModel, expanded, new Set(ALL), indexById);
+    const labels = rows.map((r) => r.label);
+    // ExtendedBookType extends BookType and adds its own Publisher element —
+    // exercises the synthetic sequence(base, own) branch end-to-end.
+    expect(labels).toContain("tns:BookCore");
+    expect(labels).toContain("Edition");
+    expect(labels).toContain("@title");
+    expect(labels).toContain("Publisher");
   });
 });

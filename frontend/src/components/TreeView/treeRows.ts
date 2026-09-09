@@ -201,12 +201,15 @@ export function buildTreeRows(
   }
   if (filterKinds.has("complexType")) {
     for (const complex of model.complex_types) {
+      const hasChildren =
+        effectiveParticle(complex, complexResolver).particle != null ||
+        effectiveAttributes(complex, complexResolver).attributes.length > 0;
       pushRow({
         id: complex.id,
         depth: 0,
         kind: "complexType",
         label: complex.name ?? "(anonymous)",
-        hasChildren: complex.particle != null || complex.attributes.length > 0,
+        hasChildren,
       });
       if (expandedIds.has(complex.id)) {
         descendComplex(complex, 1);
