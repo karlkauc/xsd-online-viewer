@@ -15,6 +15,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
+from app import __version__
 from app.main import app
 from app.parser.sample import (
     GENERATOR_LIMIT,
@@ -210,6 +211,30 @@ def test_fingerprint_separates_versions_and_defects() -> None:
     assert _fp(kind="degraded") != _fp()
     assert _fp(options=(True, 1, 40)) != _fp()
     assert _fp(error_messages=["Element 'B': other"]) != _fp()
+
+
+def test_build_issue_fingerprints_the_running_version() -> None:
+    """The version must be hashed in *before* the row leaves ``build_issue``.
+
+    Enriching the row with the version afterwards would leave the fingerprint
+    hashing an empty string: a defect fixed in a new release would keep
+    bumping ``occurrences`` on the old row instead of starting a fresh one,
+    and nobody could tell whether the fix worked.
+    """
+    issue = build_issue(kind="invalid", model=None)
+    assert issue.app_version == __version__
+    assert issue.fingerprint == fingerprint(
+        kind="invalid",
+        app_version=__version__,
+        schema_id=None,
+        element_id=None,
+        options=(False, 0, 0),
+        error_messages=[],
+        reasons=[],
+    )
+    assert issue.fingerprint != build_issue(
+        kind="invalid", model=None, app_version="0.0.0"
+    ).fingerprint
 
 
 def test_seen_fingerprints_skips_repeats_and_stays_bounded() -> None:
@@ -449,7 +474,7 @@ def test_invalid_sample_is_recorded_with_the_reason(
     assert "pattern" in json.loads(issue.errors)[0]["message"]
     # The offending declaration is quoted, the whole schema is not.
     assert "xs:pattern" in json.loads(issue.xsd_excerpts)[0]["snippet"]
-    assert issue.visitor_hash and issue.app_version
+    assert issue.visitor_hash and issue.app_version == __version__
 
 
 def test_the_same_defect_is_only_recorded_once(

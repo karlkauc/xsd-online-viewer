@@ -149,7 +149,8 @@ def record_issue(issue: SampleIssue) -> bool:
         )
         issue.country_code = tracker.geoip.country(ctx.ip) if tracker.geoip else None
         issue.device = classify_device(ctx.user_agent)
-        issue.app_version = __version__
+        # app_version is deliberately not set here: build_issue already hashed
+        # it into the fingerprint, so overwriting it would only hide a mismatch.
         accepted = tracker.issues.record(issue)
         ctx.emitted = ctx.emitted or accepted
         return accepted

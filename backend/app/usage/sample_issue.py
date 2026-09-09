@@ -32,6 +32,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, fields
 from typing import Any
 
+from app import __version__
 from app.parser.model import SchemaModel
 from app.parser.validation import ValidationErrorItem
 
@@ -272,7 +273,13 @@ def build_issue(
 
     ``report`` is a ``SampleReport.as_dict()`` payload, which may have made a
     round trip through the browser; treat it as data, never as truth.
+
+    ``app_version`` defaults to the running version and must be settled *here*,
+    because the fingerprint hashes it: filling it in after the fact would
+    fingerprint an empty version, and a defect fixed in a new release would
+    keep bumping the old row's counter instead of starting a fresh one.
     """
+    version = app_version if app_version is not None else __version__
     errors = errors or []
     entries = report.get("entries") or [] if report else []
     reasons = list((report.get("counts") or {}).keys()) if report else []
@@ -289,7 +296,7 @@ def build_issue(
     return SampleIssue(
         fingerprint=fingerprint(
             kind=kind,
-            app_version=app_version,
+            app_version=version,
             schema_id=model.schema_id if model is not None else None,
             element_id=element_id,
             options=(bool(include_optional), int(repeat or 0), int(max_depth or 0)),
@@ -297,7 +304,7 @@ def build_issue(
             reasons=reasons,
         ),
         kind=kind,
-        app_version=app_version,
+        app_version=version,
         schema_id=model.schema_id if model is not None else None,
         schema_name=main.filename if main is not None else None,
         target_namespace=model.target_namespace if model is not None else None,
