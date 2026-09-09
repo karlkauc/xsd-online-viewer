@@ -148,16 +148,34 @@ export async function validateXmlFile(
 /** Where the XML came from; recorded as the usage event's `source`. */
 export type ValidateTextOrigin = "text" | "sample";
 
+/**
+ * How a generated sample was produced. Sent back with the sample's validation
+ * request so the backend can record *why* a sample came out wrong — see
+ * backend/app/usage/sample_issue.py. Diagnostics only; it never changes the
+ * validation result.
+ */
+export interface SampleContext {
+  element_id: string;
+  element_qname?: string | null;
+  include_optional: boolean;
+  repeat?: number;
+  max_depth?: number;
+  generation_ms?: number | null;
+  /** Opaque `X-Sample-Report` value, passed through untouched. */
+  report?: string | null;
+}
+
 export async function validateXmlText(
   schemaId: string,
   content: string,
   filename = "document.xml",
   origin: ValidateTextOrigin = "text",
+  sample?: SampleContext,
 ): Promise<ValidationResponse> {
   const response = await fetch(`${API_BASE}/schema/${schemaId}/validate/text`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ content, filename, origin }),
+    body: JSON.stringify({ content, filename, origin, sample: sample ?? null }),
   });
   return handleJson<ValidationResponse>(response);
 }
@@ -179,12 +197,20 @@ export interface SampleXmlOptions {
   repeat?: number;
 }
 
+export interface SampleXmlResult {
+  xml: string;
+  /** Opaque generator report; forwarded to `validateXmlText`, never parsed here. */
+  report: string | null;
+  generationMs: number;
+}
+
 /** Skeleton instance document rooted at `elementId`, as pretty-printed XML text. */
 export async function fetchSampleXml(
   schemaId: string,
   elementId: string,
   options: SampleXmlOptions = {},
-): Promise<string> {
+): Promise<SampleXmlResult> {
+  const started = performance.now();
   const params = new URLSearchParams({ element: elementId });
   if (options.includeOptional) params.set("optional", "true");
   if (options.repeat && options.repeat > 1) params.set("repeat", String(options.repeat));
@@ -199,7 +225,11 @@ export async function fetchSampleXml(
     }
     throw new ApiError(detail, response.status);
   }
-  return response.text();
+  return {
+    xml: await response.text(),
+    report: response.headers.get("X-Sample-Report"),
+    generationMs: Math.round(performance.now() - started),
+  };
 }
 
 export function exportHtmlUrl(schemaId: string): string {

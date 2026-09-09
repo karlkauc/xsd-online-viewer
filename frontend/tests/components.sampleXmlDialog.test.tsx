@@ -42,11 +42,17 @@ const waitForSample = (fragment: string) => waitFor(() => expect(sampleText()).t
 
 const VALID = { schema_id: "abc", is_valid: true, reformatted_xml: "", errors: [] };
 
-function respondWith(text: string, validation: object = VALID) {
+function respondWith(text: string, validation: object = VALID, report: string | null = null) {
   fetchMock.mockImplementation(async (url: string) =>
     String(url).includes("/validate/")
       ? { ok: true, status: 200, json: async () => validation }
-      : { ok: true, status: 200, text: async () => text },
+      : {
+          ok: true,
+          status: 200,
+          text: async () => text,
+          // The generator report travels in a header (see fetchSampleXml).
+          headers: new Headers(report ? { "X-Sample-Report": report } : {}),
+        },
   );
 }
 
@@ -64,6 +70,26 @@ describe("SampleXmlDialog", () => {
     expect(sampleCalls()[0][0]).toBe("/api/schema/abc/sample?element=element%3A%7Bns%7DPerson");
     expect(await screen.findByRole("status")).toHaveTextContent("Schema-valid");
     expect(screen.getByRole("link", { name: "FreeXmlToolkit ↗" })).toHaveAttribute("href", "/go/freexmltoolkit");
+  });
+
+  it("hands the generator report to the validation request", async () => {
+    // The report is what lets the backend tell a generator bug apart from a
+    // broken schema, so it has to survive the round trip untouched.
+    respondWith("<Person/>", VALID, "eyJjb3VudHMiOnt9fQ==");
+    render(<SampleXmlDialog />);
+    act(() => openSampleXml({ elementId: "element:Person", name: "Person" }));
+    await screen.findByRole("status");
+
+    const validateCall = fetchMock.mock.calls.find((c) => String(c[0]).includes("/validate/"));
+    expect(validateCall).toBeDefined();
+    const body = JSON.parse(String(validateCall![1].body));
+    expect(body.origin).toBe("sample");
+    expect(body.sample).toMatchObject({
+      element_id: "element:Person",
+      include_optional: false,
+      report: "eyJjb3VudHMiOnt9fQ==",
+    });
+    expect(body.sample.generation_ms).toBeGreaterThanOrEqual(0);
   });
 
   it("reports validation errors and hands them to the Validation tab", async () => {

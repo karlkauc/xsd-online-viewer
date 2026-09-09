@@ -12,6 +12,7 @@ import html
 import logging
 import posixpath
 import time
+import traceback
 import zipfile
 from io import BytesIO
 
@@ -28,8 +29,9 @@ from app.parser.model import (
     SchemaModel,
     SimpleType,
 )
-from app.parser.sample import SampleOptions, find_element, generate_sample
-from app.usage.context import emit
+from app.parser.sample import SampleOptions, find_element, generate_sample_with_report
+from app.usage.context import emit, record_issue
+from app.usage.sample_issue import build_issue, encode_report
 
 logger = logging.getLogger(__name__)
 
@@ -77,10 +79,36 @@ async def export_sample_xml(
             error_detail=f"element not found: {element[:200]}",
         )
         raise HTTPException(status_code=404, detail="element not found in schema")
+    options = SampleOptions(include_optional=optional, repeat=repeat, max_depth=depth)
     started = time.perf_counter()
-    document = generate_sample(
-        model, declaration, SampleOptions(include_optional=optional, repeat=repeat, max_depth=depth)
-    )
+    try:
+        document, report = generate_sample_with_report(model, declaration, options)
+    except Exception as exc:  # noqa: BLE001 - recorded, then re-raised as a 500
+        # The generator is supposed to degrade, not crash. Anything that gets
+        # here is a bug, and it is the one case the browser cannot report for
+        # us because there is no document to validate.
+        record_issue(
+            build_issue(
+                kind="generator_error",
+                model=model,
+                element_id=declaration.id,
+                element_qname=declaration.qname or declaration.name,
+                include_optional=optional,
+                repeat=repeat,
+                max_depth=depth,
+                traceback="".join(traceback.format_exception(exc)),
+            )
+        )
+        emit(
+            "export",
+            source="sample",
+            status="error",
+            status_code=500,
+            schema_name=main_file,
+            target_namespace=model.target_namespace,
+            error_detail=f"{type(exc).__name__}: {exc}",
+        )
+        raise
     duration_ms = int((time.perf_counter() - started) * 1000)
     logger.info(
         "sample xml generated",
@@ -92,6 +120,7 @@ async def export_sample_xml(
             "ctx_depth": depth,
             "ctx_size_bytes": len(document),
             "ctx_duration_ms": duration_ms,
+            "ctx_degradations": report.counts,
         },
     )
     emit(
@@ -106,10 +135,17 @@ async def export_sample_xml(
         duration_ms=duration_ms,
     )
     name = (declaration.name or "sample").replace("/", "_")
+    # The report rides along so the browser can hand it back with the
+    # validation request it makes next; that is where a bad sample is
+    # recorded, and the report is what explains it (app/usage/sample_issue.py).
     return Response(
         content=document,
         media_type="application/xml; charset=utf-8",
-        headers={"Content-Disposition": f'inline; filename="{name}-sample.xml"'},
+        headers={
+            "Content-Disposition": f'inline; filename="{name}-sample.xml"',
+            "X-Sample-Report": encode_report(report.as_dict()),
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Sample-Report",
+        },
     )
 
 

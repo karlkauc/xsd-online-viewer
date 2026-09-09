@@ -78,8 +78,11 @@ one click away, including its `xmldsig-core-schema.xsd` companion.
   The public site records anonymous **aggregate usage statistics** (a daily
   rotating visitor hash — never the raw IP —, country, browser family,
   referrer, the schema's file name / URL / target namespace and size, parse
-  duration and outcome). Schema *content* is never written anywhere. Details
-  and the full column list: [docs/USAGE_STATS.md](docs/USAGE_STATS.md).
+  duration and outcome). Schema *files* are never written anywhere. The one
+  exception: if a generated sample XML fails its schema check, the generated
+  document and a few XSD lines around the declarations at fault are recorded
+  so the generator can be fixed. Details and the full column list:
+  [docs/USAGE_STATS.md](docs/USAGE_STATS.md).
   Self-hosted installs have this off unless `USAGE_DB_URL` is set.
 - **Feedback is optional and anonymous.** The 💬 Feedback button stores your
   message (plus the page, the loaded schema's name and the error you were

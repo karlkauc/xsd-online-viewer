@@ -17,7 +17,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from app.usage.events import INSERT_SQL, UsageEvent
+from app.usage.events import INSERT_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,7 @@ class UsageRecorder:
         dsn: str,
         password: str = "",
         *,
+        insert_sql: str = INSERT_SQL,
         connect: ConnectFn = _default_connect,
         queue_size: int = 1000,
         batch_size: int = 50,
@@ -49,6 +50,9 @@ class UsageRecorder:
         self._dsn = dsn.strip()
         # Secret-manager values often carry a trailing newline; never let that break auth.
         self._password = password.strip("\r\n")
+        # One recorder writes one table; ``insert_sql`` is what makes a second
+        # instance (sample issues) possible without a heterogeneous queue.
+        self._insert_sql = insert_sql
         self._connect = connect
         self._queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=queue_size)
         self._batch_size = batch_size
@@ -70,8 +74,12 @@ class UsageRecorder:
 
     # -- public API ---------------------------------------------------------
 
-    def record(self, event: UsageEvent) -> bool:
-        """Enqueue without blocking. Returns False if disabled or dropped."""
+    def record(self, event: Any) -> bool:
+        """Enqueue without blocking. Returns False if disabled or dropped.
+
+        ``event`` only has to offer ``as_row()`` matching this recorder's
+        ``insert_sql`` — see ``app.usage.sample_issue.SampleIssue``.
+        """
         if not self.enabled:
             return False
         try:
@@ -150,7 +158,7 @@ class UsageRecorder:
             if stop_after:
                 return
 
-    async def _write_with_retry(self, batch: list[UsageEvent]) -> None:
+    async def _write_with_retry(self, batch: list[Any]) -> None:
         rows = [e.as_row() for e in batch]
         for attempt in range(1, self._max_attempts + 1):
             try:
@@ -168,7 +176,7 @@ class UsageRecorder:
     async def _write(self, rows: list[tuple]) -> None:
         conn = await self._connection()
         async with conn.cursor() as cur:
-            await cur.executemany(INSERT_SQL, rows)
+            await cur.executemany(self._insert_sql, rows)
         await conn.commit()
 
     async def _connection(self) -> Any:

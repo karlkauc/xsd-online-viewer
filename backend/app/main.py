@@ -28,6 +28,7 @@ from app.usage.context import RequestUsage, UsageTracker, bind, unbind
 from app.usage.feedback import FeedbackStore
 from app.usage.geoip import GeoIp
 from app.usage.recorder import UsageRecorder
+from app.usage.sample_issue import INSERT_SQL as SAMPLE_ISSUE_INSERT_SQL
 
 configure_logging(settings.log_level)
 logger = logging.getLogger("app")
@@ -83,10 +84,19 @@ class BufferRequestBodyMiddleware:
 def build_usage_tracker() -> UsageTracker:
     """Usage statistics — inert unless USAGE_DB_URL is set (docs/USAGE_STATS.md)."""
     recorder = UsageRecorder(settings.usage_db_url, settings.usage_db_password)
+    # Sample diagnostics: rare, but each row carries a whole generated document,
+    # so it gets a short queue of its own and is written one row at a time.
+    issues = UsageRecorder(
+        settings.usage_db_url,
+        settings.usage_db_password,
+        insert_sql=SAMPLE_ISSUE_INSERT_SQL,
+        queue_size=20,
+        batch_size=1,
+    )
     geoip = GeoIp(settings.geoip_db_path, settings.maxmind_license_key) if recorder.enabled else None
     if recorder.enabled and not settings.usage_hash_secret:
         logger.warning("USAGE_HASH_SECRET is empty; visitor hashes are only date-salted")
-    return UsageTracker(recorder, geoip, settings.usage_hash_secret)
+    return UsageTracker(recorder, geoip, settings.usage_hash_secret, issues=issues)
 
 
 @asynccontextmanager
@@ -171,7 +181,7 @@ async def request_logging(request: Request, call_next):
     if usage is not None and usage.emitted:
         # Cloud Run throttles CPU after the response; give the writer a bounded
         # chance to finish while we still have it (see docs/USAGE_STATS.md).
-        await usage.tracker.recorder.drain(timeout=settings.usage_drain_seconds)
+        await usage.tracker.drain(timeout=settings.usage_drain_seconds)
     duration_ms = round((time.perf_counter() - start) * 1000, 2)
     logger.info(
         "request completed",

@@ -3,6 +3,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import { xml } from "@codemirror/lang-xml";
 import { EditorView } from "@codemirror/view";
 import { fetchSampleXml, validateXmlText } from "../api/client";
+import type { SampleXmlResult } from "../api/client";
 import { useSelection } from "../stores/selectionStore";
 import { withSchemaRetry } from "../lib/schemaSession";
 import { HANDOFF_UNSUPPORTED_HINT, handoffSupported, openInXmlViewer } from "../lib/xmlViewerHandoff";
@@ -47,10 +48,12 @@ export function SampleXmlDialog() {
   const [request, setRequest] = useState<SampleRequest | null>(null);
   const [validation, setValidation] = useState<Validation | null>(null);
   const [includeOptional, setIncludeOptional] = useState(false);
-  const [xml, setXml] = useState<string | null>(null);
+  const [sample, setSample] = useState<SampleXmlResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [handoff, setHandoff] = useState<"idle" | "sending" | "sent" | "failed" | "unsupported">("idle");
+  // The document itself; the rest of `sample` only travels back to the server.
+  const xml = sample?.xml ?? null;
 
   useEffect(() => {
     const onOpen = (event: Event) => {
@@ -65,11 +68,11 @@ export function SampleXmlDialog() {
   useEffect(() => {
     if (!request || !schemaId) return;
     let cancelled = false;
-    setXml(null);
+    setSample(null);
     setError(null);
     withSchemaRetry((id) => fetchSampleXml(id, request.elementId, { includeOptional }))
-      .then((text) => {
-        if (!cancelled) setXml(text);
+      .then((result) => {
+        if (!cancelled) setSample(result);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -89,15 +92,24 @@ export function SampleXmlDialog() {
 
   // Check the generated document against the schema right away, so the user
   // sees whether it can be used as-is or which placeholders need attention.
+  // The generator's own report rides along, so a sample that comes out wrong
+  // is recorded with the reason (backend/app/usage/sample_issue.py).
   useEffect(() => {
-    if (!request || xml === null || !isDocumentRoot) {
+    if (!request || sample === null || !isDocumentRoot) {
       setValidation(null);
       return;
     }
     let cancelled = false;
     setValidation({ status: "checking" });
     const filename = `${request.name}-sample.xml`;
-    withSchemaRetry((id) => validateXmlText(id, xml, filename, "sample"))
+    withSchemaRetry((id) =>
+      validateXmlText(id, sample.xml, filename, "sample", {
+        element_id: request.elementId,
+        include_optional: includeOptional,
+        generation_ms: sample.generationMs,
+        report: sample.report,
+      }),
+    )
       .then((result) => {
         if (!cancelled) setValidation({ status: "done", result });
       })
@@ -107,7 +119,7 @@ export function SampleXmlDialog() {
     return () => {
       cancelled = true;
     };
-  }, [request, xml, isDocumentRoot]);
+  }, [request, sample, isDocumentRoot, includeOptional]);
 
   const close = useCallback(() => setRequest(null), []);
 

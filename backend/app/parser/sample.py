@@ -108,6 +108,65 @@ _DECIMAL_TYPES = {"decimal", "float", "double"}
 _STRING_TYPES = {"string", "normalizedString", "token", "Name", "NCName", "NMTOKEN", "anyURI"}
 
 
+# Why the generator could not produce faithful content. ``schema_incomplete``
+# means the schema did not offer what we needed (a missing import, a dangling
+# ref) and there is nothing for us to fix; ``generator_limit`` means this
+# generator gave up where a better one need not, and is a bug candidate.
+GENERATOR_LIMIT = "generator_limit"
+SCHEMA_INCOMPLETE = "schema_incomplete"
+
+
+@dataclass(slots=True)
+class Degradation:
+    """One spot where the output deviates from what the schema asks for."""
+
+    reason: str
+    category: str
+    where: str | None = None
+    file_id: str | None = None
+    line: int | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "reason": self.reason,
+            "category": self.category,
+            "where": self.where,
+            "file_id": self.file_id,
+            "line": self.line,
+        }
+
+
+@dataclass(slots=True)
+class SampleReport:
+    """Everything the generator had to fudge, in document order.
+
+    An invalid sample with an empty report is the interesting case: it means
+    the generator believed it emitted faithful content and was wrong.
+    """
+
+    entries: list[Degradation] = field(default_factory=list)
+
+    @property
+    def counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for entry in self.entries:
+            counts[entry.reason] = counts.get(entry.reason, 0) + 1
+        return counts
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.entries
+
+    def as_dict(self, max_entries: int = 200) -> dict[str, object]:
+        """Compact, JSON-safe form. ``counts`` stays complete when entries are cut."""
+        return {
+            "total": len(self.entries),
+            "counts": self.counts,
+            "entries": [e.as_dict() for e in self.entries[:max_entries]],
+            "truncated": len(self.entries) > max_entries,
+        }
+
+
 @dataclass
 class SampleOptions:
     include_optional: bool = False
@@ -137,6 +196,27 @@ class _Context:
     # Number of elements left empty by the recursion/depth guards so far. An
     # optional subtree that raised it is dropped again (see _emit_element_particle).
     cuts: int = 0
+    # Every spot where the output deviates from the schema, in document order.
+    report: list[Degradation] = field(default_factory=list)
+
+    def note(
+        self,
+        reason: str,
+        category: str,
+        where: str | None = None,
+        decl: object | None = None,
+    ) -> None:
+        """Record a degradation. ``decl`` only supplies the source location."""
+        ref = getattr(decl, "source_ref", None) if decl is not None else None
+        self.report.append(
+            Degradation(
+                reason=reason,
+                category=category,
+                where=where,
+                file_id=ref.file_id if ref else None,
+                line=ref.line if ref else None,
+            )
+        )
 
     # -- lookups ---------------------------------------------------------
 
@@ -259,9 +339,28 @@ def generate_sample(
     model: SchemaModel, element: ElementDecl, options: SampleOptions | None = None
 ) -> str:
     """Return a pretty-printed XML document rooted at ``element``."""
+    return generate_sample_with_report(model, element, options)[0]
+
+
+def generate_sample_with_report(
+    model: SchemaModel, element: ElementDecl, options: SampleOptions | None = None
+) -> tuple[str, SampleReport]:
+    """Like :func:`generate_sample`, plus everything the generator had to fudge.
+
+    The report is what tells a generator bug apart from an incomplete schema,
+    so the usage statistics keep it — see ``app.usage.sample_issue``.
+    """
     options = options or SampleOptions()
     ctx = _build_context(model, options)
     element = _deref_element(ctx, element) or element
+    if element.abstract:
+        # An abstract root can never validate ("the element declaration is
+        # abstract"), so substitute it the way a child particle would.
+        substitute = _substitution_member(ctx, element)
+        if substitute is None:
+            ctx.note("abstract_no_substitution", SCHEMA_INCOMPLETE, element.name, element)
+        else:
+            element = substitute
     namespace = _element_namespace(ctx, element, is_root=True)
     if namespace:
         ctx.prefix_for(namespace)
@@ -280,9 +379,10 @@ def generate_sample(
             new_root.append(child)
         root = new_root
     etree.cleanup_namespaces(root)
-    return etree.tostring(root, pretty_print=True, xml_declaration=True, encoding="UTF-8").decode(
-        "utf-8"
-    )
+    document = etree.tostring(
+        root, pretty_print=True, xml_declaration=True, encoding="UTF-8"
+    ).decode("utf-8")
+    return document, SampleReport(entries=ctx.report)
 
 
 def _tag(namespace: str | None, name: str | None) -> str:
@@ -339,6 +439,7 @@ def _fill_element(
     resolved = _resolve_type(ctx, element.type_name)
     if resolved is None:
         node.append(etree.Comment(f" type {element.type_name} not found in schema "))
+        ctx.note("type_not_found", SCHEMA_INCOMPLETE, element.type_name, element)
         return
     kind, target = resolved
     if kind == "builtin":
@@ -348,6 +449,7 @@ def _fill_element(
     else:
         if target.id in type_stack:
             node.append(etree.Comment(f" recursive {element.type_name} omitted "))
+            ctx.note("recursion_cut", GENERATOR_LIMIT, element.type_name, element)
             ctx.cuts += 1
             return
         _fill_complex(ctx, node, target, depth=depth, type_stack=type_stack + (target.id,))
@@ -366,6 +468,12 @@ def _base_chain(ctx: _Context, ct: ComplexType) -> list[ComplexType]:
     while current.derivation == "extension" and current.base:
         base = ctx.lookup(ctx.complex_by_key, current.base)
         if base is None or base.id in seen:
+            if base is None:
+                # Everything the base contributed — including required
+                # children — is silently absent from the output.
+                ctx.note(
+                    "extension_base_not_found", SCHEMA_INCOMPLETE, current.base, current
+                )
             break
         chain.append(base)
         seen.add(base.id)
@@ -401,8 +509,17 @@ def _fill_complex(
         if base is not None and base.id not in type_stack:
             _fill_complex(ctx, node, base, depth=depth, type_stack=type_stack + (base.id,))
             return
+        # The base is gone, or we are already inside it; either way the
+        # restricted content model is missing from the output entirely.
+        ctx.note(
+            "restriction_base_not_found" if base is None else "restriction_base_recursive",
+            SCHEMA_INCOMPLETE if base is None else GENERATOR_LIMIT,
+            ct.base,
+            ct,
+        )
     if depth >= ctx.options.max_depth:
         node.append(etree.Comment(" depth limit reached "))
+        ctx.note("depth_limit", GENERATOR_LIMIT, ct.name, ct)
         ctx.cuts += 1
         return
     # Content: bases first (extension appends), then the type's own particle.
@@ -433,6 +550,9 @@ def _fill_attributes(
         if attribute.ref:
             target = ctx.lookup(ctx.global_attribute_by_key, attribute.ref)
             if target is None:
+                ctx.note(
+                    "attribute_ref_not_found", SCHEMA_INCOMPLETE, attribute.ref, attribute
+                )
                 continue
             decl = target
         if attribute.use == "prohibited" or not decl.name:
@@ -497,6 +617,10 @@ def _emit_particle(
         elif particle.kind == "choice":
             chosen = _pick_choice(particle.children)
             if chosen is not None:
+                if chosen.kind != "element":
+                    # No branch was a plain element, so we took a group or a
+                    # wildcard — the weakest guess this generator makes.
+                    ctx.note("choice_branch_not_element", GENERATOR_LIMIT, chosen.kind)
                 forced = chosen if chosen.min_occurs > 0 else chosen.model_copy(update={"min_occurs": 1})
                 _emit_particle(ctx, parent, forced, depth=depth, type_stack=type_stack)
         elif particle.kind == "group-ref":
@@ -505,10 +629,12 @@ def _emit_particle(
                 group = ctx.lookup(ctx.group_by_key, particle.group_ref)
             if group is None or group.particle is None:
                 parent.append(etree.Comment(f" group {particle.group_ref} not found in schema "))
+                ctx.note("group_not_found", SCHEMA_INCOMPLETE, particle.group_ref)
                 continue
             _emit_particle(ctx, parent, group.particle, depth=depth, type_stack=type_stack)
         elif particle.kind == "any":
             parent.append(etree.Comment(" any element allowed here "))
+            ctx.note("wildcard_skipped", GENERATOR_LIMIT, "xs:any")
 
 
 def _emit_element_particle(
@@ -523,12 +649,16 @@ def _emit_element_particle(
     declaration = _deref_element(ctx, element)
     if declaration is None:
         parent.append(etree.Comment(f" element {element.ref} not found in schema "))
+        ctx.note("element_ref_not_found", SCHEMA_INCOMPLETE, element.ref, element)
         return
     if declaration.abstract:
         substitute = _substitution_member(ctx, declaration)
         if substitute is None:
             parent.append(
                 etree.Comment(f" abstract element {declaration.name}: no substitution found ")
+            )
+            ctx.note(
+                "abstract_no_substitution", SCHEMA_INCOMPLETE, declaration.name, declaration
             )
             return
         declaration = substitute
@@ -540,6 +670,7 @@ def _emit_element_particle(
         child.set(f"{{{XSI_NS}}}nil", "true")
         return
     cuts_before = ctx.cuts
+    notes_before = len(ctx.report)
     _fill_element(ctx, child, declaration, depth=depth, type_stack=type_stack)
     if optional and ctx.cuts > cuts_before:
         # Somewhere below, a required element hit the recursion or depth
@@ -548,6 +679,10 @@ def _emit_element_particle(
         parent.remove(child)
         parent.append(etree.Comment(f" optional {declaration.name} omitted (recursive or too deep) "))
         ctx.cuts = cuts_before
+        # The subtree is gone, so its degradations no longer describe the
+        # output; the one fact that survives is that we dropped it.
+        del ctx.report[notes_before:]
+        ctx.note("optional_subtree_dropped", GENERATOR_LIMIT, declaration.name, declaration)
 
 
 def _pick_choice(children: list[Particle]) -> Particle | None:
@@ -586,6 +721,9 @@ def _value_for_type_name(ctx: _Context, type_name: str | None, extra_facets: lis
         return _builtin_value(ctx, "string", extra_facets)
     resolved = _resolve_type(ctx, type_name)
     if resolved is None:
+        # A string placeholder for a type we never saw: wrong whenever the
+        # real type was numeric, a date, or an enumeration.
+        ctx.note("type_placeholder_fallback", SCHEMA_INCOMPLETE, type_name)
         return _builtin_value(ctx, "string", extra_facets)
     kind, target = resolved
     if kind == "builtin":
@@ -596,6 +734,7 @@ def _value_for_type_name(ctx: _Context, type_name: str | None, extra_facets: lis
         return _value_for_type_name(
             ctx, target.simple_content_base, extra_facets + target.simple_content_facets
         )
+    ctx.note("complex_type_as_text", GENERATOR_LIMIT, type_name)
     return _builtin_value(ctx, "string", extra_facets)
 
 
@@ -606,6 +745,7 @@ def _simple_value(
     extra_facets: list[Facet] | None = None,
 ) -> str:
     if simple.id in stack:
+        ctx.note("simple_recursion", GENERATOR_LIMIT, simple.name, simple)
         return "text"
     stack = stack + (simple.id,)
     facets = list(simple.facets) + list(extra_facets or [])
@@ -618,6 +758,7 @@ def _simple_value(
             return _value_for_type_name(ctx, simple.member_types[0], facets)
         if simple.member_inline:
             return _simple_value(ctx, simple.member_inline[0], stack)
+        ctx.note("union_without_members", SCHEMA_INCOMPLETE, simple.name, simple)
         return "text"
     # restriction / atomic: walk to the base, accumulating facets.
     if simple.base:
@@ -626,6 +767,7 @@ def _simple_value(
             return _builtin_value(ctx, resolved[1], facets)
         if resolved is not None and resolved[0] == "simple":
             return _simple_value(ctx, resolved[1], stack, facets)
+        ctx.note("simple_base_not_found", SCHEMA_INCOMPLETE, simple.base, simple)
     return _builtin_value(ctx, "string", facets)
 
 
@@ -670,8 +812,12 @@ def _builtin_value(ctx: _Context, local: str, facets: list[Facet]) -> str:
         return ctx.next_id()
     if local in _INTEGER_TYPES or local in _DECIMAL_TYPES:
         return _numeric_value(local, facets)
-    if local in _STRING_TYPES or local not in _BUILTIN_VALUES:
-        return _string_value(local, facets)
+    if local not in _BUILTIN_VALUES:
+        # Not a built-in we know: the value below is a guess.
+        ctx.note("builtin_unknown", GENERATOR_LIMIT, local)
+        return _string_value(ctx, local, facets)
+    if local in _STRING_TYPES:
+        return _string_value(ctx, local, facets)
     return _BUILTIN_VALUES[local]
 
 
@@ -704,12 +850,15 @@ def _numeric_value(local: str, facets: list[Facet]) -> str:
     return fmt(float(_BUILTIN_VALUES.get(local, "1")))
 
 
-def _string_value(local: str, facets: list[Facet]) -> str:
+def _string_value(ctx: _Context, local: str, facets: list[Facet]) -> str:
     pattern = _facet(facets, "pattern")
     if pattern is not None:
         sample = sample_from_pattern(pattern)
         if sample is not None:
             return sample
+        # We could not read the pattern, so the placeholder below will almost
+        # certainly violate it — a prime source of invalid samples.
+        ctx.note("pattern_unsupported", GENERATOR_LIMIT, pattern)
     base = _BUILTIN_VALUES.get(local, "string")
     length = _facet(facets, "length") or _facet(facets, "minLength")
     max_length = _facet(facets, "maxLength")

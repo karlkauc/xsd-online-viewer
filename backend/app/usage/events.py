@@ -108,6 +108,9 @@ def clean_referrer(header: str | None) -> str | None:
 def schema_display_name(source: str, name: str | None) -> str | None:
     """What is stored as ``schema_name`` — never file content.
 
+    (``sample_issue`` is the one table that keeps content, and only excerpts;
+    see ``app.usage.sample_issue``.)
+
     upload/text: basename only; url: URL without query/fragment; release: as is.
     """
     if not name:

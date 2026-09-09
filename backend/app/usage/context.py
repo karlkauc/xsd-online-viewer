@@ -23,15 +23,30 @@ from app.usage.events import (
 )
 from app.usage.geoip import GeoIp
 from app.usage.recorder import UsageRecorder
+from app.usage.sample_issue import SampleIssue, SeenFingerprints
 
 
 class UsageTracker:
-    """Bundles recorder + geoip + hashing secret; lives on ``app.state.usage``."""
+    """Bundles recorders + geoip + hashing secret; lives on ``app.state.usage``.
 
-    def __init__(self, recorder: UsageRecorder, geoip: GeoIp | None, hash_secret: str) -> None:
+    ``issues`` is a second recorder for the ``sample_issue`` table. It is a
+    separate instance rather than a second row type on ``recorder`` so that
+    the queue stays homogeneous and a multi-hundred-kB diagnostics row can
+    never delay or crowd out an ordinary usage event.
+    """
+
+    def __init__(
+        self,
+        recorder: UsageRecorder,
+        geoip: GeoIp | None,
+        hash_secret: str,
+        issues: UsageRecorder | None = None,
+    ) -> None:
         self.recorder = recorder
         self.geoip = geoip
         self.hash_secret = hash_secret
+        self.issues = issues
+        self.seen_issues = SeenFingerprints()
 
     @property
     def enabled(self) -> bool:
@@ -41,13 +56,24 @@ class UsageTracker:
         if not self.enabled:
             return
         await self.recorder.start()
+        if self.issues is not None:
+            await self.issues.start()
         if self.geoip is not None:
             self.geoip.start()
 
     async def stop(self) -> None:
         await self.recorder.stop()
+        if self.issues is not None:
+            await self.issues.stop()
         if self.geoip is not None:
             self.geoip.close()
+
+    async def drain(self, timeout: float) -> bool:
+        """Flush both writers (bounded) before Cloud Run throttles the CPU."""
+        drained = await self.recorder.drain(timeout=timeout)
+        if self.issues is not None:
+            drained = await self.issues.drain(timeout=timeout) and drained
+        return drained
 
 
 @dataclass(slots=True)
@@ -98,6 +124,33 @@ def emit(event_type: str, **fields: Any) -> bool:
         if event.error_detail:
             event.error_detail = truncate(event.error_detail)
         accepted = tracker.recorder.record(event)
+        ctx.emitted = ctx.emitted or accepted
+        return accepted
+    except Exception:  # noqa: BLE001 - statistics must never break a request
+        return False
+
+
+def record_issue(issue: SampleIssue) -> bool:
+    """Enqueue a sample diagnostics row for the current request. Never raises.
+
+    A fingerprint this process already wrote is dropped here rather than in
+    Postgres: the ``ON CONFLICT`` upsert would still have to ship the whole
+    payload across the wire first.
+    """
+    ctx = _request_usage.get()
+    if ctx is None or not ctx.tracker.enabled or ctx.tracker.issues is None:
+        return False
+    try:
+        tracker = ctx.tracker
+        if not tracker.seen_issues.check_and_add(issue.fingerprint):
+            return False
+        issue.visitor_hash = visitor_hash(
+            ctx.ip, ctx.user_agent, _utc_today(), tracker.hash_secret
+        )
+        issue.country_code = tracker.geoip.country(ctx.ip) if tracker.geoip else None
+        issue.device = classify_device(ctx.user_agent)
+        issue.app_version = __version__
+        accepted = tracker.issues.record(issue)
         ctx.emitted = ctx.emitted or accepted
         return accepted
     except Exception:  # noqa: BLE001 - statistics must never break a request

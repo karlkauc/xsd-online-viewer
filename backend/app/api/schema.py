@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.cache import schema_cache
 from app.config import settings
 from app.parser.model import SchemaModel
+from app.parser.sample import find_element
 from app.parser.security import SecurityError, fetch_schema_url
 from app.parser.urls import html_response_message, looks_like_html
 from app.parser.validation import (
@@ -24,8 +25,9 @@ from app.parser.validation import (
 )
 from app.parser.xsd_parser import parse_files_map, parse_with_url_fallback, pick_main_xsd
 from app.rate_limit import WRITE_LIMIT, limiter
-from app.usage.context import emit
+from app.usage.context import emit, record_issue
 from app.usage.events import schema_display_name, truncate
+from app.usage.sample_issue import build_issue, decode_report
 
 logger = logging.getLogger(__name__)
 
@@ -46,12 +48,31 @@ class SchemaResponse(BaseModel):
     model: SchemaModel
 
 
+class SampleContext(BaseModel):
+    """How a generated sample was produced, echoed back by the browser.
+
+    Diagnostics only: these values are recorded in ``sample_issue`` and never
+    influence validation, so they are simply capped rather than trusted.
+    """
+
+    element_id: str = Field(default="", max_length=512)
+    element_qname: str | None = Field(default=None, max_length=512)
+    include_optional: bool = False
+    repeat: int = Field(default=1, ge=1, le=5)
+    max_depth: int = Field(default=40, ge=1, le=100)
+    generation_ms: int | None = Field(default=None, ge=0, le=3_600_000)
+    # base64url ``SampleReport.as_dict()`` from the X-Sample-Report header.
+    report: str | None = Field(default=None, max_length=12_000)
+
+
 class ValidateTextPayload(BaseModel):
     content: str = Field(..., description="Raw XML content to validate")
     filename: str = Field(default="document.xml")
     # Stored as ``source`` of the usage event: ``sample`` marks the automatic check of a
     # generated sample document (SampleXmlDialog), so it is not mistaken for pasted text.
     origin: Literal["text", "sample"] = Field(default="text")
+    # Only read when ``origin == "sample"``; see _record_sample_issue.
+    sample: SampleContext | None = None
 
 
 class ValidateUrlPayload(BaseModel):
@@ -283,7 +304,57 @@ async def get_cached_schema(schema_id: str) -> SchemaResponse:
 # ---------------------------------------------------------------------------
 
 
-def _validate_xml_against_schema(schema_id: str, xml_bytes: bytes, source: str) -> ValidationResponse:
+def _sample_issue_kind(result: ValidationResponse, model: SchemaModel, sample: SampleContext) -> str | None:
+    """Classify a checked sample, or ``None`` when there is nothing to record."""
+    if result.is_valid:
+        # A valid sample still tells us something when the generator had to
+        # fudge its way there — the next schema may not get away with it.
+        # An empty report is a dict, so test its contents, not its presence.
+        report = decode_report(sample.report)
+        return "degraded" if report and (report["counts"] or report["entries"]) else None
+    if any(error.kind == "not-well-formed" for error in result.errors):
+        # We emitted something that is not even XML: always our bug.
+        return "not_well_formed"
+    declaration = find_element(model, sample.element_id) if sample.element_id else None
+    if declaration is not None and declaration.abstract:
+        return "abstract_root"
+    return "invalid"
+
+
+def _record_sample_issue(
+    kind: str,
+    model: SchemaModel,
+    sample: SampleContext,
+    xml_bytes: bytes,
+    result: ValidationResponse | None,
+) -> None:
+    """Persist why a generated sample did not come out right (never raises)."""
+    declaration = find_element(model, sample.element_id) if sample.element_id else None
+    record_issue(
+        build_issue(
+            kind=kind,
+            model=model,
+            element_id=sample.element_id or None,
+            element_qname=(
+                (declaration.qname or declaration.name) if declaration else sample.element_qname
+            ),
+            include_optional=sample.include_optional,
+            repeat=sample.repeat,
+            max_depth=sample.max_depth,
+            generation_ms=sample.generation_ms,
+            sample_xml=xml_bytes.decode("utf-8", errors="replace"),
+            errors=result.errors if result is not None else None,
+            report=decode_report(sample.report),
+        )
+    )
+
+
+def _validate_xml_against_schema(
+    schema_id: str,
+    xml_bytes: bytes,
+    source: str,
+    sample: SampleContext | None = None,
+) -> ValidationResponse:
     started = time.perf_counter()
     model = schema_cache.get(schema_id)
     if model is None:
@@ -291,9 +362,18 @@ def _validate_xml_against_schema(schema_id: str, xml_bytes: bytes, source: str) 
     try:
         result = validate_xml(model, xml_bytes)
     except ValidationSetupError as exc:
+        if sample is not None:
+            # Not a sample defect: the schema itself does not compile — usually
+            # XSD 1.1, which libxml2 cannot do. Kept apart so it does not drown
+            # out the real findings.
+            _record_sample_issue("setup_error", model, sample, xml_bytes, None)
         raise reject("validate", source, 422, str(exc), input_bytes=len(xml_bytes)) from exc
     except SecurityError as exc:
         raise reject("validate", source, 400, str(exc), input_bytes=len(xml_bytes)) from exc
+    if sample is not None:
+        kind = _sample_issue_kind(result, model, sample)
+        if kind is not None:
+            _record_sample_issue(kind, model, sample, xml_bytes, result)
     emit(
         "validate",
         source=source,
@@ -324,7 +404,8 @@ async def validate_xml_text(
     data = payload.content.encode("utf-8")
     if len(data) > settings.max_upload_bytes:
         raise reject("validate", payload.origin, 413, f"content exceeds {settings.max_upload_mb} MB limit")
-    return _validate_xml_against_schema(schema_id, data, payload.origin)
+    sample = payload.sample if payload.origin == "sample" else None
+    return _validate_xml_against_schema(schema_id, data, payload.origin, sample=sample)
 
 
 @router.post("/schema/{schema_id}/validate/url", response_model=ValidationResponse)

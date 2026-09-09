@@ -2,8 +2,14 @@
 
 The public site records **aggregate, anonymous** usage so the viewer can be
 improved based on real use: how many people load schemas, from where, which
-schemas, how big they are and how long they take to parse. Schema **content is
+schemas, how big they are and how long they take to parse. **Schema files are
 never stored**, and the raw client IP is neither stored nor logged.
+
+One narrow exception exists so the sample-XML generator can be fixed: when a
+generated sample document fails its own schema check, the generated document
+(synthetic data we produced) and a few XSD lines around the declarations the
+errors point at are recorded in `sample_issue` — see
+[Sample diagnostics](#sample-diagnostics).
 
 The feature is **off by default** — it only activates when `USAGE_DB_URL` is
 set. Self-hosted installs without it record nothing.
@@ -39,9 +45,40 @@ synchronous (the user gets a real success/failure) and rate-limited to
 5/minute per IP; a hidden honeypot field drops naive bots. Without
 `USAGE_DB_URL` the endpoint answers 503.
 
-**Never collected:** schema/XML content, raw IP, cookies, anything from the
-browser beyond the standard request headers. There is no client-side tracking
-script (the CSP forbids one anyway).
+**Never collected:** whole schema files, XML you validate, raw IP, cookies,
+anything from the browser beyond the standard request headers. There is no
+client-side tracking script (the CSP forbids one anyway).
+
+### Sample diagnostics
+
+The sample-XML generator is best-effort: it walks a content model and fills in
+placeholders. When the result does not validate we need to know whether *we*
+gave up somewhere (a bug worth fixing) or the schema never offered what the
+generator needed (nothing to fix). Table `sample_issue` answers that.
+
+A row is written only when the generated sample failed its schema check or the
+generator had to fudge its way to a valid one — never for an ordinary sample.
+It holds:
+
+| column | what |
+| --- | --- |
+| `kind` | `invalid`, `not_well_formed`, `degraded`, `abstract_root`, `setup_error` (the schema does not compile — usually XSD 1.1, which libxml2 cannot do), `generator_error` |
+| `report` | the generator's own account of every spot it fudged, each classified `generator_limit` (our bug) or `schema_incomplete` (the schema's gap) |
+| `errors` | the validator's errors, in full |
+| `diagnostics` | what our parser complained about while reading the schema |
+| `sample_xml` | the generated document — synthetic data, capped at 1 MB |
+| `xsd_excerpts` | ±8 XSD lines around each declaration an error points at, capped at 16 kB — never whole files |
+| `element_id`, `include_optional`, `repeat_count`, `max_depth`, `generation_ms` | how the sample was produced |
+| `fingerprint`, `occurrences`, `first_seen_at`, `last_seen_at` | dedup: one row per defect per app version, with a hit counter |
+
+The `fingerprint` covers the app version, so a defect that gets fixed stops
+counting up and a regression starts a fresh row. The generator report reaches
+the recording endpoint via the `X-Sample-Report` response header, which the
+browser hands back with the validation request; it is treated as untrusted
+input and rebuilt field by field (`app/usage/sample_issue.py`).
+
+An **invalid sample with an empty report** is the most interesting row there
+is: the generator believed it emitted faithful content and was wrong.
 
 ## Architecture
 
@@ -156,20 +193,42 @@ SELECT device, count(*) FROM usage_event GROUP BY 1;
 SELECT received_at::timestamp(0), left(message, 120), email, page, error_detail
 FROM feedback ORDER BY received_at DESC LIMIT 20;
 
+-- Sample-generator defects worth fixing first, most-hit first
+SELECT occurrences, kind, schema_name, element_qname, error_count,
+       report -> 'counts' AS degradations
+FROM sample_issue
+WHERE kind IN ('invalid', 'not_well_formed', 'generator_error')
+ORDER BY occurrences DESC LIMIT 20;
+
+-- Ours or theirs? Split the degradations by category
+SELECT e ->> 'category' AS category, e ->> 'reason' AS reason, sum(occurrences)
+FROM sample_issue, jsonb_array_elements(report -> 'entries') AS e
+GROUP BY 1, 2 ORDER BY 3 DESC;
+
 -- Size watch
 SELECT pg_size_pretty(pg_total_relation_size('usage_event')), count(*) FROM usage_event;
+SELECT pg_size_pretty(pg_total_relation_size('sample_issue')), count(*) FROM sample_issue;
 ```
 
-Housekeeping (rows are small; a year is a few MB at current traffic):
+Housekeeping (`usage_event` rows are small; a year is a few MB at current
+traffic). `sample_issue` rows are larger but deduplicated, so the table grows
+with the number of distinct defects rather than with traffic:
 
 ```sql
 DELETE FROM usage_event WHERE received_at < now() - interval '24 months';
 VACUUM (ANALYZE) usage_event;
+
+-- Fixed defects: nothing seen since the release that fixed them
+DELETE FROM sample_issue WHERE last_seen_at < now() - interval '12 months';
+VACUUM (ANALYZE) sample_issue;
 ```
 
 ## Privacy
 
 No personal data is persisted: the IP is hashed with a daily rotating salt and
 discarded, the user agent is a standard browser string, and schema names are
-whatever the user typed or the URL they pasted (never file content). The
+whatever the user typed or the URL they pasted (never file content). The one
+place content is kept is `sample_issue`, and only for a sample that came out
+wrong: the generated document, which is synthetic, plus short XSD excerpts
+around the declarations the errors point at — never whole schema files. The
 README states this and links here.
