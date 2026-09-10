@@ -32,7 +32,7 @@ from app.parser.model import (
 )
 from app.parser.security import inspect_dtd, make_parser
 from app.parser.w3c import bytes_for_location
-from app.parser.walk import _iter_declarations
+from app.parser.walk import _iter_declarations, iter_elements
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,45 @@ class _BundledW3cResolver(etree.Resolver):
         if found is None:
             return None
         return self.resolve_string(found[1], context)
+
+
+class _MaterialisedUrlResolver(etree.Resolver):
+    """Point absolute ``schemaLocation`` URLs at the files written to the temp dir.
+
+    Files fetched by URL are materialised under their path, but a schema that
+    imports ``https://host/x.xsd`` by absolute URL still names the URL, and
+    libxml2 must not go to the network for it (INSPIRE, US-GAAP). http and
+    https count as the same location: the fetch may have followed a redirect
+    from one to the other (KML).
+    """
+
+    def __init__(self, files: dict[str, Path]) -> None:
+        super().__init__()
+        self.files = files
+
+    def resolve(self, system_url: str | None, public_id: str | None, context):  # noqa: ANN001, ANN201
+        if not system_url or "://" not in system_url:
+            return None
+        path = self.files.get(_url_key(system_url))
+        return None if path is None else self.resolve_filename(str(path), context)
+
+
+def _url_key(url: str) -> str:
+    """``url`` without scheme, query and fragment."""
+    rest = url.split("://", 1)[1]
+    return rest.split("#", 1)[0].split("?", 1)[0]
+
+
+_ENCODING_DECLARATION = re.compile(r"""^(\ufeff?\s*<\?xml[^>]*?\sencoding\s*=\s*)(["'])[^"']*\2""")
+
+
+def _utf8_bytes(content: str) -> bytes:
+    """``content`` as UTF-8, under an XML declaration that says so.
+
+    Source files are kept as decoded text. A windows-1251 schema written back
+    as UTF-8 under its original declaration would be decoded wrongly by libxml2.
+    """
+    return _ENCODING_DECLARATION.sub(r"\1\2UTF-8\2", content, count=1).encode("utf-8")
 
 
 class ValidationSetupError(ValueError):
@@ -123,17 +162,63 @@ def _safe_relative_path(filename: str, fallback: str) -> PurePosixPath:
     return PurePosixPath(*parts)
 
 
+# libxml2 expands every reference to a substitution-group head into a choice
+# over all members. Inside a repeated choice its compile time grows about 8x
+# per doubling (500 members: 1 s, 1000: 8 s, 2000: over 60 s) and memory has
+# no ceiling: US-GAAP, 17 232 items behind xbrli:item, grew by 10 MB/s. One
+# such request would take down a 512 MiB instance, so refuse before compiling.
+MAX_SUBSTITUTION_GROUP = 500
+
+
+def _local_name(qname: str) -> str:
+    return qname.rpartition("}")[2].rpartition(":")[2]
+
+
+def largest_substitution_group(model: SchemaModel) -> tuple[str, int] | None:
+    """The biggest substitution group some content model refers to, members counted transitively."""
+    members: dict[str, list[str]] = {}
+    for element in model.elements:
+        if element.name and element.substitution_group:
+            members.setdefault(_local_name(element.substitution_group), []).append(element.name)
+    if not members:
+        return None
+    sizes: dict[str, int] = {}
+
+    def size(head: str, seen: frozenset[str]) -> int:
+        if head not in sizes:
+            sizes[head] = sum(
+                1 + (size(name, seen | {name}) if name in members and name not in seen else 0)
+                for name in members.get(head, ())
+            )
+        return sizes[head]
+
+    referenced = {_local_name(e.ref) for e in iter_elements(model) if e.ref} & members.keys()
+    return max(
+        ((head, size(head, frozenset({head}))) for head in referenced),
+        key=lambda head_size: head_size[1],
+        default=None,
+    )
+
+
 def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
     """Compile ``model``'s source files into an ``etree.XMLSchema``.
 
-    Raises :class:`ValidationSetupError` if the schema has no usable main file
-    or does not compile.
+    Raises :class:`ValidationSetupError` if the schema has no usable main file,
+    is too large for libxml2 to compile within a request, or does not compile.
     """
     main = next((f for f in model.files if f.relationship == "main"), None)
     if main is None:
         raise ValidationSetupError("schema has no main file; cannot validate")
     if main.content is None:
         raise ValidationSetupError("schema source is unavailable; cannot validate")
+    largest = largest_substitution_group(model)
+    if largest is not None and largest[1] > MAX_SUBSTITUTION_GROUP:
+        head, members = largest
+        raise ValidationSetupError(
+            f"schema is too large to validate here: the substitution group of {head!r} has "
+            f"{members} members (limit {MAX_SUBSTITUTION_GROUP}), and compiling it would "
+            "exceed this server's time and memory limits"
+        )
 
     with TemporaryDirectory(prefix="xsdval-") as tmp:
         tmp_root = Path(tmp).resolve()
@@ -141,12 +226,13 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
         used_paths: set[PurePosixPath] = set()
         unavailable: list[str] = []
         main_has_entities = False
+        by_url: dict[str, Path] = {}
 
         for idx, source in enumerate(model.files):
             if source.content is None:
                 unavailable.append(source.filename)
                 continue
-            data = source.content.encode("utf-8")
+            data = _utf8_bytes(source.content)
             if inspect_dtd(data) and source.relationship == "main":
                 main_has_entities = True
 
@@ -162,6 +248,8 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
                 )
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
+            if "://" in source.filename:
+                by_url.setdefault(_url_key(source.filename), target)
             if source.relationship == "main":
                 main_on_disk = target
 
@@ -170,6 +258,7 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
 
         try:
             parser = make_parser(internal_entities=main_has_entities)
+            parser.resolvers.add(_MaterialisedUrlResolver(by_url))
             parser.resolvers.add(_BundledW3cResolver())
             xsd_tree = etree.parse(str(main_on_disk), parser)
             return etree.XMLSchema(xsd_tree)
@@ -300,9 +389,16 @@ def extract_errors(
     return items
 
 
-def validate_xml(model: SchemaModel, xml_bytes: bytes) -> ValidationResponse:
-    """Reformat then validate ``xml_bytes`` against ``model``'s schema."""
-    schema = build_xmlschema(model)
+def validate_xml(
+    model: SchemaModel, xml_bytes: bytes, *, schema: etree.XMLSchema | None = None
+) -> ValidationResponse:
+    """Reformat then validate ``xml_bytes`` against ``model``'s schema.
+
+    ``schema`` lets a batch caller (tools/sample_audit.py) compile the schema
+    once with :func:`build_xmlschema` instead of on every document.
+    """
+    if schema is None:
+        schema = build_xmlschema(model)
 
     try:
         pretty = pretty_print_and_parse(xml_bytes)

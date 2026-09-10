@@ -11,8 +11,13 @@ comments so the user can see what could not be filled in.
 
 from __future__ import annotations
 
+import base64
+import re
 from dataclasses import dataclass, field
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
+from functools import lru_cache
 from typing import TypeVar
+from xml.sax.saxutils import quoteattr
 
 from lxml import etree
 
@@ -175,9 +180,63 @@ class SampleOptions:
     max_depth: int = 40
     # Occurrences to emit for repeatable particles when optional content is on.
     repeat: int = 1
+    # Elements after which optional content is no longer added. Wide optional
+    # fan-out (JATS) otherwise grows to hundreds of thousands of elements.
+    max_elements: int = 10_000
 
 
 Key = tuple[str | None, str]
+
+
+@dataclass(slots=True)
+class _FileSettings:
+    """What one schema document's root element says about the names inside it.
+
+    The model only keeps the main file's elementFormDefault and one merged
+    prefix map, which is wrong for every imported file that differs (SIRI:
+    an unqualified main file importing qualified ones with their own default
+    namespace).
+    """
+
+    element_form: str
+    attribute_form: str
+    prefixes: dict[str, str]
+    # Present only when the file declares xmlns="..." on its root.
+    default_namespace: str | None
+    has_default_namespace: bool
+
+
+_MARKUP_NOISE = re.compile(r"<!--.*?-->|<\?.*?\?>", re.S)
+_SCHEMA_START = re.compile(r"<(?:[\w.-]+:)?schema\b(.*?)>", re.S)
+_ATTRIBUTE = re.compile(r"""([\w.:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+_FILE_SETTINGS_CACHE: dict[tuple[str, int, str, str], _FileSettings | None] = {}
+
+
+def _file_settings(file_id: str, content: str | None) -> _FileSettings | None:
+    if not content:
+        return None
+    # A cheap key: re-reading a 15 MB taxonomy on every sample is not.
+    key = (file_id, len(content), content[:256], content[-256:])
+    if key in _FILE_SETTINGS_CACHE:
+        return _FILE_SETTINGS_CACHE[key]
+    settings = None
+    match = _SCHEMA_START.search(_MARKUP_NOISE.sub("", content[:200_000]))
+    if match is not None:
+        attributes = {
+            m.group(1): m.group(2) if m.group(2) is not None else m.group(3)
+            for m in _ATTRIBUTE.finditer(match.group(1))
+        }
+        settings = _FileSettings(
+            element_form=attributes.get("elementFormDefault", "unqualified"),
+            attribute_form=attributes.get("attributeFormDefault", "unqualified"),
+            prefixes={k[len("xmlns:"):]: v for k, v in attributes.items() if k.startswith("xmlns:")},
+            default_namespace=attributes.get("xmlns"),
+            has_default_namespace="xmlns" in attributes,
+        )
+    if len(_FILE_SETTINGS_CACHE) > 4096:
+        _FILE_SETTINGS_CACHE.clear()
+    _FILE_SETTINGS_CACHE[key] = settings
+    return settings
 
 
 @dataclass
@@ -198,6 +257,24 @@ class _Context:
     cuts: int = 0
     # Every spot where the output deviates from the schema, in document order.
     report: list[Degradation] = field(default_factory=list)
+    # Elements created so far, and whether optional content was cut because of it.
+    emitted: int = 0
+    budget_hit: bool = False
+    # Declarations being filled right now, so a wildcard does not pick an ancestor.
+    open_elements: list[str] = field(default_factory=list)
+    # Prefixes used inside attribute values (xsi:type), which cleanup must keep.
+    value_prefixes: set[str] = field(default_factory=set)
+    derived_types: dict[str, ComplexType | None] = field(default_factory=dict)
+    wildcard_members: dict[str, list[ElementDecl]] = field(default_factory=dict)
+    file_settings: dict[str, _FileSettings] = field(default_factory=dict)
+    # Files whose declarations are being expanded, innermost last. Particles
+    # carry no source location, so their QNames resolve in this file.
+    file_stack: list[str | None] = field(default_factory=list)
+    # Minimal content cost per declaration id, for choosing choice branches.
+    costs: dict[object, tuple[float, frozenset[str]]] = field(default_factory=dict)
+    cost_steps: int = 0
+    # Substitution-group members by the (namespace, name) of their head; built on first use.
+    members_by_head: dict[Key, list[ElementDecl]] | None = None
 
     def note(
         self,
@@ -220,25 +297,42 @@ class _Context:
 
     # -- lookups ---------------------------------------------------------
 
-    def namespace_of_prefix(self, prefix: str | None) -> str | None:
+    def file_of(self, decl: object | None) -> str | None:
+        """The file a QName written on ``decl`` resolves in."""
+        ref = getattr(decl, "source_ref", None) if decl is not None else None
+        if ref is not None:
+            return ref.file_id
+        return self.file_stack[-1] if self.file_stack else None
+
+    def settings_of(self, decl: object | None) -> _FileSettings | None:
+        file_id = self.file_of(decl)
+        return self.file_settings.get(file_id) if file_id is not None else None
+
+    def namespace_of_prefix(self, prefix: str | None, file_id: str | None = None) -> str | None:
+        settings = self.file_settings.get(file_id) if file_id is not None else None
         if prefix is None:
-            # An unprefixed QName means the default namespace, which for
-            # a schema is almost always its own target namespace.
-            return self.model.target_namespace
+            if settings is not None and settings.has_default_namespace:
+                return settings.default_namespace or None
+            # No default namespace in sight: the file's own target namespace is
+            # the best guess (and what a chameleon include means).
+            return self.declared_namespace(file_id)
+        if settings is not None and prefix in settings.prefixes:
+            return settings.prefixes[prefix]
         return self.model.namespaces.get(prefix)
 
-    def split_qname(self, qname: str) -> Key:
+    def split_qname(self, qname: str, owner: object | None = None) -> Key:
         if qname.startswith("{"):
             ns, _, local = qname[1:].partition("}")
             return ns, local
+        file_id = self.file_of(owner)
         prefix, sep, local = qname.rpartition(":")
         if not sep:
-            return self.namespace_of_prefix(None), qname
-        return self.namespace_of_prefix(prefix), local
+            return self.namespace_of_prefix(None, file_id), qname
+        return self.namespace_of_prefix(prefix, file_id), local
 
-    def lookup_exact(self, table: dict[Key, T], qname: str) -> T | None:
+    def lookup_exact(self, table: dict[Key, T], qname: str, owner: object | None = None) -> T | None:
         """Only a real ``(namespace, name)`` hit — no local-name guessing."""
-        return table.get(self.split_qname(qname))
+        return table.get(self.split_qname(qname, owner))
 
     def lookup_loose(self, table: dict[Key, T], qname: str) -> T | None:
         """The local name alone, in any namespace (prefix undeclared / chameleon include)."""
@@ -248,8 +342,8 @@ class _Context:
                 return value
         return None
 
-    def lookup(self, table: dict[Key, T], qname: str) -> T | None:
-        hit = self.lookup_exact(table, qname)
+    def lookup(self, table: dict[Key, T], qname: str, owner: object | None = None) -> T | None:
+        hit = self.lookup_exact(table, qname, owner)
         return hit if hit is not None else self.lookup_loose(table, qname)
 
     def declared_namespace(self, decl_file_id: str | None) -> str | None:
@@ -279,28 +373,29 @@ class _Context:
 
 
 def _resolve_type(
-    ctx: _Context, type_name: str, decl: object | None = None
+    ctx: _Context, type_name: str, decl: object | None = None, *, quiet: bool = False
 ) -> tuple[str, str] | tuple[str, SimpleType] | tuple[str, ComplexType] | None:
     """Classify a type reference: ("builtin", local) | ("simple", st) | ("complex", ct).
 
-    An unprefixed name (``type="ID"`` in a schema whose default namespace is
-    the XSD namespace) is tried against the schema's own types first and
-    falls back to the built-in type of that name, because the merged
-    prefix map cannot tell per-file default namespaces apart.
+    The QName resolves in the file ``decl`` was written in -- its prefixes
+    and default namespace -- falling back to the merged prefix map. An
+    unprefixed name that matches none of the schema's types is tried as the
+    built-in type of that name.
 
     Both tables are searched exactly *before* either is searched by local name:
     the local-name fallback is a guess for undeclared prefixes and chameleon
     includes, and letting it run inside the simpleType lookup first let a
     same-named simpleType in any other namespace beat the correctly referenced
     complexType — which put a text placeholder into an element-only element.
+    ``quiet`` skips the report, for lookups that only estimate.
     """
-    ns, local = ctx.split_qname(type_name)
+    ns, local = ctx.split_qname(type_name, decl)
     if ns == XSD_NS:
         return ("builtin", local)
-    simple = ctx.lookup_exact(ctx.simple_by_key, type_name)
+    simple = ctx.lookup_exact(ctx.simple_by_key, type_name, decl)
     if simple is not None:
         return ("simple", simple)
-    complex_type = ctx.lookup_exact(ctx.complex_by_key, type_name)
+    complex_type = ctx.lookup_exact(ctx.complex_by_key, type_name, decl)
     if complex_type is not None:
         return ("complex", complex_type)
     if ":" not in type_name and not type_name.startswith("{") and local in _BUILTIN_VALUES:
@@ -310,13 +405,18 @@ def _resolve_type(
     complex_type = None if simple is not None else ctx.lookup_loose(ctx.complex_by_key, type_name)
     if simple is None and complex_type is None:
         return None
-    ctx.note("type_resolved_by_local_name", GENERATOR_LIMIT, type_name, decl)
+    if not quiet:
+        ctx.note("type_resolved_by_local_name", GENERATOR_LIMIT, type_name, decl)
     return ("simple", simple) if simple is not None else ("complex", complex_type)
 
 
 def _build_context(model: SchemaModel, options: SampleOptions) -> _Context:
     ctx = _Context(model=model, options=options)
     ctx.file_namespaces = {f.id: f.target_namespace for f in model.files}
+    for source in model.files:
+        settings = _file_settings(source.id, source.content)
+        if settings is not None:
+            ctx.file_settings[source.id] = settings
     for ct in model.complex_types:
         if ct.name:
             ctx.complex_by_key.setdefault((ctx.namespace_of(ct), ct.name), ct)
@@ -382,10 +482,15 @@ def generate_sample_with_report(
     if namespace:
         ctx.prefix_for(namespace)
     root = etree.Element(_tag(namespace, element.name))
+    ctx.emitted = 1
+    ctx.open_elements.append(element.id)
     _fill_element(ctx, root, element, depth=0, type_stack=())
+    if ctx.budget_hit:
+        ctx.note("size_limit", GENERATOR_LIMIT, element.name, element)
     # Declare the prefixes we used (and only those) on the root.
     nsmap = dict(ctx.nsmap)
-    if any(f"{{{XSI_NS}}}nil" in el.attrib for el in root.iter(etree.Element)):
+    xsi_attributes = (f"{{{XSI_NS}}}nil", f"{{{XSI_NS}}}type")
+    if any(key in el.attrib for el in root.iter(etree.Element) for key in xsi_attributes):
         nsmap["xsi"] = XSI_NS
     if nsmap:
         new_root = etree.Element(root.tag, nsmap=nsmap)
@@ -395,7 +500,7 @@ def generate_sample_with_report(
         for child in list(root):
             new_root.append(child)
         root = new_root
-    etree.cleanup_namespaces(root)
+    etree.cleanup_namespaces(root, keep_ns_prefixes=sorted(ctx.value_prefixes))
     document = etree.tostring(
         root, pretty_print=True, xml_declaration=True, encoding="UTF-8"
     ).decode("utf-8")
@@ -415,7 +520,7 @@ def _tag(namespace: str | None, name: str | None) -> str:
 def _deref_element(ctx: _Context, element: ElementDecl) -> ElementDecl | None:
     if not element.ref:
         return element
-    return ctx.lookup(ctx.global_element_by_key, element.ref)
+    return ctx.lookup(ctx.global_element_by_key, element.ref, element)
 
 
 def _element_namespace(ctx: _Context, element: ElementDecl, *, is_root: bool) -> str | None:
@@ -423,7 +528,8 @@ def _element_namespace(ctx: _Context, element: ElementDecl, *, is_root: bool) ->
         return element.target_namespace
     if element.is_global or is_root:
         return ctx.namespace_of(element)
-    form = element.form or ctx.model.element_form_default
+    settings = ctx.settings_of(element)
+    form = element.form or (settings.element_form if settings else ctx.model.element_form_default)
     return ctx.namespace_of(element) if form == "qualified" else None
 
 
@@ -464,6 +570,17 @@ def _fill_element(
     elif kind == "simple":
         node.text = element.default if element.default is not None else _simple_value(ctx, target, ())
     else:
+        if target.abstract:
+            derived = _derived_type(ctx, target)
+            if derived is None:
+                node.append(etree.Comment(f" abstract type {element.type_name}: no derived type found "))
+                ctx.note("abstract_type_without_derivation", SCHEMA_INCOMPLETE, element.type_name, element)
+                # Nothing valid can go here, so an optional occurrence is dropped (UCI ExtensionData).
+                ctx.cuts += 1
+                return
+            # An element of an abstract type has to name a concrete one (Garmin TCX).
+            node.set(f"{{{XSI_NS}}}type", _type_qname(ctx, derived))
+            target = derived
         if target.id in type_stack:
             node.append(etree.Comment(f" recursive {element.type_name} omitted "))
             ctx.note("recursion_cut", GENERATOR_LIMIT, element.type_name, element)
@@ -477,20 +594,41 @@ def _fill_element(
 # ---------------------------------------------------------------------------
 
 
-def _base_chain(ctx: _Context, ct: ComplexType) -> list[ComplexType]:
+def _base_chain(ctx: _Context, ct: ComplexType, *, quiet: bool = False) -> list[ComplexType]:
     """``ct`` first, then its extension bases (bounded, cycle-safe)."""
     chain = [ct]
     seen = {ct.id}
     current = ct
     while current.derivation == "extension" and current.base:
-        base = ctx.lookup(ctx.complex_by_key, current.base)
+        base = ctx.lookup(ctx.complex_by_key, current.base, current)
         if base is None or base.id in seen:
-            if base is None:
+            # A simpleContent extension of a simple or built-in type has no
+            # complexType base; its value comes from simple_content_base.
+            if base is None and not current.simple_content_base and not quiet:
                 # Everything the base contributed — including required
                 # children — is silently absent from the output.
                 ctx.note(
                     "extension_base_not_found", SCHEMA_INCOMPLETE, current.base, current
                 )
+            break
+        chain.append(base)
+        seen.add(base.id)
+        current = base
+    return chain
+
+
+def _attribute_chain(ctx: _Context, ct: ComplexType) -> list[ComplexType]:
+    """``ct`` first, then every complex base it derives from.
+
+    Unlike content, attribute uses are inherited through restriction too: a
+    restriction only redeclares or prohibits them (XBRL linkbase types).
+    """
+    chain = [ct]
+    seen = {ct.id}
+    current = ct
+    while current.derivation in ("extension", "restriction") and current.base:
+        base = ctx.lookup(ctx.complex_by_key, current.base, current)
+        if base is None or base.id in seen:
             break
         chain.append(base)
         seen.add(base.id)
@@ -508,21 +646,23 @@ def _fill_complex(
 ) -> None:
     chain = _base_chain(ctx, ct)
     # Attributes: bases first so the derived type's declarations win on clash.
-    for member in reversed(chain):
-        _fill_attributes(ctx, node, member.attributes, member.attribute_group_refs, set())
+    for member in reversed(_attribute_chain(ctx, ct)):
+        _fill_attributes(ctx, node, member.attributes, member.attribute_group_refs, set(), member)
     if ctx.model.default_attributes and ct.default_attributes_apply:
         group = ctx.lookup(ctx.attr_group_by_key, ctx.model.default_attributes)
         if group is not None:
-            _fill_attributes(ctx, node, group.attributes, group.attribute_group_refs, set())
+            _fill_attributes(ctx, node, group.attributes, group.attribute_group_refs, set(), group)
 
     if ct.content_kind == "simple" or (ct.simple_content_base and not ct.particle):
-        base_name = next((m.simple_content_base for m in chain if m.simple_content_base), None)
+        owner = next((m for m in chain if m.simple_content_base), None)
         facets = [f for m in chain for f in m.simple_content_facets]
-        node.text = _value_for_type_name(ctx, base_name, facets)
+        node.text = _value_for_type_name(
+            ctx, owner.simple_content_base if owner else None, facets, owner
+        )
         return
     if ct.derivation == "restriction" and ct.particle is None and ct.base:
         # A restriction that repeats nothing keeps the base's content.
-        base = ctx.lookup(ctx.complex_by_key, ct.base)
+        base = ctx.lookup(ctx.complex_by_key, ct.base, ct)
         if base is not None and base.id not in type_stack:
             _fill_complex(ctx, node, base, depth=depth, type_stack=type_stack + (base.id,))
             return
@@ -542,7 +682,11 @@ def _fill_complex(
     # Content: bases first (extension appends), then the type's own particle.
     for member in reversed(chain):
         if member.particle is not None:
-            _emit_particle(ctx, node, member.particle, depth=depth + 1, type_stack=type_stack)
+            ctx.file_stack.append(ctx.file_of(member))
+            try:
+                _emit_particle(ctx, node, member.particle, depth=depth + 1, type_stack=type_stack)
+            finally:
+                ctx.file_stack.pop()
     if ct.mixed and len(node) == 0 and not node.text:
         node.text = "text"
 
@@ -550,7 +694,9 @@ def _fill_complex(
 def _attribute_namespace(ctx: _Context, use: AttributeDecl, decl: AttributeDecl) -> str | None:
     if use.ref or decl.is_global:
         return decl.target_namespace or ctx.namespace_of(decl)
-    if (decl.form or ctx.model.attribute_form_default) == "qualified":
+    settings = ctx.settings_of(decl)
+    form = decl.form or (settings.attribute_form if settings else ctx.model.attribute_form_default)
+    if form == "qualified":
         return ctx.namespace_of(decl)
     return None
 
@@ -561,18 +707,24 @@ def _fill_attributes(
     attributes: list[AttributeDecl],
     group_refs: list[str],
     seen_groups: set[str],
+    owner: object | None = None,
 ) -> None:
     for attribute in attributes:
         decl = attribute
         if attribute.ref:
-            target = ctx.lookup(ctx.global_attribute_by_key, attribute.ref)
+            target = ctx.lookup(ctx.global_attribute_by_key, attribute.ref, attribute)
             if target is None:
                 ctx.note(
                     "attribute_ref_not_found", SCHEMA_INCOMPLETE, attribute.ref, attribute
                 )
                 continue
             decl = target
-        if attribute.use == "prohibited" or not decl.name:
+        if not decl.name:
+            continue
+        namespace = _attribute_namespace(ctx, attribute, decl)
+        if attribute.use == "prohibited":
+            # A restriction taking back an attribute its base declared.
+            node.attrib.pop(_tag(namespace, decl.name), None)
             continue
         value = attribute.fixed or decl.fixed or attribute.default or decl.default
         if attribute.use != "required" and not ctx.options.include_optional and value is None:
@@ -581,8 +733,7 @@ def _fill_attributes(
             if decl.type_inline is not None:
                 value = _simple_value(ctx, decl.type_inline, ())
             else:
-                value = _value_for_type_name(ctx, decl.type_name, [])
-        namespace = _attribute_namespace(ctx, attribute, decl)
+                value = _value_for_type_name(ctx, decl.type_name, [], decl)
         if namespace:
             ctx.prefix_for(namespace)
         node.set(_tag(namespace, decl.name), value)
@@ -590,9 +741,9 @@ def _fill_attributes(
         if ref in seen_groups:
             continue
         seen_groups.add(ref)
-        group = ctx.lookup(ctx.attr_group_by_key, ref)
+        group = ctx.lookup(ctx.attr_group_by_key, ref, owner)
         if group is not None:
-            _fill_attributes(ctx, node, group.attributes, group.attribute_group_refs, seen_groups)
+            _fill_attributes(ctx, node, group.attributes, group.attribute_group_refs, seen_groups, group)
 
 
 # ---------------------------------------------------------------------------
@@ -601,9 +752,15 @@ def _fill_attributes(
 
 
 def _occurrences(ctx: _Context, particle: Particle) -> int:
+    if particle.max_occurs == 0:
+        # maxOccurs="0" takes the particle out of the content model (goAML).
+        return 0
     if particle.min_occurs > 0:
         return particle.min_occurs
     if not ctx.options.include_optional:
+        return 0
+    if ctx.emitted >= ctx.options.max_elements:
+        ctx.budget_hit = True
         return 0
     repeatable = particle.max_occurs == "unbounded" or particle.max_occurs > 1
     return ctx.options.repeat if repeatable else 1
@@ -632,7 +789,7 @@ def _emit_particle(
             for child_particle in particle.children:
                 _emit_particle(ctx, parent, child_particle, depth=depth, type_stack=type_stack)
         elif particle.kind == "choice":
-            chosen = _pick_choice(particle.children)
+            chosen = _pick_choice(ctx, particle.children, type_stack)
             if chosen is not None:
                 if chosen.kind != "element":
                     # No branch was a plain element, so we took a group or a
@@ -648,8 +805,15 @@ def _emit_particle(
                 parent.append(etree.Comment(f" group {particle.group_ref} not found in schema "))
                 ctx.note("group_not_found", SCHEMA_INCOMPLETE, particle.group_ref)
                 continue
-            _emit_particle(ctx, parent, group.particle, depth=depth, type_stack=type_stack)
+            ctx.file_stack.append(ctx.file_of(group))
+            try:
+                _emit_particle(ctx, parent, group.particle, depth=depth, type_stack=type_stack)
+            finally:
+                ctx.file_stack.pop()
         elif particle.kind == "any":
+            if particle.min_occurs > 0:
+                _emit_wildcard(ctx, parent, particle, depth=depth, type_stack=type_stack)
+                continue
             parent.append(etree.Comment(" any element allowed here "))
             ctx.note("wildcard_skipped", GENERATOR_LIMIT, "xs:any")
 
@@ -683,18 +847,26 @@ def _emit_element_particle(
     if namespace:
         ctx.prefix_for(namespace)
     child = etree.SubElement(parent, _tag(namespace, declaration.name))
+    ctx.emitted += 1
     if declaration.nillable and _is_empty_decl(declaration):
         child.set(f"{{{XSI_NS}}}nil", "true")
         return
     cuts_before = ctx.cuts
     notes_before = len(ctx.report)
-    _fill_element(ctx, child, declaration, depth=depth, type_stack=type_stack)
+    ctx.open_elements.append(declaration.id)
+    try:
+        _fill_element(ctx, child, declaration, depth=depth, type_stack=type_stack)
+    finally:
+        ctx.open_elements.pop()
     if optional and ctx.cuts > cuts_before:
         # Somewhere below, a required element hit the recursion or depth
-        # guard and stayed empty; that would make the document invalid.
-        # This occurrence is optional, so leave it out instead.
+        # guard, or had an abstract type nothing derives from, and stayed
+        # empty; that would make the document invalid. This occurrence is
+        # optional, so leave it out instead.
         parent.remove(child)
-        parent.append(etree.Comment(f" optional {declaration.name} omitted (recursive or too deep) "))
+        parent.append(
+            etree.Comment(f" optional {declaration.name} omitted: its content cannot be generated ")
+        )
         ctx.cuts = cuts_before
         # The subtree is gone, so its degradations no longer describe the
         # output; the one fact that survives is that we dropped it.
@@ -702,12 +874,134 @@ def _emit_element_particle(
         ctx.note("optional_subtree_dropped", GENERATOR_LIMIT, declaration.name, declaration)
 
 
-def _pick_choice(children: list[Particle]) -> Particle | None:
-    """First branch that is a plain element, else the first branch."""
-    for child in children:
-        if child.kind == "element":
-            return child
-    return children[0] if children else None
+def _pick_choice(
+    ctx: _Context, children: list[Particle], type_stack: tuple[str, ...] = ()
+) -> Particle | None:
+    """A branch that can end, preferring a plain element, then document order.
+
+    A branch that can only be completed by nesting an element or type we are
+    already inside never terminates (JATS: alternatives > array > alternatives),
+    so it is taken only when every branch is like that.
+    """
+    usable = [child for child in children if child.max_occurs != 0]
+    if not usable:
+        return None
+    open_ids = frozenset(ctx.open_elements) | frozenset(type_stack)
+    ctx.cost_steps = 0
+    try:
+        endless = [_occurrence_cost(ctx, child, open_ids, 0)[0] == _ENDLESS for child in usable]
+    except _CostBudgetExceededError:
+        endless = [False] * len(usable)
+    ranked = sorted(range(len(usable)), key=lambda i: (endless[i], usable[i].kind != "element", i))
+    return usable[ranked[0]]
+
+
+_ENDLESS = float("inf")
+_COST_DEPTH = 64
+_COST_STEPS = 20_000
+
+
+class _CostBudgetExceededError(Exception):
+    pass
+
+
+def _required_cost(
+    ctx: _Context, particle: Particle, visiting: frozenset[str], depth: int
+) -> tuple[float, frozenset[str]]:
+    if particle.max_occurs == 0 or particle.min_occurs == 0:
+        return 0, frozenset()
+    cost, hits = _occurrence_cost(ctx, particle, visiting, depth)
+    return cost * particle.min_occurs, hits
+
+
+def _occurrence_cost(
+    ctx: _Context, particle: Particle, visiting: frozenset[str], depth: int
+) -> tuple[float, frozenset[str]]:
+    """Elements one occurrence of ``particle`` needs at least, and which open ids that relied on.
+
+    ``hits`` names the members of ``visiting`` an endless result ran into; a
+    result without hits does not depend on where we are and can be cached.
+    """
+    if particle.kind == "element" and particle.element is not None:
+        return _element_cost(ctx, particle.element, visiting, depth)
+    if particle.kind in ("sequence", "all"):
+        total, hits = 0.0, frozenset()
+        for child in particle.children:
+            cost, child_hits = _required_cost(ctx, child, visiting, depth)
+            total, hits = total + cost, hits | child_hits
+        return total, hits
+    if particle.kind == "choice":
+        best, hits = _ENDLESS, frozenset()
+        for child in particle.children:
+            if child.max_occurs == 0:
+                continue
+            cost, child_hits = _occurrence_cost(ctx, child, visiting, depth)
+            hits |= child_hits
+            best = min(best, cost)
+        return (best, hits) if best == _ENDLESS else (best, frozenset())
+    if particle.kind == "group-ref":
+        group = particle.group_inline
+        if group is None and particle.group_ref:
+            group = ctx.lookup(ctx.group_by_key, particle.group_ref)
+        if group is None or group.particle is None:
+            return 0, frozenset()
+        return _required_cost(ctx, group.particle, visiting, depth)
+    return 1, frozenset()
+
+
+def _element_cost(
+    ctx: _Context, element: ElementDecl, visiting: frozenset[str], depth: int
+) -> tuple[float, frozenset[str]]:
+    ctx.cost_steps += 1
+    if ctx.cost_steps > _COST_STEPS:
+        raise _CostBudgetExceededError
+    declaration = _deref_element(ctx, element)
+    if declaration is not None and declaration.abstract:
+        declaration = _substitution_member(ctx, declaration)
+    if declaration is None:
+        return 1, frozenset()
+    if declaration.id in visiting:
+        return _ENDLESS, frozenset({declaration.id})
+    if depth >= _COST_DEPTH:
+        return _ENDLESS, frozenset({declaration.id})
+    cached = ctx.costs.get(declaration.id)
+    if cached is not None:
+        return cached
+    cost, hits = _declaration_content_cost(ctx, declaration, visiting | {declaration.id}, depth + 1)
+    result = (1 + cost, hits - {declaration.id})
+    if not result[1]:
+        ctx.costs[declaration.id] = result
+    return result
+
+
+def _declaration_content_cost(
+    ctx: _Context, declaration: ElementDecl, visiting: frozenset[str], depth: int
+) -> tuple[float, frozenset[str]]:
+    if declaration.fixed is not None or declaration.type_inline_simple is not None:
+        return 0, frozenset()
+    complex_type = declaration.type_inline_complex
+    if complex_type is None and declaration.type_name:
+        resolved = _resolve_type(ctx, declaration.type_name, declaration, quiet=True)
+        if resolved is None or resolved[0] != "complex":
+            return 0, frozenset()
+        complex_type = resolved[1]
+        if complex_type.abstract:
+            complex_type = _derived_type(ctx, complex_type) or complex_type
+    if complex_type is None:
+        return 0, frozenset()
+    if complex_type.id in visiting:
+        return _ENDLESS, frozenset({complex_type.id})
+    inner = visiting | {complex_type.id}
+    if complex_type.content_kind == "simple" or (
+        complex_type.simple_content_base and not complex_type.particle
+    ):
+        return 0, frozenset()
+    total, hits = 0.0, frozenset()
+    for member in _base_chain(ctx, complex_type, quiet=True):
+        if member.particle is not None:
+            cost, member_hits = _required_cost(ctx, member.particle, inner, depth)
+            total, hits = total + cost, hits | member_hits
+    return total, hits - {complex_type.id}
 
 
 def _is_empty_decl(declaration: ElementDecl) -> bool:
@@ -718,14 +1012,143 @@ def _is_empty_decl(declaration: ElementDecl) -> bool:
     )
 
 
-def _substitution_member(ctx: _Context, head: ElementDecl) -> ElementDecl | None:
-    for candidate in ctx.model.elements:
-        if candidate.abstract or not candidate.substitution_group or not candidate.name:
+def _derived_type(ctx: _Context, base: ComplexType) -> ComplexType | None:
+    """First concrete named complexType derived, directly or not, from ``base``."""
+    if base.id in ctx.derived_types:
+        return ctx.derived_types[base.id]
+    found = None
+    for candidate in ctx.model.complex_types:
+        if candidate.abstract or not candidate.name or candidate.id == base.id:
             continue
-        _, local = ctx.split_qname(candidate.substitution_group)
-        if local == head.name:
-            return candidate
+        current, seen = candidate, {candidate.id}
+        while current.base and found is None:
+            parent = ctx.lookup(ctx.complex_by_key, current.base, current)
+            if parent is None or parent.id in seen:
+                break
+            if parent.id == base.id:
+                found = candidate
+            seen.add(parent.id)
+            current = parent
+        if found is not None:
+            break
+    ctx.derived_types[base.id] = found
+    return found
+
+
+def _type_qname(ctx: _Context, complex_type: ComplexType) -> str:
+    namespace = ctx.namespace_of(complex_type)
+    if not namespace:
+        return complex_type.name or ""
+    prefix = ctx.prefix_for(namespace)
+    ctx.value_prefixes.add(prefix)
+    return f"{prefix}:{complex_type.name}"
+
+
+# Namespace of the made-up element that fills a lax or skip wildcard.
+_FOREIGN_NAMESPACE = "urn:example:any"
+
+
+def _wildcard_allows(constraint: str | None, namespace: str | None, target: str | None) -> bool:
+    tokens = (constraint or "##any").split()
+    if tokens == ["##any"]:
+        return True
+    if tokens == ["##other"]:
+        # XSD 1.0: any namespace except the target one, and never no namespace.
+        return namespace is not None and namespace != target
+    allowed = {target if t == "##targetNamespace" else None if t == "##local" else t for t in tokens}
+    return namespace in allowed
+
+
+def _emit_wildcard(
+    ctx: _Context,
+    parent: etree._Element,
+    particle: Particle,
+    *,
+    depth: int,
+    type_stack: tuple[str, ...],
+) -> None:
+    """Fill a mandatory xs:any, which used to stay empty (XBRL segment).
+
+    A lax or skip wildcard takes a made-up element from an allowed namespace;
+    a strict one needs a global declaration, so one is picked from the schema.
+    """
+    constraint = particle.wildcard_namespace
+    target = ctx.model.target_namespace
+    if particle.wildcard_process_contents in ("lax", "skip"):
+        first = (constraint or "##any").split()[0]
+        namespace = {
+            "##any": _FOREIGN_NAMESPACE,
+            "##other": _FOREIGN_NAMESPACE,
+            "##targetNamespace": target,
+            "##local": None,
+        }.get(first, first)
+        if _wildcard_allows(constraint, namespace, target):
+            if namespace:
+                ctx.prefix_for(namespace)
+            etree.SubElement(parent, _tag(namespace, "any"))
+            ctx.emitted += 1
+            return
+    members = _wildcard_members(ctx, constraint)
+    member = next((m for m in members if m.id not in ctx.open_elements), None)
+    if member is None:
+        parent.append(etree.Comment(" any element allowed here "))
+        if members:
+            # Only the elements we are inside match; nesting one would recurse.
+            ctx.note("wildcard_skipped", GENERATOR_LIMIT, "xs:any")
+        else:
+            ctx.note("wildcard_without_declaration", SCHEMA_INCOMPLETE, constraint or "##any")
+        return
+    _emit_element_particle(ctx, parent, member, depth=depth, type_stack=type_stack)
+
+
+def _wildcard_members(ctx: _Context, constraint: str | None) -> list[ElementDecl]:
+    """Concrete global elements a strict wildcard accepts, in document order."""
+    key = constraint or "##any"
+    if key not in ctx.wildcard_members:
+        target = ctx.model.target_namespace
+        ctx.wildcard_members[key] = [
+            element
+            for element in ctx.model.elements
+            if element.name
+            and not element.abstract
+            and _wildcard_allows(constraint, element.target_namespace or ctx.namespace_of(element), target)
+        ]
+    return ctx.wildcard_members[key]
+
+
+def _substitution_member(ctx: _Context, head: ElementDecl) -> ElementDecl | None:
+    """The nearest concrete element that may stand in for ``head``.
+
+    Substitution groups are transitive, and their middle layers are often
+    abstract themselves (SIRI: AbstractServiceRequest >
+    AbstractFunctionalServiceRequest > StopMonitoringRequest), so the search
+    goes through abstract members, level by level.
+    """
+    queue, seen = [head], {head.id}
+    while queue:
+        current = queue.pop(0)
+        for candidate in _direct_members(ctx, current):
+            if candidate.id in seen:
+                continue
+            seen.add(candidate.id)
+            if not candidate.abstract:
+                return candidate
+            queue.append(candidate)
     return None
+
+
+def _direct_members(ctx: _Context, head: ElementDecl) -> list[ElementDecl]:
+    if ctx.members_by_head is None:
+        ctx.members_by_head = {}
+        for candidate in ctx.model.elements:
+            if candidate.name and candidate.substitution_group:
+                key = ctx.split_qname(candidate.substitution_group, candidate)
+                ctx.members_by_head.setdefault(key, []).append(candidate)
+    exact = ctx.members_by_head.get((head.target_namespace or ctx.namespace_of(head), head.name or ""))
+    if exact:
+        return exact
+    # An undeclared prefix or a chameleon include: match the local name alone.
+    return [m for (_, local), members in ctx.members_by_head.items() if local == head.name for m in members]
 
 
 # ---------------------------------------------------------------------------
@@ -733,10 +1156,12 @@ def _substitution_member(ctx: _Context, head: ElementDecl) -> ElementDecl | None
 # ---------------------------------------------------------------------------
 
 
-def _value_for_type_name(ctx: _Context, type_name: str | None, extra_facets: list[Facet]) -> str:
+def _value_for_type_name(
+    ctx: _Context, type_name: str | None, extra_facets: list[Facet], owner: object | None = None
+) -> str:
     if type_name is None:
         return _builtin_value(ctx, "string", extra_facets)
-    resolved = _resolve_type(ctx, type_name)
+    resolved = _resolve_type(ctx, type_name, owner)
     if resolved is None:
         # A string placeholder for a type we never saw: wrong whenever the
         # real type was numeric, a date, or an enumeration.
@@ -749,7 +1174,7 @@ def _value_for_type_name(ctx: _Context, type_name: str | None, extra_facets: lis
         return _simple_value(ctx, target, (), extra_facets)
     if target.simple_content_base:
         return _value_for_type_name(
-            ctx, target.simple_content_base, extra_facets + target.simple_content_facets
+            ctx, target.simple_content_base, extra_facets + target.simple_content_facets, target
         )
     ctx.note("complex_type_as_text", GENERATOR_LIMIT, type_name)
     return _builtin_value(ctx, "string", extra_facets)
@@ -765,21 +1190,32 @@ def _simple_value(
         ctx.note("simple_recursion", GENERATOR_LIMIT, simple.name, simple)
         return "text"
     stack = stack + (simple.id,)
-    facets = list(simple.facets) + list(extra_facets or [])
+    own = list(simple.facets)
+    extra = list(extra_facets or [])
+    if any(f.kind == "enumeration" for f in extra):
+        # A derived enumeration replaces the base's set rather than adding to it
+        # (SIRI: DaysOfWeekEnumerationx narrows DayTypeEnumeration).
+        own = [f for f in own if f.kind != "enumeration"]
+    facets = own + extra
     if simple.derivation == "list":
         if simple.item_inline is not None:
             return _simple_value(ctx, simple.item_inline, stack)
-        return _value_for_type_name(ctx, simple.item_type, [])
+        return _value_for_type_name(ctx, simple.item_type, [], simple)
     if simple.derivation == "union":
+        enumeration = next((f.value for f in facets if f.kind == "enumeration"), None)
+        if enumeration is not None:
+            # Values enumerated on a restricted union are members by definition;
+            # a sample from its first member type need not be one (SIRI DayType).
+            return enumeration
         if simple.member_types:
-            return _value_for_type_name(ctx, simple.member_types[0], facets)
+            return _value_for_type_name(ctx, simple.member_types[0], facets, simple)
         if simple.member_inline:
-            return _simple_value(ctx, simple.member_inline[0], stack)
+            return _simple_value(ctx, simple.member_inline[0], stack, facets)
         ctx.note("union_without_members", SCHEMA_INCOMPLETE, simple.name, simple)
         return "text"
     # restriction / atomic: walk to the base, accumulating facets.
     if simple.base:
-        resolved = _resolve_type(ctx, simple.base)
+        resolved = _resolve_type(ctx, simple.base, simple)
         if resolved is not None and resolved[0] == "builtin":
             return _builtin_value(ctx, resolved[1], facets)
         if resolved is not None and resolved[0] == "simple":
@@ -822,66 +1258,268 @@ def _enumeration_value(local: str, facets: list[Facet]) -> str | None:
 
 
 def _builtin_value(ctx: _Context, local: str, facets: list[Facet]) -> str:
-    enum = _enumeration_value(local, facets)
-    if enum is not None:
-        return enum
-    if local == "ID":
+    """A value of built-in type ``local`` that satisfies ``facets``.
+
+    Candidates come from the enumeration, the type's placeholder and lexical
+    variants, the range bounds and the pattern sampler. Each one is checked
+    against a throw-away schema carrying the same facets, so a value only goes
+    out once libxml2 accepts it. When nothing passes -- or the facets cannot
+    be checked -- the first candidate is used.
+    """
+    has_enumeration = any(f.kind == "enumeration" for f in facets)
+    if local == "ID" and not has_enumeration:
         return ctx.next_id()
-    if local in _INTEGER_TYPES or local in _DECIMAL_TYPES:
-        return _numeric_value(local, facets)
-    if local not in _BUILTIN_VALUES:
+    known = local in _BUILTIN_VALUES
+    if not known:
         # Not a built-in we know: the value below is a guess.
         ctx.note("builtin_unknown", GENERATOR_LIMIT, local)
-        return _string_value(ctx, local, facets)
-    if local in _STRING_TYPES:
-        return _string_value(ctx, local, facets)
-    return _BUILTIN_VALUES[local]
+    notes_before = len(ctx.report)
+    candidates = _candidates(ctx, local, facets) or ["string"]
+    checker = None
+    if known and facets and local not in _UNCHECKED_TYPES:
+        checker = _value_checker(local, _checkable(facets))
+    if checker is None:
+        return candidates[0]
+    for candidate in candidates:
+        if _accepts(checker, candidate):
+            # The value is valid after all, so nothing noted on the way applies.
+            del ctx.report[notes_before:]
+            return candidate
+    if len(ctx.report) == notes_before:
+        ctx.note("value_unsatisfiable", GENERATOR_LIMIT, local)
+    return candidates[0]
 
 
-def _numeric_value(local: str, facets: list[Facet]) -> str:
+def _candidates(ctx: _Context, local: str, facets: list[Facet]) -> list[str]:
+    enumeration = _enumeration_value(local, facets)
+    if enumeration is not None:
+        # Nothing outside the enumeration can be valid.
+        return _unique([enumeration, *(f.value for f in facets if f.kind == "enumeration")])
+    string_like = local in _STRING_TYPES or local not in _BUILTIN_VALUES
+    if local in _INTEGER_TYPES or local in _DECIMAL_TYPES:
+        values = _numeric_candidates(local, facets)
+    elif string_like:
+        values = _string_candidates(local, facets)
+    else:
+        bounds = [f.value for f in reversed(facets) if f.kind in ("minInclusive", "maxInclusive")]
+        values = [
+            _BUILTIN_VALUES[local],
+            *_VARIANTS.get(local, ()),
+            *bounds,
+            *_binary_candidates(local, facets),
+        ]
+    patterns = _pattern_candidates(ctx, facets)
+    # A string placeholder rarely matches a pattern; a number or a date often does.
+    return _unique(patterns + values if string_like else values + patterns)
+
+
+def _pattern_candidates(ctx: _Context, facets: list[Facet]) -> list[str]:
+    min_length = _int_facet(facets, "length") or _int_facet(facets, "minLength") or 0
+    values: list[str] = []
+    unsupported: str | None = None
+    # Facets run from the base type to the most derived one; the latter is the
+    # tightest, so its pattern goes first.
+    for pattern in [f.value for f in reversed(facets) if f.kind == "pattern"]:
+        shortest = sample_from_pattern(pattern)
+        if shortest is None:
+            unsupported = unsupported or pattern
+            continue
+        values.append(shortest)
+        if len(shortest) < min_length:
+            for stretch in (min_length, 1):
+                longer = sample_from_pattern(pattern, stretch=stretch)
+                if longer is not None:
+                    values.append(longer)
+    if unsupported is not None and not values:
+        # We could not read the pattern, so the placeholder will almost
+        # certainly violate it — a prime source of invalid samples.
+        ctx.note("pattern_unsupported", GENERATOR_LIMIT, unsupported)
+    return values
+
+
+def _binary_candidates(local: str, facets: list[Facet]) -> list[str]:
+    """Zero octets at the lengths the facets ask for -- binary lengths count octets (UCI SHA_2_Hash)."""
+    if local not in ("hexBinary", "base64Binary"):
+        return []
+    values = []
+    for kind in ("length", "minLength", "maxLength"):
+        size = _int_facet(facets, kind)
+        if size is None or size > 65_536:
+            continue
+        octets = bytes(size)
+        values.append(octets.hex() if local == "hexBinary" else base64.b64encode(octets).decode("ascii"))
+    return values
+
+
+def _string_candidates(local: str, facets: list[Facet]) -> list[str]:
+    base = _BUILTIN_VALUES.get(local, "string")
+    length = _int_facet(facets, "length")
+    if length is not None:
+        return [_sized(base, length)]
+    size = len(base)
+    min_length = _int_facet(facets, "minLength")
+    max_length = _int_facet(facets, "maxLength")
+    if min_length is not None:
+        size = max(size, min_length)
+    if max_length is not None:
+        size = min(size, max_length)
+    return [_sized(base, size), base]
+
+
+def _sized(base: str, size: int) -> str:
+    return (base * (size // max(len(base), 1) + 1))[:size] if size > 0 else ""
+
+
+# A lower bound up to this size reads naturally as the sample (an age of 0);
+# beyond it the type's own placeholder is nicer, when it is in range.
+_SMALL_BOUND = Decimal(1_000_000)
+
+
+def _numeric_candidates(local: str, facets: list[Facet]) -> list[str]:
+    """In-range numbers, computed in Decimal: floats turned ±99999999999999999999.99 into ±1E20."""
     integer = local in _INTEGER_TYPES
-    fraction = _facet(facets, "fractionDigits")
-    digits = int(fraction) if fraction and fraction.isdigit() else 1
+    fraction = _int_facet(facets, "fractionDigits")
+    places = 0 if integer else (fraction if fraction is not None else 1)
+    quantum = Decimal(1).scaleb(-places)
+    with localcontext() as context:
+        context.prec = 1000  # double bounds reach 1.8E308
+        lo = _bound(facets, "minInclusive", "minExclusive", quantum, ROUND_CEILING)
+        hi = _bound(facets, "maxInclusive", "maxExclusive", -quantum, ROUND_FLOOR)
+        options: list[Decimal] = []
+        if lo is not None and abs(lo) <= _SMALL_BOUND:
+            options.append(lo)
+        options += [Decimal(_BUILTIN_VALUES.get(local, "1")), Decimal(1), Decimal(0)]
+        options += [value for value in (lo, hi) if value is not None]
+        if lo is not None and hi is not None:
+            options.append(((lo + hi) / 2).quantize(quantum, rounding=ROUND_FLOOR))
+        inside = [v for v in options if (lo is None or v >= lo) and (hi is None or v <= hi)]
+        return _unique(format(v.quantize(quantum), "f") for v in (inside or options))
 
-    def fmt(value: float) -> str:
-        if integer or digits == 0:
-            return str(int(value))
-        return f"{value:.{digits}f}"
 
-    for kind in ("minInclusive", "minExclusive", "maxInclusive", "maxExclusive"):
-        raw = _facet(facets, kind)
-        if raw is None:
+def _bound(
+    facets: list[Facet], inclusive: str, exclusive: str, nudge: Decimal, rounding: str
+) -> Decimal | None:
+    """The most derived bound of one side, rounded onto the value grid."""
+    for facet in reversed(facets):
+        if facet.kind not in (inclusive, exclusive):
             continue
         try:
-            number = float(raw)
-        except ValueError:
+            value = Decimal(facet.value.strip())
+        except InvalidOperation:
             continue
-        if kind == "minExclusive":
-            number += 1
-        elif kind == "maxExclusive":
-            number -= 1
-        if kind.startswith("max") and number > 0:
-            # Prefer the smallest sensible value below the maximum.
-            number = min(number, 1 if integer else 0.0)
-        return fmt(number)
-    return fmt(float(_BUILTIN_VALUES.get(local, "1")))
+        if not value.is_finite():
+            continue
+        rounded = value.quantize(abs(nudge), rounding=rounding)
+        if facet.kind == exclusive and rounded == value:
+            rounded += nudge
+        return rounded
+    return None
 
 
-def _string_value(ctx: _Context, local: str, facets: list[Facet]) -> str:
-    pattern = _facet(facets, "pattern")
-    if pattern is not None:
-        sample = sample_from_pattern(pattern)
-        if sample is not None:
-            return sample
-        # We could not read the pattern, so the placeholder below will almost
-        # certainly violate it — a prime source of invalid samples.
-        ctx.note("pattern_unsupported", GENERATOR_LIMIT, pattern)
-    base = _BUILTIN_VALUES.get(local, "string")
-    length = _facet(facets, "length") or _facet(facets, "minLength")
-    max_length = _facet(facets, "maxLength")
-    if length and length.isdigit():
-        n = int(length)
-        return (base * (n // max(len(base), 1) + 1))[:n] if n > 0 else ""
-    if max_length and max_length.isdigit():
-        return base[: int(max_length)]
-    return base
+def _int_facet(facets: list[Facet], kind: str) -> int | None:
+    for facet in reversed(facets):
+        if facet.kind == kind and facet.value.strip().isdigit():
+            return int(facet.value)
+    return None
+
+
+def _unique(values) -> list[str]:  # noqa: ANN001 - any iterable of str
+    return list(dict.fromkeys(values))
+
+
+# Lexical variants tried after the placeholder, e.g. when a pattern insists on
+# a time zone (UCI: ``.+Z``).
+_VARIANTS: dict[str, tuple[str, ...]] = {
+    "dateTime": (
+        "2026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00+00:00",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000",
+    ),
+    "date": ("2026-01-01Z", "2026-01-01+00:00"),
+    "time": ("00:00:00Z", "00:00:00+00:00", "00:00:00.000"),
+    "gYear": ("2026Z",),
+    "gYearMonth": ("2026-01Z",),
+    "gMonth": ("--01Z",),
+    "gMonthDay": ("--01-01Z",),
+    "gDay": ("---01Z",),
+    "duration": ("PT1H", "P1Y", "PT0S"),
+    "boolean": ("false", "1", "0"),
+    "language": ("en-US", "de"),
+    "hexBinary": ("0000",),
+    "base64Binary": ("AAAA",),
+}
+
+# Facets a one-off XSD 1.0 restriction can carry. Anything else (XSD 1.1
+# assertions, explicitTimezone) is left out of the check.
+_CHECKABLE_FACETS = {
+    "length",
+    "minLength",
+    "maxLength",
+    "pattern",
+    "enumeration",
+    "whiteSpace",
+    "maxInclusive",
+    "maxExclusive",
+    "minInclusive",
+    "minExclusive",
+    "totalDigits",
+    "fractionDigits",
+}
+# Types whose values a stand-alone element cannot check: identity and entity
+# references need the rest of the document, QNames a namespace context, and
+# libxml2 does not know the XSD 1.1 additions.
+_UNCHECKED_TYPES = {
+    "ID",
+    "IDREF",
+    "IDREFS",
+    "ENTITY",
+    "ENTITIES",
+    "QName",
+    "NOTATION",
+    "anyType",
+    "anySimpleType",
+    "anyAtomicType",
+    "dateTimeStamp",
+    "dayTimeDuration",
+    "yearMonthDuration",
+}
+
+
+def _checkable(facets: list[Facet]) -> tuple[tuple[str, str], ...]:
+    """Hashable facet list for the checker: repeatable facets all, the others most derived."""
+    single: dict[str, str] = {}
+    repeatable: list[tuple[str, str]] = []
+    for facet in facets:
+        if facet.kind not in _CHECKABLE_FACETS:
+            continue
+        if facet.kind in ("pattern", "enumeration"):
+            repeatable.append((facet.kind, facet.value))
+        else:
+            single[facet.kind] = facet.value
+    return tuple(repeatable) + tuple(single.items())
+
+
+@lru_cache(maxsize=4096)
+def _value_checker(local: str, facets: tuple[tuple[str, str], ...]) -> etree.XMLSchema | None:
+    """A one-element schema accepting exactly the values of ``local`` under ``facets``."""
+    body = "".join(f"<xs:{kind} value={quoteattr(value)}/>" for kind, value in facets)
+    xsd = (
+        f'<xs:schema xmlns:xs="{XSD_NS}"><xs:element name="v"><xs:simpleType>'
+        f'<xs:restriction base="xs:{local}">{body}</xs:restriction>'
+        "</xs:simpleType></xs:element></xs:schema>"
+    )
+    try:
+        return etree.XMLSchema(etree.fromstring(xsd))
+    except (etree.XMLSchemaParseError, etree.XMLSyntaxError):
+        # Contradictory facets (minInclusive next to minExclusive) and the like.
+        return None
+
+
+def _accepts(checker: etree.XMLSchema, value: str) -> bool:
+    element = etree.Element("v")
+    try:
+        element.text = value
+    except ValueError:  # a control character no XML document can carry
+        return False
+    return bool(checker.validate(element))

@@ -155,6 +155,25 @@ the secrets.
 Quick overview: `python3 tools/usage_report.py [--days 30]` (read-only; password
 from `$USAGE_DB_PASSWORD` or Secret Manager via gcloud).
 
+Sample generator audit: `sample_issue` only sees the samples people happened to
+generate. `tools/sample_audit.py` replays the generator over every schema loaded
+by URL — a sample for every global element, with and without optional content,
+each validated against its schema — and writes `results/*.jsonl`, the invalid
+samples and a `summary.json` of error clusters and report reasons:
+
+```bash
+# URL list (read-only)
+psql … -At -c "SELECT DISTINCT schema_name FROM usage_event
+               WHERE event_type='schema_load' AND source='url' AND status='ok'" > urls.txt
+python3 tools/sample_audit.py --urls urls.txt --out audit/before --cache-dir audit/cache
+# … fix the generator …
+python3 tools/sample_audit.py --urls urls.txt --out audit/after --cache-dir audit/cache-after
+python3 tools/sample_audit.py --compare audit/before audit/after   # exit 1 on regressions
+```
+
+Keep the output and cache outside the repo — they hold the publishers' schemas.
+A parser change needs a fresh `--cache-dir`: the cache stores parsed models.
+
 Connect directly:
 `psql "postgresql://xsdviewer:…@62.238.116.11:5432/xsdviewer_stats?sslmode=require"`
 (or from the VPS via `127.0.0.1`). Useful queries:

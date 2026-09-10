@@ -539,7 +539,7 @@ class XsdParser:
                 filename=loaded.filename,
                 target_namespace=loaded.target_ns,
                 relationship=loaded.relationship,
-                content=loaded.raw_content.decode("utf-8", errors="replace"),
+                content=_decode_source(loaded.raw_content, loaded.tree),
             )
             model.files.append(source)
 
@@ -1348,6 +1348,18 @@ def _detect_xsd_version(files: list[_LoadedFile], main: _LoadedFile) -> XsdVersi
     if explicit and explicit.startswith("1.1"):
         return "1.1"
     return "1.0"
+
+
+def _decode_source(raw: bytes, tree: etree._ElementTree) -> str:
+    """Source text for the Text tab and for validation.
+
+    Decoded with the encoding the parser found (XML declaration or BOM), not
+    blindly as UTF-8: a windows-1251 schema otherwise loses every Cyrillic name.
+    """
+    try:
+        return raw.decode(tree.docinfo.encoding or "utf-8", errors="replace")
+    except LookupError:
+        return raw.decode("utf-8", errors="replace")
 
 
 # ---------------------------------------------------------------------------

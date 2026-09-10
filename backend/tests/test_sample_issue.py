@@ -80,6 +80,21 @@ def test_unresolved_extension_base_is_reported() -> None:
     assert counts["extension_base_not_found"] == 1
 
 
+@pytest.mark.parametrize("base", ["xs:decimal", "Money"])
+def test_simple_content_extension_of_a_simple_type_is_not_a_missing_base(base: str) -> None:
+    """A simpleContent base is a simple type -- there is no complexType to find."""
+    body = (
+        '<xs:element name="A" type="Amount"/>'
+        '<xs:simpleType name="Money"><xs:restriction base="xs:decimal"/></xs:simpleType>'
+        '<xs:complexType name="Amount"><xs:simpleContent>'
+        f'<xs:extension base="{base}">'
+        '<xs:attribute name="currency" type="xs:string" use="required"/>'
+        "</xs:extension></xs:simpleContent></xs:complexType>"
+    )
+    _, counts = _report_for(body)
+    assert counts == {}
+
+
 def test_unresolved_attribute_ref_is_reported() -> None:
     """Previously silent: the attribute is simply dropped."""
     _, counts = _report_for(
@@ -125,6 +140,16 @@ def test_wildcard_is_reported() -> None:
         "</xs:sequence></xs:complexType></xs:element>"
     )
     assert counts == {"wildcard_skipped": 1}
+
+
+def test_strict_wildcard_without_a_matching_declaration_is_schema_incomplete() -> None:
+    """Nothing in the schema may appear there -- the declaring import is missing."""
+    _, counts = _report_for(
+        '<xs:element name="A"><xs:complexType><xs:sequence>'
+        '<xs:any namespace="urn:elsewhere" processContents="strict"/>'
+        "</xs:sequence></xs:complexType></xs:element>"
+    )
+    assert counts == {"wildcard_without_declaration": 1}
 
 
 def test_dropped_optional_subtree_replaces_its_own_entries() -> None:

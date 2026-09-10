@@ -16,7 +16,7 @@ _ESCAPES = {
     "s": " ",
     "S": "a",
     "i": "a",
-    "I": "a",
+    "I": "0",  # not a name-start character
     "c": "a",
     "C": " ",
     "n": "\n",
@@ -30,9 +30,10 @@ class _UnsupportedError(Exception):
 
 
 class _Parser:
-    def __init__(self, pattern: str) -> None:
+    def __init__(self, pattern: str, stretch: int = 0) -> None:
         self.s = pattern
         self.i = 0
+        self.stretch = stretch
 
     def peek(self) -> str | None:
         return self.s[self.i] if self.i < len(self.s) else None
@@ -74,7 +75,9 @@ class _Parser:
     def piece(self) -> str:
         atom = self.atom()
         lo, hi = self.quantifier()
-        count = lo if lo > 0 else (0 if hi == 0 else 0)
+        count = lo
+        if self.stretch > lo:
+            count = self.stretch if hi is None else min(hi, self.stretch)
         return atom * count
 
     def quantifier(self) -> tuple[int, int | None]:
@@ -125,8 +128,8 @@ class _Parser:
             return self.escape()
         if ch == ".":
             return "a"
-        if ch in "^$":
-            return ""
+        # ``^`` and ``$`` are not anchors in XSD regexes (every pattern is
+        # implicitly anchored), so they fall through as literal characters.
         if ch in "*+?{":
             raise _UnsupportedError
         return ch
@@ -201,10 +204,16 @@ class _Parser:
         return self.s[j] if j < len(self.s) else None
 
 
-def sample_from_pattern(pattern: str) -> str | None:
-    """Return a string matching ``pattern`` or ``None`` when unsupported."""
+def sample_from_pattern(pattern: str, stretch: int = 0) -> str | None:
+    """Return a string matching ``pattern`` or ``None`` when unsupported.
+
+    By default every quantifier takes its minimum, which gives the shortest
+    match -- often the empty string. ``stretch`` repeats open or ranged
+    quantifiers up to that many times (within their bounds), which is how a
+    caller reaches a ``minLength``.
+    """
     try:
-        parser = _Parser(pattern)
+        parser = _Parser(pattern, stretch)
         result = parser.alternation()
         if parser.peek() is not None:
             return None

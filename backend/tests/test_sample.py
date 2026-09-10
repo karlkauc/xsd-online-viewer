@@ -278,3 +278,361 @@ def test_a_type_found_only_by_local_name_is_reported() -> None:
     assert report.counts.get("type_resolved_by_local_name") == 1
     assert [e.category for e in report.entries] == [GENERATOR_LIMIT]
     assert report.entries[0].where == "undeclared:GTDIDType"
+
+
+# ---------------------------------------------------------------------------
+# Found by tools/sample_audit.py over schemas users loaded by URL (2026-09-10)
+# ---------------------------------------------------------------------------
+
+
+def _simple_schema(restriction: str, base: str = "xs:string") -> bytes:
+    return f"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="V"><xs:simpleType><xs:restriction base="{base}">
+    {restriction}
+  </xs:restriction></xs:simpleType></xs:element>
+</xs:schema>""".encode()
+
+
+def test_prohibited_particle_is_never_emitted() -> None:
+    """maxOccurs="0" removes a particle; optional mode used to emit it once (goAML)."""
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="Address"><xs:complexType><xs:sequence>
+    <xs:element name="City" type="xs:string"/>
+    <xs:element name="Geo" type="xs:string" minOccurs="0" maxOccurs="0"/>
+    <xs:element name="Comments" type="xs:string" minOccurs="0"/>
+  </xs:sequence></xs:complexType></xs:element>
+</xs:schema>"""
+    model = parse_single(xsd, "address.xsd")
+    xml, root = _sample(model, "element:Address", include_optional=True)
+    assert [child.tag for child in root] == ["City", "Comments"]
+    assert validate_xml(model, xml.encode("utf-8")).is_valid
+
+
+@pytest.mark.parametrize("pattern", ["[a-zA-Z0-9-]*", "\\d{0,5}"])
+def test_pattern_sample_meets_min_length(pattern: str) -> None:
+    """The shortest match of ``x*`` is empty, which minLength rejects (AEAT modelo 170)."""
+    model = parse_single(
+        _simple_schema(
+            f'<xs:minLength value="3"/><xs:maxLength value="50"/><xs:pattern value="{pattern}"/>'
+        ),
+        "v.xsd",
+    )
+    xml, root = _sample(model, "element:V")
+    assert len(root.text or "") >= 3
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+@pytest.mark.parametrize(
+    "facets",
+    [
+        '<xs:minInclusive value="-99999999999999999999.99"/>'
+        '<xs:maxInclusive value="99999999999999999999.99"/>'
+        '<xs:fractionDigits value="2"/><xs:totalDigits value="22"/>',
+        '<xs:minExclusive value="1000"/><xs:maxExclusive value="1001"/>'
+        '<xs:fractionDigits value="1"/>',
+    ],
+)
+def test_decimal_value_lies_inside_its_facets(facets: str) -> None:
+    """Float arithmetic turned -99999999999999999999.99 into -1E20 (AEAT modelo 170)."""
+    model = parse_single(_simple_schema(facets, base="xs:decimal"), "v.xsd")
+    xml, _ = _sample(model, "element:V")
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+@pytest.mark.parametrize(
+    ("base", "pattern"),
+    [
+        ("xs:dateTime", ".+Z"),
+        ("xs:date", "\\d{4}-\\d{2}-\\d{2}Z"),
+        ("xs:decimal", "\\d+\\.\\d{2}"),
+    ],
+)
+def test_pattern_on_a_non_string_builtin_is_honoured(base: str, pattern: str) -> None:
+    """Patterns were only read for string types; UCI demands a trailing Z on dateTimes."""
+    model = parse_single(_simple_schema(f'<xs:pattern value="{pattern}"/>', base=base), "v.xsd")
+    xml, _ = _sample(model, "element:V")
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+_ABSTRACT_TYPE = """<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:t="urn:t"
+           targetNamespace="urn:t" elementFormDefault="qualified">
+  <xs:element name="Activity"><xs:complexType><xs:sequence>
+    <xs:element name="Creator" type="t:AbstractSource_t"/>
+  </xs:sequence></xs:complexType></xs:element>
+  <xs:complexType name="AbstractSource_t" abstract="true"><xs:sequence>
+    <xs:element name="Name" type="xs:string"/>
+  </xs:sequence></xs:complexType>
+  <xs:complexType name="Device_t"><xs:complexContent>
+    <xs:extension base="t:AbstractSource_t"><xs:sequence>
+      <xs:element name="UnitId" type="xs:unsignedInt"/>
+    </xs:sequence></xs:extension>
+  </xs:complexContent></xs:complexType>
+</xs:schema>"""
+
+
+def test_abstract_type_is_replaced_by_a_derived_type_via_xsi_type() -> None:
+    """An element of an abstract type needs xsi:type (Garmin TrainingCenterDatabase)."""
+    model = parse_single(_ABSTRACT_TYPE.encode(), "tcx.xsd")
+    xml, root = _sample(model, "element:{urn:t}Activity")
+    creator = root.find("{urn:t}Creator")
+    prefix, _, local = creator.get("{http://www.w3.org/2001/XMLSchema-instance}type").rpartition(":")
+    assert local == "Device_t"
+    assert creator.nsmap.get(prefix or None) == "urn:t"
+    assert [child.tag for child in creator] == ["{urn:t}Name", "{urn:t}UnitId"]
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+def test_abstract_type_without_a_derived_type_is_reported() -> None:
+    xsd = _ABSTRACT_TYPE.split("  <xs:complexType name=\"Device_t\">")[0] + "</xs:schema>"
+    model = parse_single(xsd.encode(), "tcx.xsd")
+    element = find_element(model, "element:{urn:t}Activity")
+    _, report = generate_sample_with_report(model, element, SampleOptions())
+    assert report.counts == {"abstract_type_without_derivation": 1}
+
+
+@pytest.mark.parametrize(
+    "wildcard",
+    [
+        'namespace="##other" processContents="lax"',
+        'namespace="##any" processContents="skip"',
+        'namespace="##local" processContents="lax"',
+        'namespace="##targetNamespace" processContents="strict"',
+    ],
+)
+def test_required_wildcard_is_filled(wildcard: str) -> None:
+    """A mandatory xs:any used to stay empty, so the parent was incomplete (XBRL segment)."""
+    xsd = f"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:t="urn:t"
+           targetNamespace="urn:t" elementFormDefault="qualified">
+  <xs:element name="Segment"><xs:complexType><xs:sequence>
+    <xs:any {wildcard}/>
+  </xs:sequence></xs:complexType></xs:element>
+  <xs:element name="Member" type="xs:string"/>
+</xs:schema>""".encode()
+    model = parse_single(xsd, "segment.xsd")
+    xml, root = _sample(model, "element:{urn:t}Segment")
+    assert len(root) == 1
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+def _fan_out_schema(levels: int, width: int) -> bytes:
+    parts = [
+        '<?xml version="1.0"?><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">',
+        '<xs:element name="Root" type="L0"/>',
+    ]
+    for level in range(levels):
+        children = "".join(
+            f'<xs:element name="E{level}_{i}" type="L{level + 1}" minOccurs="0"/>' for i in range(width)
+        )
+        parts.append(
+            f'<xs:complexType name="L{level}"><xs:sequence>{children}</xs:sequence></xs:complexType>'
+        )
+    parts.append(f'<xs:simpleType name="L{levels}"><xs:restriction base="xs:string"/></xs:simpleType>')
+    parts.append("</xs:schema>")
+    return "".join(parts).encode()
+
+
+def test_optional_content_stops_at_the_element_budget() -> None:
+    """Without a budget, optional fan-out ran for minutes (JATS: 260k elements in 20 s)."""
+    model = parse_single(_fan_out_schema(levels=6, width=6), "fan.xsd")
+    element = find_element(model, "element:Root")
+    xml, report = generate_sample_with_report(
+        model, element, SampleOptions(include_optional=True, max_elements=300)
+    )
+    root = etree.fromstring(xml.encode("utf-8"))
+    assert sum(1 for _ in root.iter(etree.Element)) <= 300
+    assert report.counts == {"size_limit": 1}
+    assert validate_xml(model, xml.encode("utf-8")).is_valid
+
+
+# A main file without elementFormDefault importing a qualified file that uses
+# its own default namespace -- the SIRI layout.
+_FORM_FILES = {
+    "main.xsd": b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:c="urn:c" targetNamespace="urn:m">
+  <xs:import namespace="urn:c" schemaLocation="common.xsd"/>
+  <xs:element name="Request" type="c:RequestType"/>
+</xs:schema>""",
+    "common.xsd": b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="urn:c"
+           targetNamespace="urn:c" elementFormDefault="qualified">
+  <xs:complexType name="RequestType"><xs:sequence>
+    <xs:element name="Context" type="ContextType"/>
+  </xs:sequence></xs:complexType>
+  <xs:complexType name="ContextType"><xs:sequence>
+    <xs:element name="Address" type="xs:string"/>
+  </xs:sequence></xs:complexType>
+</xs:schema>""",
+}
+
+
+def test_element_form_and_default_namespace_come_from_the_declaring_file() -> None:
+    """SIRI: local elements of the qualified import came out unqualified, and its
+    unprefixed type names were only found by guessing."""
+    model = parse_files_map(_FORM_FILES, "main.xsd")
+    element = find_element(model, "element:{urn:m}Request")
+    xml, report = generate_sample_with_report(model, element, SampleOptions())
+    root = etree.fromstring(xml.encode("utf-8"))
+    assert [child.tag for child in root] == ["{urn:c}Context"]
+    assert root[0][0].tag == "{urn:c}Address"
+    assert report.counts == {}
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+def test_choice_prefers_a_branch_that_terminates() -> None:
+    """JATS alternatives: the first branch nests back into the element and never ends."""
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:group name="alternatives-model"><xs:choice>
+    <xs:element ref="array"/>
+    <xs:element ref="code"/>
+  </xs:choice></xs:group>
+  <xs:element name="alternatives"><xs:complexType>
+    <xs:group ref="alternatives-model" maxOccurs="unbounded"/>
+  </xs:complexType></xs:element>
+  <xs:element name="array"><xs:complexType><xs:sequence>
+    <xs:element ref="alternatives"/>
+  </xs:sequence></xs:complexType></xs:element>
+  <xs:element name="code" type="xs:string"/>
+</xs:schema>"""
+    model = parse_single(xsd, "jats.xsd")
+    element = find_element(model, "element:alternatives")
+    xml, report = generate_sample_with_report(model, element, SampleOptions())
+    assert report.counts == {}
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+def test_complex_restriction_keeps_the_base_attributes() -> None:
+    """XBRL linkbase: a restriction inherits every attribute use it does not prohibit."""
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:complexType name="ExtendedType">
+    <xs:sequence>
+      <xs:element name="Loc" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="type" type="xs:string" use="required" fixed="extended"/>
+    <xs:attribute name="role" type="xs:anyURI" use="required"/>
+    <xs:attribute name="title" type="xs:string"/>
+  </xs:complexType>
+  <xs:element name="Link"><xs:complexType><xs:complexContent>
+    <xs:restriction base="ExtendedType">
+      <xs:sequence>
+        <xs:element name="Loc" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+      <xs:attribute name="title" use="prohibited"/>
+    </xs:restriction>
+  </xs:complexContent></xs:complexType></xs:element>
+</xs:schema>"""
+    model = parse_single(xsd, "link.xsd")
+    xml, root = _sample(model, "element:Link", include_optional=True)
+    assert root.get("type") == "extended"
+    assert root.get("role") is not None
+    assert root.get("title") is None
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+def test_abstract_head_is_substituted_through_an_abstract_member() -> None:
+    """SIRI: AbstractServiceRequest > AbstractFunctionalServiceRequest (abstract) > StopMonitoringRequest.
+
+    Only direct, concrete members were looked at, so the chain looked empty and
+    the sample kept the abstract element -- blamed on the schema.
+    """
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="AbstractRequest" abstract="true" type="xs:string"/>
+  <xs:element name="AbstractFunctionalRequest" abstract="true" type="xs:string"
+              substitutionGroup="AbstractRequest"/>
+  <xs:element name="StopRequest" type="xs:string" substitutionGroup="AbstractFunctionalRequest"/>
+  <xs:element name="Service"><xs:complexType><xs:sequence>
+    <xs:element ref="AbstractRequest"/>
+  </xs:sequence></xs:complexType></xs:element>
+</xs:schema>"""
+    model = parse_single(xsd, "siri.xsd")
+    for element_id in ("element:Service", "element:AbstractRequest"):
+        element = find_element(model, element_id)
+        xml, report = generate_sample_with_report(model, element, SampleOptions())
+        root = etree.fromstring(xml.encode("utf-8"))
+        assert "StopRequest" in {el.tag for el in root.iter(etree.Element)}, xml
+        assert report.counts == {}
+        assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+def test_enumeration_on_a_restricted_union_wins() -> None:
+    """SIRI DayType: the enumeration restricting a union was dropped for inline members."""
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="AnyDay"><xs:union>
+    <xs:simpleType><xs:restriction base="xs:string">
+      <xs:pattern value="pti[0-9]+_[0-9]+"/>
+    </xs:restriction></xs:simpleType>
+    <xs:simpleType><xs:restriction base="xs:string">
+      <xs:enumeration value="monday"/>
+    </xs:restriction></xs:simpleType>
+  </xs:union></xs:simpleType>
+  <xs:element name="DayType"><xs:simpleType>
+    <xs:restriction base="AnyDay">
+      <xs:enumeration value="monday"/><xs:enumeration value="pti34_0"/>
+    </xs:restriction>
+  </xs:simpleType></xs:element>
+</xs:schema>"""
+    model = parse_single(xsd, "day.xsd")
+    xml, root = _sample(model, "element:DayType")
+    assert root.text in {"monday", "pti34_0"}
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+def test_optional_element_of_an_underivable_abstract_type_is_left_out() -> None:
+    """UCI ExtensionData: nothing derives from the abstract type, so it cannot be filled.
+
+    The element is optional, so it is left out.
+    """
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:complexType name="ExtensionType" abstract="true"><xs:sequence>
+    <xs:element name="Key" type="xs:string"/>
+  </xs:sequence></xs:complexType>
+  <xs:element name="Policy"><xs:complexType><xs:sequence>
+    <xs:element name="Name" type="xs:string"/>
+    <xs:element name="ExtensionData" type="ExtensionType" minOccurs="0"/>
+  </xs:sequence></xs:complexType></xs:element>
+</xs:schema>"""
+    model = parse_single(xsd, "uci.xsd")
+    xml, root = _sample(model, "element:Policy", include_optional=True)
+    assert root.find("ExtensionData") is None
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+@pytest.mark.parametrize(
+    ("base", "facet"),
+    [
+        ("xs:hexBinary", '<xs:length value="32"/>'),
+        ("xs:base64Binary", '<xs:length value="4"/>'),
+        ("xs:hexBinary", '<xs:minLength value="3"/>'),
+    ],
+)
+def test_binary_value_meets_its_length_in_octets(base: str, facet: str) -> None:
+    """UCI SHA_2_Hash: the length of hexBinary and base64Binary counts octets."""
+    model = parse_single(_simple_schema(facet, base=base), "v.xsd")
+    xml, _ = _sample(model, "element:V")
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+def test_most_derived_enumeration_wins() -> None:
+    """SIRI DaysOfWeekEnumerationx narrows DayTypeEnumeration; the base's first value is not allowed."""
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="DayTypeEnumeration"><xs:restriction base="xs:NMTOKEN">
+    <xs:enumeration value="pti34_0"/><xs:enumeration value="unknown"/><xs:enumeration value="monday"/>
+  </xs:restriction></xs:simpleType>
+  <xs:simpleType name="DaysOfWeek"><xs:restriction base="DayTypeEnumeration">
+    <xs:enumeration value="unknown"/><xs:enumeration value="monday"/>
+  </xs:restriction></xs:simpleType>
+  <xs:element name="DayType" type="DaysOfWeek"/>
+</xs:schema>"""
+    model = parse_single(xsd, "days.xsd")
+    xml, root = _sample(model, "element:DayType")
+    assert root.text in {"unknown", "monday"}
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml

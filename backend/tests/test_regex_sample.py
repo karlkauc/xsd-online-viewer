@@ -32,6 +32,18 @@ def test_sample_matches_its_pattern(pattern: str) -> None:
     assert re.fullmatch(pattern.replace("-[aeiou]", ""), sample) is not None, (pattern, sample)
 
 
+def test_caret_and_dollar_are_ordinary_characters() -> None:
+    """XSD regexes are implicitly anchored; libxml2 matches ^ and $ literally."""
+    assert sample_from_pattern("^[A-Z]{2}$") == "^AA$"
+
+
+@pytest.mark.parametrize("pattern", ["\\I", "[\\I]"])
+def test_not_name_start_escape_yields_a_non_name_start_char(pattern: str) -> None:
+    sample = sample_from_pattern(pattern)
+    assert sample is not None and len(sample) == 1
+    assert not (sample.isalpha() or sample in "_:"), sample
+
+
 def test_unsupported_constructs_return_none() -> None:
     assert sample_from_pattern("\\p{L}+") is None
     assert sample_from_pattern("(?:x)") is None
