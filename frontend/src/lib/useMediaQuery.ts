@@ -7,6 +7,10 @@ import { useCallback, useSyncExternalStore } from "react";
 export const SM_QUERY = "(min-width: 640px)";
 export const MD_QUERY = "(min-width: 768px)";
 export const LG_QUERY = "(min-width: 1024px)";
+// Wide enough for every secondary header action inline next to the title
+// (`2xl`). With a schema loaded they need about 1,350 px, more with wider
+// system fonts; at `lg` they ran over the title up to that width.
+export const HEADER_ACTIONS_QUERY = "(min-width: 1536px)";
 export const COARSE_POINTER_QUERY = "(pointer: coarse)";
 
 export function matchesMediaQuery(query: string): boolean {

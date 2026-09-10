@@ -86,3 +86,23 @@ test("the header title links back to a clean start page", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Load an XSD schema" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Load a different schema file" })).toHaveCount(0);
 });
+
+for (const width of [1024, 1280, 1440, 1600]) {
+  test(`header actions never cover the title at ${width}px`, async ({ page }) => {
+    // With a schema loaded every header action is present. Inline, they used
+    // to run over the title from 1024 px up to about 1350 px, so a click on
+    // "Online XSD Viewer" hit the "Load new" button instead (CI, 2026-09).
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto("/");
+    await page.locator('input[type="file"]').setInputFiles(SIMPLE_XSD);
+    const loadNew = page.getByRole("button", { name: "Load a different schema file" });
+    await expect(loadNew).toBeVisible();
+    const title = await page.getByRole("link", { name: "Online XSD Viewer" }).boundingBox();
+    const actions = await loadNew.boundingBox();
+    expect(title).not.toBeNull();
+    expect(actions).not.toBeNull();
+    expect(title!.x + title!.width).toBeLessThanOrEqual(actions!.x);
+    const header = await page.getByRole("banner").evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(header).toBeLessThanOrEqual(0);
+  });
+}

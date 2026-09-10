@@ -19,7 +19,7 @@ import { FREEXMLTOOLKIT_GO, XML_VIEWER_URL } from "./lib/links";
 import { DesktopAppCard } from "./components/DesktopAppCard";
 import { MobileNav, type MobilePane } from "./components/MobileNav";
 import { HeaderActions, type HeaderAction } from "./components/HeaderActions";
-import { LG_QUERY, MD_QUERY, useMediaQuery } from "./lib/useMediaQuery";
+import { HEADER_ACTIONS_QUERY, MD_QUERY, useMediaQuery } from "./lib/useMediaQuery";
 import { useSelection, type ViewTab } from "./stores/selectionStore";
 import { exportHtmlUrl } from "./api/client";
 import { downloadSchemaExport } from "./lib/schemaSession";
@@ -111,7 +111,7 @@ export default function App() {
   const [mobilePane, setMobilePane] = useState<MobilePane>("view");
   const detailsOpen = mobilePane === "details";
   const atLeastMd = useMediaQuery(MD_QUERY);
-  const wide = useMediaQuery(LG_QUERY);
+  const wide = useMediaQuery(HEADER_ACTIONS_QUERY);
 
   useEffect(() => {
     window.localStorage.setItem("xsdv:structureCollapsed", structureCollapsed ? "1" : "0");
@@ -171,7 +171,7 @@ export default function App() {
   }, [selectedId, atLeastMd]);
 
   // Secondary header actions: inline buttons on wide screens, a "More" menu
-  // below `lg` so the header can never overflow the viewport.
+  // below `2xl` so the header can never overflow the viewport or cover the title.
   const source = useSelection((s) => s.source);
   const { copied: linkCopied, copy: copyLink } = useCopy(2500);
 
