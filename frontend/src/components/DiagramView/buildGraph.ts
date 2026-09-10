@@ -180,8 +180,12 @@ function computeElementDisplay(
   const namedComplex = !inlineComplex ? resolveComplex(target.type_name, context) : undefined;
   const resolvedComplex = inlineComplex ?? namedComplex ?? null;
 
-  const attrs = inlineComplex
-    ? effectiveAttributes(inlineComplex, context.complexResolver).attributes
+  // Attributes come from whichever complex type the element resolves to —
+  // anonymous inline *or* named (FundsXML's `FXRate type="FXRateType"`, a
+  // simpleContent extension carrying fromCcy/toCcy/mulDiv). Only drawing
+  // them for inline types silently dropped every named-type attribute.
+  const attrs = resolvedComplex
+    ? effectiveAttributes(resolvedComplex, context.complexResolver).attributes
     : [];
   const docFull = collectDocumentation(element) ?? collectDocumentation(target);
   const docLines = truncateDocLines(docFull);

@@ -201,7 +201,8 @@ describe("buildDiagramGraph height budget", () => {
     address.annotation = docs("Line one\nLine two\nLine three");
 
     expect(heightOf(model, "LastName")).toBe(51); // plain leaf
-    expect(heightOf(model, "Person")).toBe(95); // one doc line + expand hint
+    // one doc line + expand hint + the named PersonType's single attribute
+    expect(heightOf(model, "Person")).toBe(120);
     expect(heightOf(model, "FirstName")).toBe(88); // two doc lines
     expect(heightOf(model, "Address")).toBe(206); // 4 attrs + "more" row, 2 doc lines, hint
     expect(heightOf(smallModel, "Address")).toBe(72); // expand hint only
@@ -549,6 +550,31 @@ describe("buildDiagramGraph content inherited through xs:extension", () => {
     );
     expect(groupRef).toBeDefined();
     expect(elementByLabel(nodes, "Edition")).toBeDefined();
+  });
+
+  it("shows a named complex type's attributes inline (FundsXML FXRate)", () => {
+    // FundsXML's FXRate is `type="FXRateType"` — a named simpleContent
+    // extension of xs:decimal carrying fromCcy/toCcy/mulDiv. The diagram
+    // used to draw attributes only for anonymous inline types, so nodes
+    // referencing a named type lost theirs.
+    const { nodes } = buildDiagramGraph(constraintsModel, new Set([libraryElement.id]), null);
+    const books = elementByLabel(nodes, "Books");
+    expect(books).toBeDefined();
+    const expanded = new Set([libraryElement.id, (books!.data as { schemaId: string }).schemaId]);
+    const book = elementByLabel(buildDiagramGraph(constraintsModel, expanded, null).nodes, "Book");
+    expect(book).toBeDefined();
+    const attrs = (book!.data as { attributes: { name: string | null }[] }).attributes;
+    expect(attrs.map((a) => a.name)).toEqual(["title"]);
+    // The attribute row is part of the height budget, exactly as for inline types.
+    expect(nodeHeight(book!)).toBeGreaterThan(NODE_HEIGHT);
+  });
+
+  it("shows the base's attributes inline for a named-type extension", () => {
+    const { nodes } = buildDiagramGraph(constraintsModel, new Set([archiveElement.id]), null);
+    const book = elementByLabel(nodes, "Book");
+    expect(book).toBeDefined();
+    const attrs = (book!.data as { attributes: { name: string | null }[] }).attributes;
+    expect(attrs.map((a) => a.name)).toContain("title");
   });
 
   it("shows the base's attributes inline for an inline-complex extension", () => {
