@@ -4,14 +4,16 @@ The generator walks the content model the way XMLSpy's "Generate Sample XML"
 does: required particles once, the first branch of a choice, the first
 enumeration value, type-appropriate placeholders for built-in types, and a
 best-effort string for ``xs:pattern`` facets. Optional content is included
-on request. It is deliberately structural — no XPath, no assertions — and
-never raises on an incomplete schema: unresolved references become XML
-comments so the user can see what could not be filled in.
+on request. Identity constraints (xs:key, xs:keyref, xs:unique) are settled
+on the finished tree, since their selectors are XPath; assertions are not
+evaluated. It never raises on an incomplete schema: unresolved references
+become XML comments so the user can see what could not be filled in.
 """
 
 from __future__ import annotations
 
 import base64
+import itertools
 import re
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
@@ -28,6 +30,7 @@ from app.parser.model import (
     ElementDecl,
     Facet,
     Group,
+    IdentityConstraint,
     Particle,
     SchemaModel,
     SimpleType,
@@ -275,6 +278,17 @@ class _Context:
     cost_steps: int = 0
     # Substitution-group members by the (namespace, name) of their head; built on first use.
     members_by_head: dict[Key, list[ElementDecl]] | None = None
+    # For identity constraints: elements that declare them, optional
+    # occurrences that may be dropped, and how each value was produced
+    # (built-in type and facets, keyed by element and attribute name).
+    constraint_scopes: list[tuple[etree._Element, ElementDecl]] = field(default_factory=list)
+    optional_nodes: set[etree._Element] = field(default_factory=set)
+    value_specs: dict[tuple[etree._Element, str | None], tuple[str, list[Facet]]] = field(
+        default_factory=dict
+    )
+    last_spec: tuple[str, list[Facet]] | None = None
+    xpaths: dict[tuple[str, str], etree.XPath] = field(default_factory=dict)
+    unusable_constraints: set[str] = field(default_factory=set)
 
     def note(
         self,
@@ -484,7 +498,10 @@ def generate_sample_with_report(
     root = etree.Element(_tag(namespace, element.name))
     ctx.emitted = 1
     ctx.open_elements.append(element.id)
+    if element.identity_constraints:
+        ctx.constraint_scopes.append((root, element))
     _fill_element(ctx, root, element, depth=0, type_stack=())
+    _apply_identity_constraints(ctx, root)
     if ctx.budget_hit:
         ctx.note("size_limit", GENERATOR_LIMIT, element.name, element)
     # Declare the prefixes we used (and only those) on the root.
@@ -548,7 +565,7 @@ def _fill_element(
         node.text = (
             element.default
             if element.default is not None
-            else _simple_value(ctx, element.type_inline_simple, ())
+            else _recorded(ctx, node, None, _simple_value, ctx, element.type_inline_simple, ())
         )
         return
     if element.type_inline_complex is not None:
@@ -566,9 +583,17 @@ def _fill_element(
         return
     kind, target = resolved
     if kind == "builtin":
-        node.text = element.default if element.default is not None else _builtin_value(ctx, target, [])
+        node.text = (
+            element.default
+            if element.default is not None
+            else _recorded(ctx, node, None, _builtin_value, ctx, target, [])
+        )
     elif kind == "simple":
-        node.text = element.default if element.default is not None else _simple_value(ctx, target, ())
+        node.text = (
+            element.default
+            if element.default is not None
+            else _recorded(ctx, node, None, _simple_value, ctx, target, ())
+        )
     else:
         if target.abstract:
             derived = _derived_type(ctx, target)
@@ -656,9 +681,8 @@ def _fill_complex(
     if ct.content_kind == "simple" or (ct.simple_content_base and not ct.particle):
         owner = next((m for m in chain if m.simple_content_base), None)
         facets = [f for m in chain for f in m.simple_content_facets]
-        node.text = _value_for_type_name(
-            ctx, owner.simple_content_base if owner else None, facets, owner
-        )
+        base_name = owner.simple_content_base if owner else None
+        node.text = _recorded(ctx, node, None, _value_for_type_name, ctx, base_name, facets, owner)
         return
     if ct.derivation == "restriction" and ct.particle is None and ct.base:
         # A restriction that repeats nothing keeps the base's content.
@@ -729,14 +753,15 @@ def _fill_attributes(
         value = attribute.fixed or decl.fixed or attribute.default or decl.default
         if attribute.use != "required" and not ctx.options.include_optional and value is None:
             continue
+        tag = _tag(namespace, decl.name)
         if value is None:
             if decl.type_inline is not None:
-                value = _simple_value(ctx, decl.type_inline, ())
+                value = _recorded(ctx, node, tag, _simple_value, ctx, decl.type_inline, ())
             else:
-                value = _value_for_type_name(ctx, decl.type_name, [], decl)
+                value = _recorded(ctx, node, tag, _value_for_type_name, ctx, decl.type_name, [], decl)
         if namespace:
             ctx.prefix_for(namespace)
-        node.set(_tag(namespace, decl.name), value)
+        node.set(tag, value)
     for ref in group_refs:
         if ref in seen_groups:
             continue
@@ -848,6 +873,10 @@ def _emit_element_particle(
         ctx.prefix_for(namespace)
     child = etree.SubElement(parent, _tag(namespace, declaration.name))
     ctx.emitted += 1
+    if optional:
+        ctx.optional_nodes.add(child)
+    if declaration.identity_constraints:
+        ctx.constraint_scopes.append((child, declaration))
     if declaration.nillable and _is_empty_decl(declaration):
         child.set(f"{{{XSI_NS}}}nil", "true")
         return
@@ -1152,6 +1181,307 @@ def _direct_members(ctx: _Context, head: ElementDecl) -> list[ElementDecl]:
 
 
 # ---------------------------------------------------------------------------
+# Identity constraints
+# ---------------------------------------------------------------------------
+
+
+class _UnusableConstraintError(Exception):
+    """A selector or field this generator cannot evaluate."""
+
+
+def _apply_identity_constraints(ctx: _Context, root: etree._Element) -> None:
+    """Settle xs:key, xs:unique and xs:keyref on the finished tree.
+
+    Without this every occurrence carried the same placeholder, so keys and
+    uniques collided (XTCE) and keyrefs pointed at nothing (Garmin TCX).
+    Three passes, in order: drop optional nodes a key selects but that lack
+    a field, make key and unique tuples distinct, then point every keyref at
+    an existing tuple of its key.
+    """
+    if not ctx.constraint_scopes:
+        return
+    scopes = list(ctx.constraint_scopes)
+    for step in (_drop_incomplete_key_targets, _make_distinct, _resolve_keyref):
+        for scope, declaration in scopes:
+            if not _in_tree(scope, root):
+                continue
+            for constraint in declaration.identity_constraints:
+                if constraint.id in ctx.unusable_constraints:
+                    continue
+                try:
+                    step(ctx, root, scope, constraint, scopes)
+                except _UnusableConstraintError:
+                    ctx.unusable_constraints.add(constraint.id)
+                    ctx.note("identity_constraint_skipped", GENERATOR_LIMIT, constraint.name, constraint)
+
+
+def _in_tree(node: etree._Element, root: etree._Element) -> bool:
+    return node is root or any(ancestor is root for ancestor in node.iterancestors())
+
+
+def _run_xpath(ctx: _Context, constraint: IdentityConstraint, expression: str, node: etree._Element) -> list:
+    if constraint.xpath_default_namespace:
+        raise _UnusableConstraintError  # XPath 1.0 has no default namespace for name tests
+    key = (constraint.id, expression)
+    xpath = ctx.xpaths.get(key)
+    if xpath is None:
+        namespaces = {prefix: uri for prefix, uri in ctx.model.namespaces.items() if prefix}
+        settings = ctx.settings_of(constraint)
+        if settings is not None:
+            namespaces.update({prefix: uri for prefix, uri in settings.prefixes.items() if prefix})
+        try:
+            xpath = etree.XPath(expression.strip(), namespaces=namespaces)
+        except etree.XPathError as exc:
+            raise _UnusableConstraintError from exc
+        ctx.xpaths[key] = xpath
+    try:
+        result = xpath(node)
+    except etree.XPathError as exc:
+        raise _UnusableConstraintError from exc
+    return result if isinstance(result, list) else []
+
+
+def _select(ctx: _Context, constraint: IdentityConstraint, scope: etree._Element) -> list[etree._Element]:
+    selected = _run_xpath(ctx, constraint, constraint.selector, scope)
+    return [node for node in selected if isinstance(node, etree._Element)]
+
+
+def _fields(ctx: _Context, constraint: IdentityConstraint, target: etree._Element) -> list[object] | None:
+    """One node per field, or None when a field reaches nothing (or more than one node)."""
+    hits = []
+    for expression in constraint.fields:
+        result = _run_xpath(ctx, constraint, expression, target)
+        if len(result) != 1:
+            return None
+        hits.append(result[0])
+    return hits
+
+
+def _hit_value(hit: object) -> str:
+    return (hit.text or "") if isinstance(hit, etree._Element) else str(hit)
+
+
+def _slot(hit: object) -> tuple[etree._Element, str | None] | None:
+    """Where a field's value lives: an element's text or one of its attributes."""
+    if isinstance(hit, etree._Element):
+        return (hit, None) if len(hit) == 0 else None
+    if getattr(hit, "is_attribute", False):
+        parent = hit.getparent()
+        return (parent, hit.attrname) if parent is not None else None
+    return None
+
+
+def _write(slot: tuple[etree._Element, str | None], value: str) -> None:
+    element, attribute = slot
+    if attribute is None:
+        element.text = value
+    else:
+        element.set(attribute, value)
+
+
+def _removable(ctx: _Context, node: etree._Element, root: etree._Element) -> etree._Element | None:
+    """The node itself or its nearest ancestor that was emitted as an optional occurrence."""
+    current = node
+    while current is not None and current is not root:
+        if current in ctx.optional_nodes:
+            return current
+        current = current.getparent()
+    return None
+
+
+def _drop(ctx: _Context, node: etree._Element) -> None:
+    parent = node.getparent()
+    name = etree.QName(node).localname
+    parent.insert(
+        parent.index(node), etree.Comment(f" optional {name} omitted: it would break an identity constraint ")
+    )
+    parent.remove(node)
+    ctx.note("optional_subtree_dropped", GENERATOR_LIMIT, name)
+
+
+def _drop_incomplete_key_targets(
+    ctx: _Context, root: etree._Element, scope: etree._Element, constraint: IdentityConstraint, _scopes: list
+) -> None:
+    """Every node a key selects needs every field (XTCE: MessageSet/* also reaches LongDescription)."""
+    if constraint.kind != "key":
+        return
+    for target in _select(ctx, constraint, scope):
+        if not _in_tree(target, root) or _fields(ctx, constraint, target) is not None:
+            continue
+        removable = _removable(ctx, target, root)
+        if removable is None:
+            ctx.note("key_field_missing", GENERATOR_LIMIT, constraint.name, constraint)
+        else:
+            _drop(ctx, removable)
+
+
+def _make_distinct(
+    ctx: _Context, root: etree._Element, scope: etree._Element, constraint: IdentityConstraint, _scopes: list
+) -> None:
+    if constraint.kind not in ("key", "unique"):
+        return
+    taken: set[tuple[str, ...]] = set()
+    for target in _select(ctx, constraint, scope):
+        hits = _fields(ctx, constraint, target)
+        if hits is None:
+            continue  # a unique may leave fields out; keys were settled in the pass before
+        values = tuple(_hit_value(hit) for hit in hits)
+        if values in taken:
+            renewed = _renew(ctx, hits, values, taken)
+            if renewed is None:
+                ctx.note("identity_value_not_unique", GENERATOR_LIMIT, constraint.name, constraint)
+                continue
+            values = renewed
+        taken.add(values)
+
+
+def _renew(
+    ctx: _Context, hits: list[object], values: tuple[str, ...], taken: set[tuple[str, ...]]
+) -> tuple[str, ...] | None:
+    for index, hit in enumerate(hits):
+        slot = _slot(hit)
+        if slot is None:
+            continue
+        for value in itertools.islice(_alternatives(ctx, slot, values[index]), 500):
+            candidate = values[:index] + (value,) + values[index + 1 :]
+            if candidate not in taken:
+                _write(slot, value)
+                return candidate
+    return None
+
+
+def _alternatives(ctx: _Context, slot: tuple[etree._Element, str | None], current: str):
+    """Other values the slot's type and facets accept, nearest-looking first."""
+    spec = ctx.value_specs.get(slot)
+    if spec is None:
+        return  # a fixed or default value, which must stay as it is
+    local, facets = spec
+    if local == "ID":
+        for _ in range(50):
+            yield ctx.next_id()
+        return
+    checker = None
+    if local in _BUILTIN_VALUES and local not in _UNCHECKED_TYPES:
+        checker = _value_checker(local, _checkable(facets))
+    notes_before = len(ctx.report)
+    pool = _candidates(ctx, local, facets)
+    del ctx.report[notes_before:]
+    tried = {current}
+    suffixed = (f"{current}{k}" for k in range(1, 100))
+    for value in itertools.chain(pool, _numeric_steps(current), suffixed, _bumped(current)):
+        if value in tried:
+            continue
+        tried.add(value)
+        if checker is None or _accepts(checker, value):
+            yield value
+
+
+def _numeric_steps(current: str):
+    try:
+        number = Decimal(current.strip())
+    except InvalidOperation:
+        return
+    if not number.is_finite():
+        return
+    for step in range(1, 50):
+        yield format(number + step, "f")
+        yield format(number - step, "f")
+
+
+def _bumped(current: str):
+    """``current`` with one letter or digit moved along its alphabet, last position first.
+
+    Keeps a value inside character-class patterns such as ``[A-Z][0-9]{2}``.
+    """
+    for index in range(len(current) - 1, -1, -1):
+        char = current[index]
+        for alphabet in (
+            "0123456789",
+            "abcdefghijklmnopqrstuvwxyz",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        ):
+            if char in alphabet:
+                start = alphabet.index(char)
+                for step in range(1, len(alphabet)):
+                    yield current[:index] + alphabet[(start + step) % len(alphabet)] + current[index + 1 :]
+
+
+def _resolve_keyref(
+    ctx: _Context,
+    root: etree._Element,
+    scope: etree._Element,
+    constraint: IdentityConstraint,
+    scopes: list[tuple[etree._Element, ElementDecl]],
+) -> None:
+    """Point each keyref tuple at a tuple of the key it refers to, visible from ``scope``."""
+    if constraint.kind != "keyref":
+        return
+    if constraint.refer_id is None:
+        ctx.note("keyref_target_unknown", SCHEMA_INCOMPLETE, constraint.refer, constraint)
+        return
+    key_tuples: list[tuple[str, ...]] = []
+    # A key's table is visible in its own scope and every ancestor scope.
+    for node, declaration in scopes:
+        if not _in_tree(node, root) or not (node is scope or any(a is scope for a in node.iterancestors())):
+            continue
+        for key in declaration.identity_constraints:
+            if key.id != constraint.refer_id:
+                continue
+            for target in _select(ctx, key, node):
+                hits = _fields(ctx, key, target)
+                if hits is not None:
+                    key_tuples.append(tuple(_hit_value(hit) for hit in hits))
+    for target in _select(ctx, constraint, scope):
+        if not _in_tree(target, root):
+            continue
+        hits = _fields(ctx, constraint, target)
+        if hits is None:
+            continue  # a keyref with an absent field constrains nothing
+        if tuple(_hit_value(hit) for hit in hits) in key_tuples:
+            continue
+        if key_tuples and _point_at(ctx, hits, key_tuples):
+            continue
+        removable = _removable(ctx, target, root)
+        if removable is not None:
+            _drop(ctx, removable)
+        else:
+            ctx.note("keyref_without_key", GENERATOR_LIMIT, constraint.name, constraint)
+
+
+def _point_at(ctx: _Context, hits: list[object], key_tuples: list[tuple[str, ...]]) -> bool:
+    slots = [_slot(hit) for hit in hits]
+    if any(slot is None or slot not in ctx.value_specs for slot in slots):
+        return False
+    for values in key_tuples:
+        if len(values) == len(slots) and all(
+            _fits(ctx, slot, v) for slot, v in zip(slots, values, strict=True)
+        ):
+            for slot, value in zip(slots, values, strict=True):
+                _write(slot, value)
+            return True
+    return False
+
+
+def _fits(ctx: _Context, slot: tuple[etree._Element, str | None], value: str) -> bool:
+    local, facets = ctx.value_specs[slot]
+    if local not in _BUILTIN_VALUES or local in _UNCHECKED_TYPES:
+        return True
+    checker = _value_checker(local, _checkable(facets))
+    return checker is None or _accepts(checker, value)
+
+
+def _recorded(  # noqa: ANN001 - produce is any value function of this module
+    ctx: _Context, node: etree._Element, attribute: str | None, produce, *args
+) -> str:
+    """Call ``produce(*args)`` and remember which type and facets its value came from."""
+    ctx.last_spec = None
+    value = produce(*args)
+    if ctx.last_spec is not None:
+        ctx.value_specs[(node, attribute)] = ctx.last_spec
+    return value
+
+
+# ---------------------------------------------------------------------------
 # Simple values
 # ---------------------------------------------------------------------------
 
@@ -1266,6 +1596,7 @@ def _builtin_value(ctx: _Context, local: str, facets: list[Facet]) -> str:
     out once libxml2 accepts it. When nothing passes -- or the facets cannot
     be checked -- the first candidate is used.
     """
+    ctx.last_spec = (local, facets)
     has_enumeration = any(f.kind == "enumeration" for f in facets)
     if local == "ID" and not has_enumeration:
         return ctx.next_id()

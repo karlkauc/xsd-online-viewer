@@ -636,3 +636,123 @@ def test_most_derived_enumeration_wins() -> None:
     xml, root = _sample(model, "element:DayType")
     assert root.text in {"unknown", "monday"}
     assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+# ---------------------------------------------------------------------------
+# Identity constraints (xs:key, xs:keyref, xs:unique)
+# ---------------------------------------------------------------------------
+
+
+def test_unique_values_are_made_distinct() -> None:
+    """Every occurrence got the same placeholder, so any unique field collided."""
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="Catalog">
+    <xs:complexType><xs:sequence>
+      <xs:element name="Item" minOccurs="3" maxOccurs="unbounded"><xs:complexType>
+        <xs:attribute name="sku" type="xs:string" use="required"/>
+      </xs:complexType></xs:element>
+    </xs:sequence></xs:complexType>
+    <xs:unique name="uniqueSku"><xs:selector xpath="Item"/><xs:field xpath="@sku"/></xs:unique>
+  </xs:element>
+</xs:schema>"""
+    model = parse_single(xsd, "catalog.xsd")
+    element = find_element(model, "element:Catalog")
+    xml, report = generate_sample_with_report(model, element, SampleOptions())
+    root = etree.fromstring(xml.encode("utf-8"))
+    skus = [item.get("sku") for item in root]
+    assert len(skus) == 3 and len(set(skus)) == 3, skus
+    assert report.counts == {}
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+def test_key_values_stay_inside_their_pattern_when_made_distinct() -> None:
+    """XTCE-style: prefixed selector and field, a pattern the new values must still match."""
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:t="urn:t"
+           targetNamespace="urn:t" elementFormDefault="qualified">
+  <xs:element name="Workouts">
+    <xs:complexType><xs:sequence>
+      <xs:element name="Workout" minOccurs="3" maxOccurs="unbounded"><xs:complexType><xs:sequence>
+        <xs:element name="Name"><xs:simpleType><xs:restriction base="xs:token">
+          <xs:pattern value="[A-Z][0-9]{2}"/>
+        </xs:restriction></xs:simpleType></xs:element>
+      </xs:sequence></xs:complexType></xs:element>
+    </xs:sequence></xs:complexType>
+    <xs:key name="workoutKey"><xs:selector xpath="t:Workout"/><xs:field xpath="t:Name"/></xs:key>
+  </xs:element>
+</xs:schema>"""
+    model = parse_single(xsd, "workouts.xsd")
+    xml, root = _sample(model, "element:{urn:t}Workouts")
+    names = [w.findtext("{urn:t}Name") for w in root]
+    assert len(set(names)) == 3, names
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+_KEYREF = """<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="Db">
+    <xs:complexType><xs:sequence>
+      <xs:element name="Workout" minOccurs="{workouts}" maxOccurs="unbounded"><xs:complexType>
+        <xs:attribute name="Name" use="required"><xs:simpleType>
+          <xs:restriction base="xs:token"><xs:pattern value="W[0-9]"/></xs:restriction>
+        </xs:simpleType></xs:attribute>
+      </xs:complexType></xs:element>
+      <xs:element name="Ref" minOccurs="{refs}"><xs:complexType><xs:sequence>
+        <xs:element name="Id" type="xs:token"/>
+      </xs:sequence></xs:complexType></xs:element>
+    </xs:sequence></xs:complexType>
+    <xs:key name="nameKey"><xs:selector xpath="Workout"/><xs:field xpath="@Name"/></xs:key>
+    <xs:keyref name="nameRef" refer="nameKey"><xs:selector xpath="Ref"/><xs:field xpath="Id"/></xs:keyref>
+  </xs:element>
+</xs:schema>"""
+
+
+def test_keyref_points_at_an_existing_key() -> None:
+    """Garmin TCX: WorkoutNameRef/Id held a placeholder no Workout had as its Name."""
+    model = parse_single(_KEYREF.format(workouts=1, refs=1).encode(), "db.xsd")
+    element = find_element(model, "element:Db")
+    xml, report = generate_sample_with_report(model, element, SampleOptions())
+    root = etree.fromstring(xml.encode("utf-8"))
+    assert root.findtext("Ref/Id") == root.find("Workout").get("Name")
+    assert report.counts == {}
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+def test_optional_keyref_without_any_key_is_left_out() -> None:
+    """The key selects nothing that exists, so no value can satisfy an optional keyref."""
+    xsd = _KEYREF.format(workouts=1, refs=0).replace(
+        '<xs:selector xpath="Workout"/>', '<xs:selector xpath="Retired"/>'
+    )
+    model = parse_single(xsd.encode(), "db.xsd")
+    xml, root = _sample(model, "element:Db", include_optional=True)
+    assert root.find("Ref") is None
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+def test_required_keyref_without_any_key_is_reported() -> None:
+    model = parse_single(_KEYREF.format(workouts=0, refs=1).encode(), "db.xsd")
+    element = find_element(model, "element:Db")
+    _, report = generate_sample_with_report(model, element, SampleOptions())
+    assert report.counts == {"keyref_without_key": 1}
+
+
+def test_key_target_without_its_field_is_left_out_when_optional() -> None:
+    """XTCE messageNameKey selects MessageSet/*, which also reaches LongDescription."""
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="MessageSet">
+    <xs:complexType><xs:sequence>
+      <xs:element name="LongDescription" type="xs:string" minOccurs="0"/>
+      <xs:element name="Message" maxOccurs="unbounded"><xs:complexType>
+        <xs:attribute name="name" type="xs:string" use="required"/>
+      </xs:complexType></xs:element>
+    </xs:sequence></xs:complexType>
+    <xs:key name="messageNameKey"><xs:selector xpath="*"/><xs:field xpath="@name"/></xs:key>
+  </xs:element>
+</xs:schema>"""
+    model = parse_single(xsd, "xtce.xsd")
+    xml, root = _sample(model, "element:MessageSet", include_optional=True)
+    assert root.find("LongDescription") is None
+    assert root.find("Message") is not None
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
