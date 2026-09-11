@@ -28,7 +28,6 @@ export function parseZipEntries(bytes: Uint8Array): string[] {
   if (directoryOffset + directorySize > bytes.byteLength) return [];
 
   const utf8 = new TextDecoder("utf-8");
-  const latin1 = new TextDecoder("latin1");
   const names: string[] = [];
   let offset = directoryOffset;
   for (let i = 0; i < entryCount; i += 1) {
@@ -37,12 +36,71 @@ export function parseZipEntries(bytes: Uint8Array): string[] {
     const nameLength = view.getUint16(offset + 28, true);
     const extraLength = view.getUint16(offset + 30, true);
     const commentLength = view.getUint16(offset + 32, true);
-    const nameBytes = bytes.subarray(offset + 46, offset + 46 + nameLength);
-    const name = (flags & UTF8_FLAG ? utf8 : latin1).decode(nameBytes);
+    const nameStart = offset + 46;
+    const nameBytes = bytes.subarray(nameStart, nameStart + nameLength);
+    const extra = bytes.subarray(nameStart + nameLength, nameStart + nameLength + extraLength);
+    // Decoded the way the backend's zipfile (Python 3.12) does: the main
+    // schema picked here is sent by name and has to match its spelling there.
+    const name = flags & UTF8_FLAG ? utf8.decode(nameBytes) : (unicodePath(extra, nameBytes) ?? decodeCp437(nameBytes));
     if (!name.endsWith("/")) names.push(name);
     offset += 46 + nameLength + extraLength + commentLength;
   }
   return names;
+}
+
+const UNICODE_PATH_FIELD = 0x7075;
+
+/**
+ * The UTF-8 name an Info-ZIP unicode path field carries for a name stored in
+ * a legacy code page (Windows archivers: CP866 for Cyrillic). Only used while
+ * its CRC still matches the stored name.
+ */
+function unicodePath(extra: Uint8Array, nameBytes: Uint8Array): string | null {
+  const view = new DataView(extra.buffer, extra.byteOffset, extra.byteLength);
+  for (let pos = 0; pos + 4 <= extra.byteLength; ) {
+    const id = view.getUint16(pos, true);
+    const size = view.getUint16(pos + 2, true);
+    const data = extra.subarray(pos + 4, pos + 4 + size);
+    if (id === UNICODE_PATH_FIELD && data.length === size && size >= 5 && data[0] === 1) {
+      const storedCrc = new DataView(data.buffer, data.byteOffset + 1, 4).getUint32(0, true);
+      if (storedCrc === crc32(nameBytes)) return new TextDecoder("utf-8").decode(data.subarray(5));
+    }
+    pos += 4 + size;
+  }
+  return null;
+}
+
+// Upper half of IBM code page 437, the ZIP default for names without the UTF-8 flag.
+const CP437_HIGH =
+  "ÇüéâäàåçêëèïîìÄÅ" +
+  "ÉæÆôöòûùÿÖÜ¢£¥₧ƒ" +
+  "áíóúñÑªº¿⌐¬½¼¡«»" +
+  "░▒▓│┤╡╢╖╕╣║╗╝╜╛┐" +
+  "└┴┬├─┼╞╟╚╔╩╦╠═╬╧" +
+  "╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀" +
+  "αßΓπΣσµτΦΘΩδ∞φε∩" +
+  "≡±≥≤⌠⌡÷≈°∙·√ⁿ²■ ";
+
+function decodeCp437(bytes: Uint8Array): string {
+  let out = "";
+  for (const byte of bytes) out += byte < 0x80 ? String.fromCharCode(byte) : CP437_HIGH[byte - 0x80];
+  return out;
+}
+
+let crcTable: Uint32Array | null = null;
+
+function crc32(bytes: Uint8Array): number {
+  if (crcTable === null) {
+    crcTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let c = n;
+      for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      crcTable[n] = c >>> 0;
+    }
+  }
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 function findEndOfCentralDirectory(view: DataView): number {

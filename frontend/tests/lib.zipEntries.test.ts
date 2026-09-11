@@ -26,6 +26,66 @@ describe("parseZipEntries", () => {
   });
 });
 
+// Windows archivers store a name in the OEM code page — here CP866 for
+// "Сервис1/General_1.40.xsd" — without the UTF-8 flag, and may add its UTF-8
+// form in an Info-ZIP unicode path field (0x7075).
+const CP866_NAME = new Uint8Array([
+  0x91, 0xa5, 0xe0, 0xa2, 0xa8, 0xe1, 0x31, 0x2f, 0x47, 0x65, 0x6e, 0x65, 0x72, 0x61, 0x6c, 0x5f, 0x31, 0x2e, 0x34,
+  0x30, 0x2e, 0x78, 0x73, 0x64,
+]);
+const CP866_NAME_CRC = 0x0586b622;
+
+/** A one-entry central directory and its end record: all parseZipEntries reads. */
+function legacyArchive(extra: Uint8Array = new Uint8Array(0)): Uint8Array {
+  const central = new Uint8Array(46 + CP866_NAME.length + extra.length);
+  const entry = new DataView(central.buffer);
+  entry.setUint32(0, 0x02014b50, true); // flags stay 0: no UTF-8 flag
+  entry.setUint16(28, CP866_NAME.length, true);
+  entry.setUint16(30, extra.length, true);
+  central.set(CP866_NAME, 46);
+  central.set(extra, 46 + CP866_NAME.length);
+  const archive = new Uint8Array(central.length + 22);
+  archive.set(central);
+  const end = new DataView(archive.buffer, central.length);
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, 1, true);
+  end.setUint16(10, 1, true);
+  end.setUint32(12, central.length, true);
+  end.setUint32(16, 0, true);
+  return archive;
+}
+
+function unicodePathField(nameCrc: number): Uint8Array {
+  const utf8 = new TextEncoder().encode("Сервис1/General_1.40.xsd");
+  const field = new Uint8Array(9 + utf8.length);
+  const view = new DataView(field.buffer);
+  view.setUint16(0, 0x7075, true);
+  view.setUint16(2, 5 + utf8.length, true);
+  field[4] = 1; // version
+  view.setUint32(5, nameCrc, true);
+  field.set(utf8, 9);
+  return field;
+}
+
+// The backend (Python 3.12's zipfile) reads names this way. Reading them
+// differently here sent a main schema name the backend did not know: "main
+// schema '‘¥à¢¨á1 …' is not among the uploaded files" (2026-09-11).
+describe("parseZipEntries with names in a legacy code page", () => {
+  it("uses the UTF-8 name from an Info-ZIP unicode path field", () => {
+    expect(parseZipEntries(legacyArchive(unicodePathField(CP866_NAME_CRC)))).toEqual(["Сервис1/General_1.40.xsd"]);
+  });
+
+  it("ignores a unicode path field written for a different name", () => {
+    expect(parseZipEntries(legacyArchive(unicodePathField(CP866_NAME_CRC ^ 1)))).toEqual([
+      "æÑαó¿ß1/General_1.40.xsd",
+    ]);
+  });
+
+  it("decodes a legacy name without that field as code page 437", () => {
+    expect(parseZipEntries(legacyArchive())).toEqual(["æÑαó¿ß1/General_1.40.xsd"]);
+  });
+});
+
 describe("pickMainXsd", () => {
   it("keeps only .xsd names and prefers shallow, short paths", () => {
     const names = ["x/deep.xsd", "main-schema.xsd", "a.xsd", "readme.txt"];
