@@ -756,3 +756,54 @@ def test_key_target_without_its_field_is_left_out_when_optional() -> None:
     assert root.find("LongDescription") is None
     assert root.find("Message") is not None
     assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+# ---------------------------------------------------------------------------
+# Found by the audit and in sample_issue rows (2026-09-11)
+# ---------------------------------------------------------------------------
+
+_LIST_XSD = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:l" xmlns="urn:l">
+  <xs:simpleType name="NameList"><xs:list itemType="xs:NCName"/></xs:simpleType>
+  <xs:simpleType name="Pair">
+    <xs:restriction base="NameList"><xs:length value="2"/></xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="AtLeastThree">
+    <xs:restriction base="NameList"><xs:minLength value="3"/></xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="CodeList"><xs:simpleContent><xs:extension base="NameList">
+    <xs:attribute name="codeSpace" type="xs:anyURI"/>
+  </xs:extension></xs:simpleContent></xs:complexType>
+  <xs:complexType name="CategoryExtent"><xs:simpleContent><xs:restriction base="CodeList">
+    <xs:length value="2"/>
+  </xs:restriction></xs:simpleContent></xs:complexType>
+  <xs:element name="Pair" type="Pair"/>
+  <xs:element name="AtLeastThree" type="AtLeastThree"/>
+  <xs:element name="CategoryExtent" type="CategoryExtent"/>
+</xs:schema>"""
+
+
+@pytest.mark.parametrize(("name", "items"), [("Pair", 2), ("AtLeastThree", 3), ("CategoryExtent", 2)])
+def test_length_facets_on_a_list_count_items(name: str, items: int) -> None:
+    """On a list type the length facets count items, not characters (GML CategoryExtent)."""
+    model = parse_single(_LIST_XSD, "list.xsd")
+    xml, root = _sample(model, f"element:{{urn:l}}{name}")
+    assert len((root.text or "").split()) == items, xml
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+def test_unresolved_element_ref_as_root_keeps_its_name() -> None:
+    """A sample for a ref whose import is missing came out as <ns1:element/> (UBL cac:*)."""
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:doc" xmlns:cac="urn:cac">
+  <xs:import namespace="urn:cac" schemaLocation="missing.xsd"/>
+  <xs:element name="Invoice"><xs:complexType><xs:sequence>
+    <xs:element ref="cac:Party"/>
+  </xs:sequence></xs:complexType></xs:element>
+</xs:schema>"""
+    model = parse_single(xsd, "invoice.xsd")
+    element = find_element(model, "element:cac:Party")
+    assert element is not None
+    xml, report = generate_sample_with_report(model, element, SampleOptions())
+    assert etree.fromstring(xml.encode("utf-8")).tag == "{urn:cac}Party", xml
+    assert report.counts == {"element_ref_not_found": 1}

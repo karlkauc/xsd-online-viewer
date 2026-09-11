@@ -483,7 +483,32 @@ def generate_sample_with_report(
     """
     options = options or SampleOptions()
     ctx = _build_context(model, options)
-    element = _deref_element(ctx, element) or element
+    declaration = _deref_element(ctx, element)
+    root = (
+        _unresolved_root(ctx, element) if declaration is None else _generated_root(ctx, declaration)
+    )
+    # Declare the prefixes we used (and only those) on the root.
+    nsmap = dict(ctx.nsmap)
+    xsi_attributes = (f"{{{XSI_NS}}}nil", f"{{{XSI_NS}}}type")
+    if any(key in el.attrib for el in root.iter(etree.Element) for key in xsi_attributes):
+        nsmap["xsi"] = XSI_NS
+    if nsmap:
+        new_root = etree.Element(root.tag, nsmap=nsmap)
+        for key, value in root.attrib.items():
+            new_root.set(key, value)
+        new_root.text = root.text
+        for child in list(root):
+            new_root.append(child)
+        root = new_root
+    etree.cleanup_namespaces(root, keep_ns_prefixes=sorted(ctx.value_prefixes))
+    document = etree.tostring(
+        root, pretty_print=True, xml_declaration=True, encoding="UTF-8"
+    ).decode("utf-8")
+    return document, SampleReport(entries=ctx.report)
+
+
+def _generated_root(ctx: _Context, element: ElementDecl) -> etree._Element:
+    """The document element for a resolved declaration, filled in."""
     if element.abstract:
         # An abstract root can never validate ("the element declaration is
         # abstract"), so substitute it the way a child particle would.
@@ -504,24 +529,23 @@ def generate_sample_with_report(
     _apply_identity_constraints(ctx, root)
     if ctx.budget_hit:
         ctx.note("size_limit", GENERATOR_LIMIT, element.name, element)
-    # Declare the prefixes we used (and only those) on the root.
-    nsmap = dict(ctx.nsmap)
-    xsi_attributes = (f"{{{XSI_NS}}}nil", f"{{{XSI_NS}}}type")
-    if any(key in el.attrib for el in root.iter(etree.Element) for key in xsi_attributes):
-        nsmap["xsi"] = XSI_NS
-    if nsmap:
-        new_root = etree.Element(root.tag, nsmap=nsmap)
-        for key, value in root.attrib.items():
-            new_root.set(key, value)
-        new_root.text = root.text
-        for child in list(root):
-            new_root.append(child)
-        root = new_root
-    etree.cleanup_namespaces(root, keep_ns_prefixes=sorted(ctx.value_prefixes))
-    document = etree.tostring(
-        root, pretty_print=True, xml_declaration=True, encoding="UTF-8"
-    ).decode("utf-8")
-    return document, SampleReport(entries=ctx.report)
+    return root
+
+
+def _unresolved_root(ctx: _Context, element: ElementDecl) -> etree._Element:
+    """A root for a ref whose target never loaded (a missing import).
+
+    It keeps the name it was referenced by -- the anonymous ``<element/>`` it
+    used to become told the user nothing (UBL cac:*) -- and says what is
+    missing, the way the same ref does as a child.
+    """
+    namespace, local = ctx.split_qname(element.ref or "", element)
+    if namespace:
+        ctx.prefix_for(namespace)
+    root = etree.Element(_tag(namespace, local))
+    root.append(etree.Comment(f" element {element.ref} not found in schema "))
+    ctx.note("element_ref_not_found", SCHEMA_INCOMPLETE, element.ref, element)
+    return root
 
 
 def _tag(namespace: str | None, name: str | None) -> str:
@@ -1529,8 +1553,14 @@ def _simple_value(
     facets = own + extra
     if simple.derivation == "list":
         if simple.item_inline is not None:
-            return _simple_value(ctx, simple.item_inline, stack)
-        return _value_for_type_name(ctx, simple.item_type, [], simple)
+            item = _simple_value(ctx, simple.item_inline, stack)
+        else:
+            item = _value_for_type_name(ctx, simple.item_type, [], simple)
+        # On a list the length facets count items, not characters (GML
+        # CategoryExtent restricts a name list to exactly two).
+        length = _int_facet(facets, "length")
+        count = length if length is not None else max(1, _int_facet(facets, "minLength") or 0)
+        return " ".join([item] * count)
     if simple.derivation == "union":
         enumeration = next((f.value for f in facets if f.kind == "enumeration"), None)
         if enumeration is not None:
