@@ -9,12 +9,14 @@ pretty-printed source download.
 from __future__ import annotations
 
 import html
+import json
 import logging
 import posixpath
 import time
 import traceback
 import zipfile
 from io import BytesIO
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
@@ -36,6 +38,9 @@ from app.usage.sample_issue import build_issue, encode_report
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["export"])
+
+# Missing references named in X-Sample-Missing; the count covers the rest.
+MAX_MISSING_NAMES = 10
 
 
 @router.get("/schema/{schema_id}/export/html", response_class=Response)
@@ -138,15 +143,24 @@ async def export_sample_xml(
     # The report rides along so the browser can hand it back with the
     # validation request it makes next; that is where a bad sample is
     # recorded, and the report is what explains it (app/usage/sample_issue.py).
-    return Response(
-        content=document,
-        media_type="application/xml; charset=utf-8",
-        headers={
-            "Content-Disposition": f'inline; filename="{name}-sample.xml"',
-            "X-Sample-Report": encode_report(report.as_dict()),
-            "Access-Control-Expose-Headers": "Content-Disposition, X-Sample-Report",
-        },
-    )
+    headers = {
+        "Content-Disposition": f'inline; filename="{name}-sample.xml"',
+        "X-Sample-Report": encode_report(report.as_dict()),
+        "Access-Control-Expose-Headers": "Content-Disposition, X-Sample-Report, X-Sample-Missing",
+    }
+    missing = report.missing_references
+    if missing:
+        # A schema that references declarations it never loaded cannot
+        # compile, so the browser skips its check and names these instead.
+        # Percent-encoded: a header is latin-1, a QName need not be.
+        headers["X-Sample-Missing"] = quote(
+            json.dumps(
+                {"count": len(missing), "names": missing[:MAX_MISSING_NAMES]},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+    return Response(content=document, media_type="application/xml; charset=utf-8", headers=headers)
 
 
 @router.get("/schema/{schema_id}/export/bundle", response_class=Response)

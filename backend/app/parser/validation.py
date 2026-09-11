@@ -267,7 +267,7 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
             if unavailable:
                 detail += f" (unavailable referenced files: {', '.join(unavailable)})"
             raise ValidationSetupError(
-                f"cached schema is not itself a valid XSD: {detail}"
+                f"the loaded schema does not compile: {detail}"
             ) from exc
         except etree.XMLSyntaxError as exc:
             raise ValidationSetupError(

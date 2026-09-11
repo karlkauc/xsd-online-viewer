@@ -111,3 +111,14 @@ def test_huge_substitution_group_is_refused_before_compiling() -> None:
 def test_small_substitution_group_still_compiles() -> None:
     model = parse_single(_substitution_schema(50), "small.xsd")
     assert build_xmlschema(model) is not None
+
+
+def test_a_schema_that_does_not_compile_says_so_plainly() -> None:
+    """Shown in the sample dialog and the Validation tab, so no "cached schema" jargon."""
+    model = parse_single(
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+        b'<xs:element name="A" type="Missing"/></xs:schema>',
+        "a.xsd",
+    )
+    with pytest.raises(ValidationSetupError, match="^the loaded schema does not compile: "):
+        build_xmlschema(model)

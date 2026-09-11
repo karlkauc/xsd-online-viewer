@@ -62,7 +62,7 @@ It holds:
 
 | column | what |
 | --- | --- |
-| `kind` | `invalid`, `not_well_formed`, `degraded`, `abstract_root`, `setup_error` (the schema does not compile — usually XSD 1.1, which libxml2 cannot do), `generator_error` |
+| `kind` | `invalid`, `not_well_formed`, `degraded`, `abstract_root`, `setup_error` (the schema does not compile — XSD 1.1, which libxml2 cannot do, or a missing part the sample never reached; a sample that itself hit references the loaded files do not define is never checked: the `X-Sample-Missing` header tells the dialog to name them instead, so nothing is recorded), `generator_error` |
 | `report` | the generator's own account of every spot it fudged, each classified `generator_limit` (our bug) or `schema_incomplete` (the schema's gap) |
 | `errors` | the validator's errors, in full |
 | `diagnostics` | what our parser complained about while reading the schema |

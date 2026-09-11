@@ -197,11 +197,32 @@ export interface SampleXmlOptions {
   repeat?: number;
 }
 
+/** Declarations a schema references but never loaded; such a schema cannot compile. */
+export interface MissingReferences {
+  count: number;
+  /** The first few, for display. */
+  names: string[];
+}
+
 export interface SampleXmlResult {
   xml: string;
   /** Opaque generator report; forwarded to `validateXmlText`, never parsed here. */
   report: string | null;
   generationMs: number;
+  /** Set when the sample hit references the loaded files do not define. */
+  missing: MissingReferences | null;
+}
+
+/** `X-Sample-Missing`: percent-encoded JSON. Anything malformed counts as complete. */
+function parseMissingReferences(raw: string | null): MissingReferences | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(decodeURIComponent(raw));
+    if (typeof parsed?.count !== "number" || parsed.count <= 0 || !Array.isArray(parsed.names)) return null;
+    return { count: parsed.count, names: parsed.names.filter((n: unknown): n is string => typeof n === "string") };
+  } catch {
+    return null;
+  }
 }
 
 /** Skeleton instance document rooted at `elementId`, as pretty-printed XML text. */
@@ -229,6 +250,7 @@ export async function fetchSampleXml(
     xml: await response.text(),
     report: response.headers.get("X-Sample-Report"),
     generationMs: Math.round(performance.now() - started),
+    missing: parseMissingReferences(response.headers.get("X-Sample-Missing")),
   };
 }
 

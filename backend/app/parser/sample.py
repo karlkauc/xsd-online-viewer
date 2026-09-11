@@ -123,6 +123,12 @@ _STRING_TYPES = {"string", "normalizedString", "token", "Name", "NCName", "NMTOK
 GENERATOR_LIMIT = "generator_limit"
 SCHEMA_INCOMPLETE = "schema_incomplete"
 
+# Reasons that mean the loaded files do not define a referenced declaration,
+# so libxml2 cannot compile the schema. Deliberately narrow: the audit of
+# URL-loaded schemas (2026-09-11) saw extension_base_not_found and
+# restriction_base_not_found in schemas that compile and validate.
+MISSING_REFERENCE_REASONS = frozenset({"type_not_found", "element_ref_not_found"})
+
 
 @dataclass(slots=True)
 class Degradation:
@@ -164,6 +170,15 @@ class SampleReport:
     @property
     def is_empty(self) -> bool:
         return not self.entries
+
+    @property
+    def missing_references(self) -> list[str]:
+        """Declarations the schema references but never loaded, first-seen order.
+
+        Such a schema cannot compile, so there is no point checking the sample.
+        """
+        names = (e.where for e in self.entries if e.reason in MISSING_REFERENCE_REASONS)
+        return list(dict.fromkeys(name for name in names if name))
 
     def as_dict(self, max_entries: int = 200) -> dict[str, object]:
         """Compact, JSON-safe form. ``counts`` stays complete when entries are cut."""

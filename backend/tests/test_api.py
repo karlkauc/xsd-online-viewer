@@ -176,6 +176,37 @@ class TestSampleXml:
             params={"element": "element:{http://example.com/simple}Person", "optional": "true"},
         )
         assert "<tns:Age>0</tns:Age>" in with_optional.text
+        assert "x-sample-missing" not in with_optional.headers
+
+    def test_incomplete_schema_names_its_missing_references(self, client: TestClient) -> None:
+        """Such a schema cannot compile, so the dialog skips its check (SampleXmlDialog).
+
+        Names travel percent-encoded: a header is latin-1, a QName need not be.
+        """
+        import json
+        from urllib.parse import unquote
+
+        xsd = """<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:doc" xmlns:cac="urn:cac">
+  <xs:import namespace="urn:cac" schemaLocation="missing.xsd"/>
+  <xs:element name="Invoice"><xs:complexType><xs:sequence>
+    <xs:element ref="cac:Party"/>
+    <xs:element name="Total" type="cac:Сумма"/>
+  </xs:sequence></xs:complexType></xs:element>
+</xs:schema>""".encode()
+        upload = client.post(
+            "/api/schema/upload", files={"file": ("invoice.xsd", xsd, "application/xml")}
+        )
+        schema_id = upload.json()["schema_id"]
+        response = client.get(
+            f"/api/schema/{schema_id}/sample", params={"element": "element:{urn:doc}Invoice"}
+        )
+        assert response.status_code == 200, response.text
+        assert json.loads(unquote(response.headers["x-sample-missing"])) == {
+            "count": 2,
+            "names": ["cac:Party", "cac:Сумма"],
+        }
+        assert "X-Sample-Missing" in response.headers["access-control-expose-headers"]
 
     def test_unknown_element_or_schema_404(self, client: TestClient, simple_xsd_bytes: bytes) -> None:
         upload = client.post(

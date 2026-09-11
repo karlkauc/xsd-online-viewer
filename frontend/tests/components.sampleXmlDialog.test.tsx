@@ -180,6 +180,56 @@ describe("SampleXmlDialog", () => {
     }
   });
 
+  // A schema that references declarations it never loaded cannot compile, so
+  // the check would only fail with a compiler message (UBL without its imports).
+  it("skips the check for an incomplete schema and says what is missing", async () => {
+    useSelection.setState({
+      model: {
+        ...MODEL,
+        diagnostics: [
+          {
+            severity: "warning",
+            message: "invoice.xsd: unresolved import schemaLocation='common/cac.xsd'",
+            file_id: null,
+            line: 3,
+          },
+        ],
+      } as SchemaModel,
+    });
+    const missing = encodeURIComponent(JSON.stringify({ count: 7, names: ["cac:Party", "cbc:ID"] }));
+    fetchMock.mockImplementation(async (url: string) =>
+      String(url).includes("/validate/")
+        ? { ok: true, status: 200, json: async () => VALID }
+        : { ok: true, status: 200, text: async () => "<Invoice/>", headers: new Headers({ "X-Sample-Missing": missing }) },
+    );
+    render(<SampleXmlDialog />);
+    act(() => openSampleXml({ elementId: "element:Person", name: "Person" }));
+
+    const note = await screen.findByTestId("sample-incomplete-note");
+    expect(note).toHaveTextContent(
+      "Not validated — the schema is incomplete: 7 referenced declarations are missing from the loaded files (cac:Party, cbc:ID, …).",
+    );
+    expect(note).toHaveTextContent("Not loaded: common/cac.xsd");
+    expect(validateCalls()).toHaveLength(0);
+  });
+
+  it("explains a check the server refuses because the schema does not compile", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      String(url).includes("/validate/")
+        ? {
+            ok: false,
+            status: 422,
+            json: async () => ({ detail: "the loaded schema does not compile: Element 'A': no type 'B'" }),
+          }
+        : { ok: true, status: 200, text: async () => "<Person/>", headers: new Headers() },
+    );
+    render(<SampleXmlDialog />);
+    act(() => openSampleXml({ elementId: "element:Person", name: "Person" }));
+    expect(
+      await screen.findByText("Cannot check the sample: the loaded schema does not compile: Element 'A': no type 'B'"),
+    ).toBeInTheDocument();
+  });
+
   it("copies the XML to the clipboard", async () => {
     respondWith("<Person/>");
     const writeText = vi.fn().mockResolvedValue(undefined);

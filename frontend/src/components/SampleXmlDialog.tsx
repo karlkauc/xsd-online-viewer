@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { xml } from "@codemirror/lang-xml";
 import { EditorView } from "@codemirror/view";
-import { fetchSampleXml, validateXmlText } from "../api/client";
-import type { SampleXmlResult } from "../api/client";
+import { ApiError, fetchSampleXml, validateXmlText } from "../api/client";
+import type { MissingReferences, SampleXmlResult } from "../api/client";
 import { useSelection } from "../stores/selectionStore";
 import { withSchemaRetry } from "../lib/schemaSession";
 import { HANDOFF_UNSUPPORTED_HINT, handoffSupported, openInXmlViewer } from "../lib/xmlViewerHandoff";
@@ -35,6 +35,24 @@ interface GeneratedSample extends SampleXmlResult {
 }
 
 const EXTENSIONS = [xml(), EditorView.lineWrapping];
+
+// The warnings the parser writes for imports and includes it could not load.
+const UNLOADED_FILE = /(?:unresolved (?:import|include|redefine|override) schemaLocation=|could not load )'([^']+)'/;
+
+function unloadedFiles(model: { diagnostics: { message: string }[] } | null): string[] {
+  const files = (model?.diagnostics ?? []).map((d) => UNLOADED_FILE.exec(d.message)?.[1]);
+  return [...new Set(files.filter((f): f is string => !!f))];
+}
+
+function incompleteNote(missing: MissingReferences, unloaded: string[]): string {
+  const listed = missing.names.join(", ") + (missing.count > missing.names.length ? ", …" : "");
+  const noun = missing.count === 1 ? "referenced declaration is" : "referenced declarations are";
+  return (
+    `Not validated — the schema is incomplete: ${missing.count} ${noun} missing from the loaded files (${listed}). ` +
+    "Load the schema together with its imported and included files (ZIP upload or URL) to get a sample that can be checked." +
+    (unloaded.length > 0 ? ` Not loaded: ${unloaded.join(", ")}.` : "")
+  );
+}
 const isDark = () => document.documentElement.classList.contains("dark");
 
 export function openSampleXml(request: SampleRequest): void {
@@ -108,7 +126,10 @@ export function SampleXmlDialog() {
   useEffect(() => {
     const current =
       sample !== null && sample.request === request && sample.includeOptional === includeOptional;
-    if (!request || !current || !isDocumentRoot) {
+    // A schema that references declarations it never loaded cannot compile;
+    // checking it would only return a compiler error, so the dialog says what
+    // is missing instead.
+    if (!request || !current || !isDocumentRoot || sample.missing) {
       setValidation(null);
       return;
     }
@@ -127,7 +148,15 @@ export function SampleXmlDialog() {
         if (!cancelled) setValidation({ status: "done", result });
       })
       .catch((err) => {
-        if (!cancelled) setValidation({ status: "failed", error: err instanceof Error ? err.message : String(err) });
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : String(err);
+        // 422: the schema itself does not compile (a part the generator never
+        // reached is missing, XSD 1.1, or it is too large to compile here).
+        const refused = err instanceof ApiError && err.status === 422;
+        setValidation({
+          status: "failed",
+          error: refused ? `Cannot check the sample: ${message}` : `Could not validate: ${message}`,
+        });
       });
     return () => {
       cancelled = true;
@@ -290,6 +319,16 @@ export function SampleXmlDialog() {
           </div>
         )}
 
+        {isDocumentRoot && sample?.missing && (
+          <div
+            role="status"
+            data-testid="sample-incomplete-note"
+            className="px-4 py-2 border-b border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 text-sm text-amber-900 dark:text-amber-200"
+          >
+            {incompleteNote(sample.missing, unloadedFiles(model))}
+          </div>
+        )}
+
         {validation && (
           <div
             role="status"
@@ -303,7 +342,7 @@ export function SampleXmlDialog() {
             }
           >
             {validation.status === "checking" && <span>Validating against the schema…</span>}
-            {validation.status === "failed" && <span>Could not validate: {validation.error}</span>}
+            {validation.status === "failed" && <span>{validation.error}</span>}
             {validation.status === "done" && validation.result.is_valid && (
               <span className="font-medium">✓ Schema-valid — the document validates against the loaded XSD.</span>
             )}

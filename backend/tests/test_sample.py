@@ -834,3 +834,30 @@ def test_complex_content_extension_of_simple_content_keeps_the_text() -> None:
     assert (root.text or "").strip(), xml
     assert root.get("type") is not None
     assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+
+
+def test_report_lists_references_the_loaded_files_do_not_define() -> None:
+    """A schema that references what it never loaded cannot compile (UBL without its imports).
+
+    The dialog skips its check for such a sample and names what is missing.
+    """
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:doc" xmlns:cac="urn:cac">
+  <xs:import namespace="urn:cac" schemaLocation="missing.xsd"/>
+  <xs:element name="Invoice"><xs:complexType><xs:sequence>
+    <xs:element ref="cac:Party"/>
+    <xs:element name="Total" type="cac:AmountType"/>
+    <xs:element ref="cac:Party"/>
+  </xs:sequence></xs:complexType></xs:element>
+</xs:schema>"""
+    model = parse_single(xsd, "invoice.xsd")
+    element = find_element(model, "element:{urn:doc}Invoice")
+    _, report = generate_sample_with_report(model, element, SampleOptions())
+    assert report.missing_references == ["cac:Party", "cac:AmountType"]
+
+
+def test_a_complete_schema_misses_no_references(simple_xsd_bytes: bytes) -> None:
+    model = parse_single(simple_xsd_bytes, "simple.xsd")
+    element = find_element(model, "element:{http://example.com/simple}Person")
+    _, report = generate_sample_with_report(model, element, SampleOptions(include_optional=True))
+    assert report.missing_references == []
