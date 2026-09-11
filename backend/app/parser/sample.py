@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import itertools
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
 from functools import lru_cache
@@ -843,48 +844,126 @@ def _emit_particle(
     depth: int,
     type_stack: tuple[str, ...],
 ) -> None:
-    count = _occurrences(ctx, particle)
-    for _ in range(count):
-        if particle.kind == "element" and particle.element is not None:
-            _emit_element_particle(
-                ctx,
-                parent,
-                particle.element,
-                depth=depth,
-                type_stack=type_stack,
-                optional=particle.min_occurs == 0,
-            )
-        elif particle.kind in ("sequence", "all"):
-            for child_particle in particle.children:
-                _emit_particle(ctx, parent, child_particle, depth=depth, type_stack=type_stack)
-        elif particle.kind == "choice":
-            chosen = _pick_choice(ctx, particle.children, type_stack)
-            if chosen is not None:
-                if chosen.kind != "element":
-                    # No branch was a plain element, so we took a group or a
-                    # wildcard — the weakest guess this generator makes.
-                    ctx.note("choice_branch_not_element", GENERATOR_LIMIT, chosen.kind)
-                forced = chosen if chosen.min_occurs > 0 else chosen.model_copy(update={"min_occurs": 1})
-                _emit_particle(ctx, parent, forced, depth=depth, type_stack=type_stack)
-        elif particle.kind == "group-ref":
-            group = particle.group_inline
-            if group is None and particle.group_ref:
-                group = ctx.lookup(ctx.group_by_key, particle.group_ref)
-            if group is None or group.particle is None:
-                parent.append(etree.Comment(f" group {particle.group_ref} not found in schema "))
-                ctx.note("group_not_found", SCHEMA_INCOMPLETE, particle.group_ref)
-                continue
-            ctx.file_stack.append(ctx.file_of(group))
-            try:
-                _emit_particle(ctx, parent, group.particle, depth=depth, type_stack=type_stack)
-            finally:
-                ctx.file_stack.pop()
-        elif particle.kind == "any":
-            if particle.min_occurs > 0:
-                _emit_wildcard(ctx, parent, particle, depth=depth, type_stack=type_stack)
-                continue
-            parent.append(etree.Comment(" any element allowed here "))
-            ctx.note("wildcard_skipped", GENERATOR_LIMIT, "xs:any")
+    for _ in range(_occurrences(ctx, particle)):
+        if particle.min_occurs == 0:
+            # Only here because optional content was asked for.
+            _emit_tentatively(ctx, parent, particle, _emit_occurrence, particle, depth, type_stack)
+        else:
+            _emit_occurrence(ctx, parent, particle, depth=depth, type_stack=type_stack)
+
+
+def _emit_occurrence(
+    ctx: _Context,
+    parent: etree._Element,
+    particle: Particle,
+    *,
+    depth: int,
+    type_stack: tuple[str, ...],
+) -> None:
+    """One occurrence of ``particle``."""
+    if particle.kind == "element" and particle.element is not None:
+        _emit_element_particle(
+            ctx,
+            parent,
+            particle.element,
+            depth=depth,
+            type_stack=type_stack,
+            optional=particle.min_occurs == 0,
+        )
+    elif particle.kind in ("sequence", "all"):
+        for child_particle in particle.children:
+            _emit_particle(ctx, parent, child_particle, depth=depth, type_stack=type_stack)
+    elif particle.kind == "choice":
+        _emit_choice(ctx, parent, particle, depth=depth, type_stack=type_stack)
+    elif particle.kind == "group-ref":
+        group = particle.group_inline
+        if group is None and particle.group_ref:
+            group = ctx.lookup(ctx.group_by_key, particle.group_ref)
+        if group is None or group.particle is None:
+            parent.append(etree.Comment(f" group {particle.group_ref} not found in schema "))
+            ctx.note("group_not_found", SCHEMA_INCOMPLETE, particle.group_ref)
+            return
+        ctx.file_stack.append(ctx.file_of(group))
+        try:
+            _emit_particle(ctx, parent, group.particle, depth=depth, type_stack=type_stack)
+        finally:
+            ctx.file_stack.pop()
+    elif particle.kind == "any":
+        if particle.min_occurs > 0:
+            _emit_wildcard(ctx, parent, particle, depth=depth, type_stack=type_stack)
+            return
+        parent.append(etree.Comment(" any element allowed here "))
+        ctx.note("wildcard_skipped", GENERATOR_LIMIT, "xs:any")
+
+
+def _emit_choice(
+    ctx: _Context,
+    parent: etree._Element,
+    particle: Particle,
+    *,
+    depth: int,
+    type_stack: tuple[str, ...],
+) -> None:
+    picked = _pick_choice(ctx, particle.children, type_stack)
+    if picked is None:
+        return
+    chosen, endless = picked
+    if chosen.min_occurs == 0 and endless:
+        # The branch may stay empty, and filling it could only re-enter an
+        # element that is already open (JATS def-list > def-list): that nests
+        # down to the depth limit only to be cut there. An empty choice is valid.
+        return
+    if chosen.kind != "element":
+        # No branch was a plain element, so we took a group or a
+        # wildcard — the weakest guess this generator makes.
+        ctx.note("choice_branch_not_element", GENERATOR_LIMIT, chosen.kind)
+    if chosen.min_occurs > 0:
+        _emit_particle(ctx, parent, chosen, depth=depth, type_stack=type_stack)
+        return
+    # The branch may be empty; show it once anyway, but take it back when its
+    # content cannot be generated.
+    forced = chosen.model_copy(update={"min_occurs": 1})
+    _emit_tentatively(ctx, parent, chosen, _emit_particle, forced, depth, type_stack)
+
+
+def _emit_tentatively(
+    ctx: _Context,
+    parent: etree._Element,
+    optional: Particle,
+    emit: Callable[..., None],
+    particle: Particle,
+    depth: int,
+    type_stack: tuple[str, ...],
+) -> None:
+    """``emit(particle)`` for content the schema does not require, taken back if it breaks.
+
+    Somewhere below, a required element may hit the recursion or depth guard,
+    or have an abstract type nothing derives from, and stay empty; that would
+    make the document invalid. ``optional`` is not required, so leave it out
+    instead — whether it is an element or a whole group (INSPIRE: an optional
+    sequence around gml:TopoComplex).
+    """
+    kept = len(parent)
+    cuts_before = ctx.cuts
+    notes_before = len(ctx.report)
+    emit(ctx, parent, particle, depth=depth, type_stack=type_stack)
+    if ctx.cuts == cuts_before:
+        return
+    for node in parent[kept:]:
+        parent.remove(node)
+    name = _particle_label(optional)
+    parent.append(etree.Comment(f" optional {name} omitted: its content cannot be generated "))
+    ctx.cuts = cuts_before
+    # The subtree is gone, so its degradations no longer describe the output;
+    # the one fact that survives is that we dropped it.
+    del ctx.report[notes_before:]
+    ctx.note("optional_subtree_dropped", GENERATOR_LIMIT, name, optional.element)
+
+
+def _particle_label(particle: Particle) -> str:
+    if particle.element is not None:
+        return particle.element.name or particle.element.ref or "element"
+    return particle.group_ref or particle.kind
 
 
 def _emit_element_particle(
@@ -924,37 +1003,24 @@ def _emit_element_particle(
     if declaration.nillable and _is_empty_decl(declaration):
         child.set(f"{{{XSI_NS}}}nil", "true")
         return
-    cuts_before = ctx.cuts
-    notes_before = len(ctx.report)
+    # An optional occurrence whose content cannot be completed is taken back
+    # by _emit_tentatively, one level up.
     ctx.open_elements.append(declaration.id)
     try:
         _fill_element(ctx, child, declaration, depth=depth, type_stack=type_stack)
     finally:
         ctx.open_elements.pop()
-    if optional and ctx.cuts > cuts_before:
-        # Somewhere below, a required element hit the recursion or depth
-        # guard, or had an abstract type nothing derives from, and stayed
-        # empty; that would make the document invalid. This occurrence is
-        # optional, so leave it out instead.
-        parent.remove(child)
-        parent.append(
-            etree.Comment(f" optional {declaration.name} omitted: its content cannot be generated ")
-        )
-        ctx.cuts = cuts_before
-        # The subtree is gone, so its degradations no longer describe the
-        # output; the one fact that survives is that we dropped it.
-        del ctx.report[notes_before:]
-        ctx.note("optional_subtree_dropped", GENERATOR_LIMIT, declaration.name, declaration)
 
 
 def _pick_choice(
     ctx: _Context, children: list[Particle], type_stack: tuple[str, ...] = ()
-) -> Particle | None:
+) -> tuple[Particle, bool] | None:
     """A branch that can end, preferring a plain element, then document order.
 
     A branch that can only be completed by nesting an element or type we are
     already inside never terminates (JATS: alternatives > array > alternatives),
-    so it is taken only when every branch is like that.
+    so it is taken only when every branch is like that. The flag says whether
+    the chosen one is such a branch.
     """
     usable = [child for child in children if child.max_occurs != 0]
     if not usable:
@@ -966,7 +1032,8 @@ def _pick_choice(
     except _CostBudgetExceededError:
         endless = [False] * len(usable)
     ranked = sorted(range(len(usable)), key=lambda i: (endless[i], usable[i].kind != "element", i))
-    return usable[ranked[0]]
+    best = ranked[0]
+    return usable[best], endless[best]
 
 
 _ENDLESS = float("inf")

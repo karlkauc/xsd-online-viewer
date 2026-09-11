@@ -856,6 +856,63 @@ def test_report_lists_references_the_loaded_files_do_not_define() -> None:
     assert report.missing_references == ["cac:Party", "cac:AmountType"]
 
 
+_RECURSION_HEAD = (
+    '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:r" xmlns="urn:r"'
+    ' elementFormDefault="qualified">'
+)
+
+# INSPIRE gml:TopoComplex: an optional sequence wraps a required element whose type recurses.
+_OPTIONAL_GROUP_RECURSION = (
+    _RECURSION_HEAD
+    + """
+  <xs:complexType name="NodeType">
+    <xs:sequence><xs:element name="child" type="MemberType"/></xs:sequence>
+    <xs:attribute name="id" type="xs:ID" use="required"/>
+  </xs:complexType>
+  <xs:complexType name="MemberType">
+    <xs:sequence minOccurs="0"><xs:element ref="Node"/></xs:sequence>
+  </xs:complexType>
+  <xs:element name="Node" type="NodeType"/>
+</xs:schema>"""
+).encode()
+
+# JATS def-list: the choice's only branch is optional and re-enters the element itself.
+_FORCED_BRANCH_RECURSION = (
+    _RECURSION_HEAD
+    + """
+  <xs:element name="List"><xs:complexType><xs:sequence>
+    <xs:element name="Item"><xs:complexType><xs:sequence>
+      <xs:element name="p" type="xs:string"/>
+    </xs:sequence></xs:complexType></xs:element>
+    <xs:choice><xs:element ref="List" minOccurs="0" maxOccurs="unbounded"/></xs:choice>
+  </xs:sequence></xs:complexType></xs:element>
+</xs:schema>"""
+).encode()
+
+
+@pytest.mark.parametrize("optional", [False, True])
+def test_recursion_inside_an_optional_group_is_left_out(optional: bool) -> None:
+    """The guard used to leave the inner Node without its child and its required id."""
+    model = parse_single(_OPTIONAL_GROUP_RECURSION, "r.xsd")
+    element = find_element(model, "element:{urn:r}Node")
+    xml, report = generate_sample_with_report(model, element, SampleOptions(include_optional=optional))
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+    assert "recursion_cut" not in report.counts
+    if optional:
+        assert report.counts.get("optional_subtree_dropped") == 1
+
+
+@pytest.mark.parametrize("optional", [False, True])
+def test_a_choice_is_not_forced_into_recursion(optional: bool) -> None:
+    """An empty choice is valid here; forcing the branch nested down to the depth limit."""
+    model = parse_single(_FORCED_BRANCH_RECURSION, "r.xsd")
+    element = find_element(model, "element:{urn:r}List")
+    xml, report = generate_sample_with_report(model, element, SampleOptions(include_optional=optional))
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
+    assert etree.fromstring(xml.encode("utf-8")).find("{urn:r}List") is None, xml
+    assert "depth_limit" not in report.counts
+
+
 def test_a_complete_schema_misses_no_references(simple_xsd_bytes: bytes) -> None:
     model = parse_single(simple_xsd_bytes, "simple.xsd")
     element = find_element(model, "element:{http://example.com/simple}Person")
