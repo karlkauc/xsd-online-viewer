@@ -702,7 +702,12 @@ def _fill_complex(
         if group is not None:
             _fill_attributes(ctx, node, group.attributes, group.attribute_group_refs, set(), group)
 
-    if ct.content_kind == "simple" or (ct.simple_content_base and not ct.particle):
+    # Simple content may sit further down the extension chain: a complexContent
+    # extension that only adds attributes keeps its base's text (GLEIF
+    # OtherEntityNameType over NameType).
+    if not any(m.particle for m in chain) and any(
+        m.content_kind == "simple" or m.simple_content_base for m in chain
+    ):
         owner = next((m for m in chain if m.simple_content_base), None)
         facets = [f for m in chain for f in m.simple_content_facets]
         base_name = owner.simple_content_base if owner else None

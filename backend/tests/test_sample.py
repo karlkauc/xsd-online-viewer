@@ -807,3 +807,30 @@ def test_unresolved_element_ref_as_root_keeps_its_name() -> None:
     xml, report = generate_sample_with_report(model, element, SampleOptions())
     assert etree.fromstring(xml.encode("utf-8")).tag == "{urn:cac}Party", xml
     assert report.counts == {"element_ref_not_found": 1}
+
+
+def test_complex_content_extension_of_simple_content_keeps_the_text() -> None:
+    """GLEIF OtherEntityNameType adds an attribute to NameType through complexContent.
+
+    The content stays NameType's simple content (minLength 1), but the derived
+    type itself carries neither a particle nor a simple base, so the element
+    came out empty -- invalid, and with nothing in the report.
+    """
+    xsd = b"""<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:g" xmlns:g="urn:g">
+  <xs:simpleType name="Tokenized500">
+    <xs:restriction base="xs:token"><xs:minLength value="1"/><xs:maxLength value="500"/></xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="NameType"><xs:simpleContent><xs:extension base="g:Tokenized500">
+    <xs:attribute name="lang" type="xs:language"/>
+  </xs:extension></xs:simpleContent></xs:complexType>
+  <xs:complexType name="OtherNameType"><xs:complexContent><xs:extension base="g:NameType">
+    <xs:attribute name="type" type="xs:string" use="required"/>
+  </xs:extension></xs:complexContent></xs:complexType>
+  <xs:element name="OtherName" type="g:OtherNameType"/>
+</xs:schema>"""
+    model = parse_single(xsd, "lei.xsd")
+    xml, root = _sample(model, "element:{urn:g}OtherName")
+    assert (root.text or "").strip(), xml
+    assert root.get("type") is not None
+    assert validate_xml(model, xml.encode("utf-8")).is_valid, xml
