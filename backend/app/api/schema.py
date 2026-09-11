@@ -19,6 +19,7 @@ from app.parser.sample import find_element
 from app.parser.security import SecurityError, fetch_schema_url
 from app.parser.urls import html_response_message, looks_like_html
 from app.parser.validation import (
+    ValidationErrorItem,
     ValidationResponse,
     ValidationSetupError,
     validate_xml,
@@ -326,7 +327,7 @@ def _record_sample_issue(
     model: SchemaModel,
     sample: SampleContext,
     xml_bytes: bytes,
-    result: ValidationResponse | None,
+    errors: list[ValidationErrorItem],
 ) -> None:
     """Persist why a generated sample did not come out right (never raises)."""
     declaration = find_element(model, sample.element_id) if sample.element_id else None
@@ -343,7 +344,7 @@ def _record_sample_issue(
             max_depth=sample.max_depth,
             generation_ms=sample.generation_ms,
             sample_xml=xml_bytes.decode("utf-8", errors="replace"),
-            errors=result.errors if result is not None else None,
+            errors=errors or None,
             report=decode_report(sample.report),
         )
     )
@@ -363,17 +364,19 @@ def _validate_xml_against_schema(
         result = validate_xml(model, xml_bytes)
     except ValidationSetupError as exc:
         if sample is not None:
-            # Not a sample defect: the schema itself does not compile — usually
-            # XSD 1.1, which libxml2 cannot do. Kept apart so it does not drown
-            # out the real findings.
-            _record_sample_issue("setup_error", model, sample, xml_bytes, None)
+            # Not a sample defect: the schema itself does not compile — XSD 1.1,
+            # which libxml2 cannot do, or a part the sample never reached is
+            # missing. Kept apart so it does not drown out the real findings,
+            # and the compiler's message is the reason.
+            setup = [ValidationErrorItem(kind="schema-setup", message=str(exc))]
+            _record_sample_issue("setup_error", model, sample, xml_bytes, setup)
         raise reject("validate", source, 422, str(exc), input_bytes=len(xml_bytes)) from exc
     except SecurityError as exc:
         raise reject("validate", source, 400, str(exc), input_bytes=len(xml_bytes)) from exc
     if sample is not None:
         kind = _sample_issue_kind(result, model, sample)
         if kind is not None:
-            _record_sample_issue(kind, model, sample, xml_bytes, result)
+            _record_sample_issue(kind, model, sample, xml_bytes, result.errors)
     emit(
         "validate",
         source=source,

@@ -572,6 +572,27 @@ def test_uncompilable_schema_is_kept_apart(client: TestClient, issues: IssueReco
     (issue,) = issues.issues
     assert issue.kind == "setup_error"
     assert issue.xsd_version in ("1.1", "unknown")
+    # Why it does not compile is the whole point of the row.
+    (error,) = json.loads(issue.errors)
+    assert error["kind"] == "schema-setup"
+    assert error["message"].startswith("the loaded schema does not compile: ")
+
+
+def test_an_uncompilable_schema_is_one_defect_whatever_the_root(
+    client: TestClient, issues: IssueRecorder
+) -> None:
+    """The schema is broken, not a sample: every root and option used to open its own row."""
+    xsd = _schema(
+        '<xs:element name="A" type="Missing"/>'
+        '<xs:element name="B" type="xs:string"/>'
+    )
+    schema_id = _load(client, xsd)
+    _sample_then_validate(client, schema_id, "element:{urn:t}B")
+    _sample_then_validate(client, schema_id, "element:{urn:t}B", optional=True)
+    first, repeat = issues.issues
+    assert first.kind == repeat.kind == "setup_error"
+    assert repeat.fingerprint == first.fingerprint
+    assert repeat.sample_xml is None  # counted, not shipped again
 
 
 def test_direct_api_use_without_a_report_records_nothing(

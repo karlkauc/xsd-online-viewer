@@ -64,12 +64,12 @@ It holds:
 | --- | --- |
 | `kind` | `invalid`, `not_well_formed`, `degraded`, `abstract_root`, `setup_error` (the schema does not compile — XSD 1.1, which libxml2 cannot do, or a missing part the sample never reached; a sample that itself hit references the loaded files do not define is never checked: the `X-Sample-Missing` header tells the dialog to name them instead, so nothing is recorded), `generator_error` |
 | `report` | the generator's own account of every spot it fudged, each classified `generator_limit` (our bug) or `schema_incomplete` (the schema's gap) |
-| `errors` | the validator's errors, in full |
+| `errors` | the validator's errors, in full; for `setup_error` the compiler's message (one entry, `kind: schema-setup`, file paths relative to the schema) |
 | `diagnostics` | what our parser complained about while reading the schema |
 | `sample_xml` | the generated document — synthetic data, capped at 1 MB |
 | `xsd_excerpts` | ±8 XSD lines around each declaration an error points at, capped at 16 kB — never whole files |
 | `element_id`, `include_optional`, `repeat_count`, `max_depth`, `generation_ms` | how the sample was produced |
-| `fingerprint`, `occurrences`, `first_seen_at`, `last_seen_at` | dedup: one row per defect per release, with a hit counter |
+| `fingerprint`, `occurrences`, `first_seen_at`, `last_seen_at` | dedup: one row per defect per release, with a hit counter; a `setup_error` is one row per schema and compiler message, whatever root or options reached it |
 
 The `fingerprint` covers the release (`app_version`: package version plus
 Cloud Run revision), so a defect that gets fixed stops counting up and a

@@ -122,3 +122,19 @@ def test_a_schema_that_does_not_compile_says_so_plainly() -> None:
     )
     with pytest.raises(ValidationSetupError, match="^the loaded schema does not compile: "):
         build_xmlschema(model)
+
+
+def test_a_compile_error_names_files_relative_to_the_schema() -> None:
+    """libxml2 reports the temporary copy (/tmp/xsdval-<random>/...), which reads badly
+    and gave every occurrence of the same defect a different sample_issue fingerprint."""
+    model = parse_single(
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+        b'<xs:include schemaLocation="parts/missing.xsd"/>'
+        b'<xs:element name="A" type="xs:string"/></xs:schema>',
+        "main.xsd",
+    )
+    with pytest.raises(ValidationSetupError) as raised:
+        build_xmlschema(model)
+    message = str(raised.value)
+    assert "parts/missing.xsd" in message
+    assert "xsdval-" not in message and "/tmp" not in message

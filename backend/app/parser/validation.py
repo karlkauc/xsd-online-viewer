@@ -263,15 +263,18 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
             xsd_tree = etree.parse(str(main_on_disk), parser)
             return etree.XMLSchema(xsd_tree)
         except etree.XMLSchemaParseError as exc:
-            detail = str(exc)
+            # libxml2 names the temporary copies; show paths relative to the
+            # schema instead, which also keeps the message stable across calls.
+            detail = str(exc).replace(f"{tmp_root}/", "")
             if unavailable:
                 detail += f" (unavailable referenced files: {', '.join(unavailable)})"
             raise ValidationSetupError(
                 f"the loaded schema does not compile: {detail}"
             ) from exc
         except etree.XMLSyntaxError as exc:
+            detail = str(exc).replace(f"{tmp_root}/", "")
             raise ValidationSetupError(
-                f"cached schema could not be parsed: {exc}"
+                f"cached schema could not be parsed: {detail}"
             ) from exc
 
 

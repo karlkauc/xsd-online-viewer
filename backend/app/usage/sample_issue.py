@@ -306,15 +306,22 @@ def build_issue(
     if model is not None:
         main = next((f for f in model.files if f.relationship == "main"), None)
 
+    # A schema that does not compile is one defect however it was reached;
+    # otherwise every root and option combination would open a row of its own.
+    schema_defect = kind == "setup_error"
     return SampleIssue(
         fingerprint=fingerprint(
             kind=kind,
             app_version=version,
             schema_id=model.schema_id if model is not None else None,
-            element_id=element_id,
-            options=(bool(include_optional), int(repeat or 0), int(max_depth or 0)),
+            element_id=None if schema_defect else element_id,
+            options=(
+                None
+                if schema_defect
+                else (bool(include_optional), int(repeat or 0), int(max_depth or 0))
+            ),
             error_messages=[e.message for e in errors],
-            reasons=reasons,
+            reasons=[] if schema_defect else reasons,
         ),
         kind=kind,
         app_version=version,
