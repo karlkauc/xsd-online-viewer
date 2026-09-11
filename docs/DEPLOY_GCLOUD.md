@@ -38,7 +38,7 @@ gcloud run deploy xsdviewer \
   --region europe-west1 \
   --platform managed \
   --allow-unauthenticated \
-  --memory 512Mi \
+  --memory 1Gi \
   --cpu 1 \
   --cpu-boost \
   --concurrency 20 \
@@ -75,7 +75,7 @@ aus. Production läuft hinter der Custom-Domain
 |-------|------|------------|
 | Max. Request-Größe | **32 MB** | `MAX_UPLOAD_MB` darf nicht größer sein, sonst akzeptiert das Backend Uploads, die der Cloud-Run-LB vorher schon ablehnt. |
 | Max. Request-Timeout | 60 min (Default 5 min) | Die App antwortet typischerweise in <1 s; 60 s reichen mehr als aus. |
-| Memory | 128 MiB – 32 GiB | 512 MiB ist hier der Sweet-Spot (siehe Sizing). |
+| Memory | 128 MiB – 32 GiB | 1 GiB seit 2026-09-11; 512 MiB reichten für große Schemas nicht (siehe Sizing). |
 
 ## Sizing-Begründung
 
@@ -86,8 +86,13 @@ Worst-Case-Memory beim Parsen einer 32 MB XSD:
 - LRU-Cache (`SCHEMA_CACHE_MAX_ENTRIES=32` Standard, `backend/app/config.py`): ~ 5 MB pro Eintrag → bis zu 160 MB steady-state
 - Framework-Overhead: ~ 20 MB
 
-Macht **~210 MB Steady, ~360 MB Peak**. 512 MiB lassen genug Headroom,
-ohne Memory zu verschwenden.
+Macht **~210 MB Steady, ~360 MB Peak** — nach Rohgröße gerechnet. Den
+Speicher treibt aber die Zahl der Deklarationen: 8–9-MB-Schemas mit rund
+6000 Typen (A-GRA, UCI, UNPDocument) haben 512 MiB zwischen 2026-09-01 und
+2026-09-11 dreizehnmal überschritten; die Instanz wurde beendet und ihr
+Schema-Cache war weg, Folge-Requests liefen in 404. Eine 19,8-MB-Datei mit
+288 Typen (CrossIndustryInvoice) blieb dagegen unkritisch. Seit 2026-09-11
+daher 1 GiB.
 
 XSD-Parsing ist **CPU-bound** (lxml-Tree-Walks, Facetten-Regex). Eine CPU
 pro Instanz reicht; Last-Spitzen werden horizontal über zusätzliche
@@ -95,7 +100,7 @@ Instanzen bedient.
 
 | Flag | Wert | Begründung |
 |------|------|------------|
-| `--memory` | `512Mi` | Peak + Headroom, kein OOM-Risiko |
+| `--memory` | `1Gi` | Peak großer Schemas (~6000 Typen) + Headroom; mit `512Mi` OOM |
 | `--cpu` | `1` | CPU-bound Workload, horizontal skalieren |
 | `--min-instances` | `0` | Scale-to-zero, keine Idle-Kosten |
 | `--max-instances` | `5` | Harter Deckel gegen Runaway-Billing |

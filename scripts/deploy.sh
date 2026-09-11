@@ -8,6 +8,7 @@
 #
 # Usage: scripts/deploy.sh            (from the repo root or anywhere)
 #        SKIP_GEOIP=1 scripts/deploy.sh   (deploy without refreshing the DB)
+#        scripts/deploy.sh --memory 1Gi   (extra flags go to `gcloud run deploy`)
 set -euo pipefail
 
 PROJECT=xsd-viewer-495407
@@ -36,4 +37,4 @@ fi
 [[ -s "$DEST" ]] || echo "!! $DEST missing — the image will fall back to a runtime download" >&2
 
 echo ">> deploying $SERVICE to $PROJECT/$REGION"
-gcloud run deploy "$SERVICE" --source . --region "$REGION" --project "$PROJECT"
+gcloud run deploy "$SERVICE" --source . --region "$REGION" --project "$PROJECT" "$@"
