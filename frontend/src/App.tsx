@@ -6,7 +6,7 @@ import { SearchPalette } from "./components/SearchPalette";
 import { AboutDialog, GITHUB_REPO_URL, openAbout } from "./components/AboutDialog";
 import { FeedbackDialog } from "./components/FeedbackDialog";
 import { SampleXmlDialog, openSampleXml } from "./components/SampleXmlDialog";
-import { computeRootElements } from "./lib/rootElements";
+import { sampleRootCandidates } from "./lib/rootElements";
 import { openFeedback } from "./components/UploadError";
 import { DiagramView } from "./components/DiagramView/DiagramView";
 import { TextView } from "./components/TextView/TextView";
@@ -179,9 +179,7 @@ export default function App() {
   const sampleRoots = useMemo(
     () =>
       model
-        ? computeRootElements(model)
-            .filter((el) => el.name)
-            .map((el) => ({ elementId: el.id, name: el.name as string }))
+        ? sampleRootCandidates(model).map((el) => ({ elementId: el.id, name: el.name as string }))
         : [],
     [model],
   );

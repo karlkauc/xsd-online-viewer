@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeRootElements } from "../src/lib/rootElements";
+import { computeRootElements, sampleRootCandidates } from "../src/lib/rootElements";
 import type { ElementDecl, SchemaModel, SourceFile } from "../src/types/schema";
 
 const NS = "http://example.com/ns";
@@ -98,5 +98,57 @@ describe("computeRootElements", () => {
     const roots = computeRootElements(model([a], [INCLUDED]));
 
     expect(roots.map((e) => e.name)).toEqual(["A"]);
+  });
+});
+
+function abstractElement(name: string, fileId = "main"): ElementDecl {
+  return { ...globalElement(name, fileId), abstract: true };
+}
+
+function inGroup(element: ElementDecl, head: string): ElementDecl {
+  return { ...element, substitution_group: `tns:${head}` };
+}
+
+const candidateNames = (m: SchemaModel) => sampleRootCandidates(m).map((e) => e.name);
+
+describe("sampleRootCandidates", () => {
+  it("leaves out abstract roots that nothing can substitute (KML: 113 of 269 roots)", () => {
+    const kml = globalElement("kml", "main");
+    const group = abstractElement("AbstractObjectGroup");
+
+    expect(candidateNames(model([kml, group], [MAIN]))).toEqual(["kml"]);
+  });
+
+  it("keeps an abstract root with a concrete member, also one declared in another file", () => {
+    const feature = abstractElement("AbstractFeatureGroup");
+    const placemark = inGroup(globalElement("Placemark", "inc"), "AbstractFeatureGroup");
+
+    expect(candidateNames(model([feature, placemark], [MAIN, INCLUDED]))).toEqual(["AbstractFeatureGroup"]);
+  });
+
+  it("follows the group through abstract members to a concrete one", () => {
+    const feature = abstractElement("AbstractFeatureGroup");
+    const container = inGroup(abstractElement("AbstractContainerGroup"), "AbstractFeatureGroup");
+    const folder = inGroup(globalElement("Folder", "inc"), "AbstractContainerGroup");
+
+    expect(candidateNames(model([feature, container, folder], [MAIN, INCLUDED]))).toEqual([
+      "AbstractFeatureGroup",
+      "AbstractContainerGroup",
+    ]);
+  });
+
+  it("counts neither a chain of abstract members nor a cycle as substitutable", () => {
+    const doc = globalElement("Doc", "main");
+    const a = inGroup(abstractElement("A"), "B");
+    const b = inGroup(abstractElement("B"), "A");
+
+    expect(candidateNames(model([doc, a, b], [MAIN]))).toEqual(["Doc"]);
+  });
+
+  it("falls back to every root when all of them are abstract", () => {
+    const a = abstractElement("A");
+    const b = abstractElement("B");
+
+    expect(candidateNames(model([a, b], [MAIN]))).toEqual(["A", "B"]);
   });
 });

@@ -27,3 +27,34 @@ export function computeRootElements(model: SchemaModel): ElementDecl[] {
   // full list so the views are never empty.
   return roots.length > 0 ? roots : model.elements;
 }
+
+/**
+ * Roots worth offering for a sample document: the named document roots minus
+ * abstract elements nothing can substitute. Such an element can never be the
+ * document element, so its sample could never validate (KML declares 113 of
+ * its 269 globals like that). An abstract root with a concrete member stays:
+ * the generator substitutes it. If nothing would be left, every named root is
+ * offered as before.
+ */
+export function sampleRootCandidates(model: SchemaModel): ElementDecl[] {
+  const named = computeRootElements(model).filter((el) => el.name);
+  const membersByHead = new Map<string, ElementDecl[]>();
+  for (const el of model.elements) {
+    if (!el.substitution_group || !el.name) continue;
+    // substitution_group is a prefixed QName; match on its local name.
+    const head = localName(el.substitution_group);
+    membersByHead.set(head, [...(membersByHead.get(head) ?? []), el]);
+  }
+  const substitutable = (el: ElementDecl, seen: Set<string>): boolean => {
+    if (!el.abstract) return true;
+    if (seen.has(el.id)) return false;
+    seen.add(el.id);
+    return (membersByHead.get(el.name ?? "") ?? []).some((member) => substitutable(member, seen));
+  };
+  const usable = named.filter((el) => substitutable(el, new Set()));
+  return usable.length > 0 ? usable : named;
+}
+
+function localName(qname: string): string {
+  return qname.slice(Math.max(qname.lastIndexOf("}"), qname.lastIndexOf(":")) + 1);
+}
