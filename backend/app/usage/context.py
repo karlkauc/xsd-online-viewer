@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from app import __version__
+from app import release_version
 from app.usage.events import (
     UsageEvent,
     classify_device,
@@ -117,7 +117,7 @@ def emit(event_type: str, **fields: Any) -> bool:
             country_code=tracker.geoip.country(ctx.ip) if tracker.geoip else None,
             user_agent=truncate(ctx.user_agent),
             device=classify_device(ctx.user_agent),
-            app_version=__version__,
+            app_version=release_version(),
             referrer=clean_referrer(ctx.referrer),
             **fields,
         )
@@ -133,9 +133,9 @@ def emit(event_type: str, **fields: Any) -> bool:
 def record_issue(issue: SampleIssue) -> bool:
     """Enqueue a sample diagnostics row for the current request. Never raises.
 
-    A fingerprint this process already wrote is dropped here rather than in
-    Postgres: the ``ON CONFLICT`` upsert would still have to ship the whole
-    payload across the wire first.
+    A fingerprint this process already wrote goes out again without its
+    payload: the ``ON CONFLICT`` upsert only needs the fingerprint to bump
+    ``occurrences``, and shipping the whole document again would be waste.
     """
     ctx = _request_usage.get()
     if ctx is None or not ctx.tracker.enabled or ctx.tracker.issues is None:
@@ -143,7 +143,7 @@ def record_issue(issue: SampleIssue) -> bool:
     try:
         tracker = ctx.tracker
         if not tracker.seen_issues.check_and_add(issue.fingerprint):
-            return False
+            issue = issue.without_payload()
         issue.visitor_hash = visitor_hash(
             ctx.ip, ctx.user_agent, _utc_today(), tracker.hash_secret
         )

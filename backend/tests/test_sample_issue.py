@@ -262,6 +262,15 @@ def test_build_issue_fingerprints_the_running_version() -> None:
     ).fingerprint
 
 
+def test_the_cloud_run_revision_tells_deploys_apart(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The package version stays put across many deploys; the revision does not."""
+    monkeypatch.setenv("K_REVISION", "xsdviewer-00046-abc")
+    issue = build_issue(kind="invalid", model=None)
+    assert issue.app_version == f"{__version__}+xsdviewer-00046-abc"
+    monkeypatch.setenv("K_REVISION", "xsdviewer-00047-def")
+    assert build_issue(kind="invalid", model=None).fingerprint != issue.fingerprint
+
+
 def test_seen_fingerprints_skips_repeats_and_stays_bounded() -> None:
     seen = SeenFingerprints(capacity=2)
     assert seen.check_and_add("a") is True
@@ -502,13 +511,27 @@ def test_invalid_sample_is_recorded_with_the_reason(
     assert issue.visitor_hash and issue.app_version == __version__
 
 
-def test_the_same_defect_is_only_recorded_once(
+def test_a_repeated_defect_still_counts_without_its_payload(
     client: TestClient, issues: IssueRecorder
 ) -> None:
+    """A repeat must bump ``occurrences``, or the table cannot rank defects by hits.
+
+    Only the fingerprint and the small metadata travel again; the upsert's
+    conflict branch does the counting.
+    """
     schema_id = _load(client, PATTERN_XSD)
     _sample_then_validate(client, schema_id, "element:{urn:t}A")
     _sample_then_validate(client, schema_id, "element:{urn:t}A")
-    assert len(issues.issues) == 1
+    first, repeat = issues.issues
+    assert repeat.fingerprint == first.fingerprint
+    assert first.sample_xml is not None and first.errors is not None
+    assert (
+        repeat.sample_xml,
+        repeat.errors,
+        repeat.report,
+        repeat.diagnostics,
+        repeat.xsd_excerpts,
+    ) == (None, None, None, None, None)
 
 
 def test_a_clean_sample_records_nothing(

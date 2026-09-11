@@ -29,10 +29,10 @@ import json
 import re
 from collections import OrderedDict
 from collections.abc import Iterable
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from typing import Any
 
-from app import __version__
+from app import release_version
 from app.parser.model import SchemaModel
 from app.parser.validation import ValidationErrorItem
 
@@ -90,6 +90,18 @@ class SampleIssue:
 
     def as_row(self) -> tuple:
         return tuple(getattr(self, f.name) for f in fields(self))
+
+    def without_payload(self) -> SampleIssue:
+        """The same defect minus the bulky columns: enough to count a repeat."""
+        return replace(
+            self,
+            errors=None,
+            report=None,
+            diagnostics=None,
+            xsd_excerpts=None,
+            sample_xml=None,
+            traceback=None,
+        )
 
 
 COLUMNS: tuple[str, ...] = tuple(f.name for f in fields(SampleIssue))
@@ -274,12 +286,13 @@ def build_issue(
     ``report`` is a ``SampleReport.as_dict()`` payload, which may have made a
     round trip through the browser; treat it as data, never as truth.
 
-    ``app_version`` defaults to the running version and must be settled *here*,
-    because the fingerprint hashes it: filling it in after the fact would
-    fingerprint an empty version, and a defect fixed in a new release would
-    keep bumping the old row's counter instead of starting a fresh one.
+    ``app_version`` defaults to the running release (version plus Cloud Run
+    revision) and must be settled *here*, because the fingerprint hashes it:
+    filling it in after the fact would fingerprint an empty version, and a
+    defect fixed in a new release would keep bumping the old row's counter
+    instead of starting a fresh one.
     """
-    version = app_version if app_version is not None else __version__
+    version = app_version if app_version is not None else release_version()
     errors = errors or []
     entries = report.get("entries") or [] if report else []
     reasons = list((report.get("counts") or {}).keys()) if report else []

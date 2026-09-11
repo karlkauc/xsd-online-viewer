@@ -8,7 +8,7 @@ from datetime import date
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from app import __version__
+from app import release_version
 from app.rate_limit import limiter
 from app.usage.context import current
 from app.usage.events import classify_device, truncate, visitor_hash
@@ -58,7 +58,7 @@ async def submit_feedback(request: Request, payload: FeedbackPayload) -> Respons
         country_code=tracker.geoip.country(ip) if tracker and tracker.geoip else None,
         user_agent=truncate(ua),
         device=classify_device(ua),
-        app_version=__version__,
+        app_version=release_version(),
     )
     try:
         await store.save(row)

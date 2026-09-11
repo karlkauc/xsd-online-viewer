@@ -32,7 +32,7 @@ One row per event in table `usage_event` (DDL: `backend/sql/usage_stats.sql`):
 | `input_bytes`, `file_count`, `element_count`, `type_count`, `diagnostic_count` | sizes and counts |
 | `error_count` | validate: number of validation errors |
 | `duration_ms`, `status`, `status_code`, `error_detail` | timing and outcome (`ok`/`invalid`/`parse_error`/`rejected`); `error_detail` is the exception message, ≤255 chars |
-| `app_version`, `received_at` | build version, server timestamp |
+| `app_version`, `received_at` | release (package version plus Cloud Run revision, e.g. `0.2.0+xsdviewer-00046-abc`; the bare version off Cloud Run), server timestamp |
 
 ### Feedback
 
@@ -69,10 +69,13 @@ It holds:
 | `sample_xml` | the generated document — synthetic data, capped at 1 MB |
 | `xsd_excerpts` | ±8 XSD lines around each declaration an error points at, capped at 16 kB — never whole files |
 | `element_id`, `include_optional`, `repeat_count`, `max_depth`, `generation_ms` | how the sample was produced |
-| `fingerprint`, `occurrences`, `first_seen_at`, `last_seen_at` | dedup: one row per defect per app version, with a hit counter |
+| `fingerprint`, `occurrences`, `first_seen_at`, `last_seen_at` | dedup: one row per defect per release, with a hit counter |
 
-The `fingerprint` covers the app version, so a defect that gets fixed stops
-counting up and a regression starts a fresh row. The generator report reaches
+The `fingerprint` covers the release (`app_version`: package version plus
+Cloud Run revision), so a defect that gets fixed stops counting up and a
+regression starts a fresh row. A repeat that the same instance already wrote
+goes out again without its payload (no document, errors or excerpts): the
+upsert only needs the fingerprint to bump `occurrences`. The generator report reaches
 the recording endpoint via the `X-Sample-Report` response header, which the
 browser hands back with the validation request; it is treated as untrusted
 input and rebuilt field by field (`app/usage/sample_issue.py`).
