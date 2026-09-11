@@ -57,6 +57,20 @@ function respondWith(text: string, validation: object = VALID, report: string | 
 }
 
 const sampleCalls = () => fetchMock.mock.calls.filter((c) => !String(c[0]).includes("/validate/"));
+const validateCalls = () => fetchMock.mock.calls.filter((c) => String(c[0]).includes("/validate/"));
+
+/** A sample that names the element and option it was generated for. */
+const parameterSample = (elementId: string | null, optional: boolean) =>
+  `<Sample element="${elementId}" optional="${optional}"/>`;
+
+function respondWithParameters() {
+  fetchMock.mockImplementation(async (url: string) => {
+    if (String(url).includes("/validate/")) return { ok: true, status: 200, json: async () => VALID };
+    const params = new URL(String(url), "http://localhost").searchParams;
+    const text = parameterSample(params.get("element"), params.get("optional") === "true");
+    return { ok: true, status: 200, text: async () => text, headers: new Headers() };
+  });
+}
 
 describe("SampleXmlDialog", () => {
   it("stays closed until asked, then fetches and shows the sample", async () => {
@@ -130,6 +144,40 @@ describe("SampleXmlDialog", () => {
     await userEvent.click(screen.getByRole("checkbox", { name: /Include optional/ }));
     await waitFor(() => expect(sampleCalls()).toHaveLength(2));
     expect(sampleCalls()[1][0]).toContain("optional=true");
+  });
+
+  // The check says how the sample was made, and a failing one is recorded in
+  // sample_issue under exactly that. Checking the previous sample under a new
+  // element or option records a defect that never happened (UBL, A-GRA).
+  it("never validates the previous element's sample under the new element", async () => {
+    respondWithParameters();
+    render(<SampleXmlDialog />);
+    act(() => openSampleXml({ elementId: "element:Address", name: "Address" }));
+    await screen.findByTestId("sample-fragment-note");
+    act(() => openSampleXml({ elementId: "element:Person", name: "Person" }));
+    await screen.findByText(/Schema-valid/);
+
+    expect(validateCalls().length).toBeGreaterThan(0);
+    for (const [, init] of validateCalls()) {
+      const body = JSON.parse(String(init.body));
+      expect(body.content).toBe(parameterSample(body.sample.element_id, body.sample.include_optional));
+    }
+  });
+
+  it("never validates the required-only sample as the one with optional content", async () => {
+    respondWithParameters();
+    render(<SampleXmlDialog />);
+    act(() => openSampleXml({ elementId: "element:Person", name: "Person" }));
+    await screen.findByText(/Schema-valid/);
+    await userEvent.click(screen.getByRole("checkbox", { name: /Include optional/ }));
+    await waitFor(() =>
+      expect(validateCalls().some(([, init]) => JSON.parse(String(init.body)).sample.include_optional)).toBe(true),
+    );
+
+    for (const [, init] of validateCalls()) {
+      const body = JSON.parse(String(init.body));
+      expect(body.content).toBe(parameterSample(body.sample.element_id, body.sample.include_optional));
+    }
   });
 
   it("copies the XML to the clipboard", async () => {

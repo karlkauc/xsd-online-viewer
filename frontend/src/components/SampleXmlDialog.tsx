@@ -28,6 +28,12 @@ export interface SampleRequest extends SampleTarget {
   candidates?: SampleTarget[];
 }
 
+/** A generated sample and what it was generated for. */
+interface GeneratedSample extends SampleXmlResult {
+  request: SampleRequest;
+  includeOptional: boolean;
+}
+
 const EXTENSIONS = [xml(), EditorView.lineWrapping];
 const isDark = () => document.documentElement.classList.contains("dark");
 
@@ -48,7 +54,7 @@ export function SampleXmlDialog() {
   const [request, setRequest] = useState<SampleRequest | null>(null);
   const [validation, setValidation] = useState<Validation | null>(null);
   const [includeOptional, setIncludeOptional] = useState(false);
-  const [sample, setSample] = useState<SampleXmlResult | null>(null);
+  const [sample, setSample] = useState<GeneratedSample | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [handoff, setHandoff] = useState<"idle" | "sending" | "sent" | "failed" | "unsupported">("idle");
@@ -72,7 +78,7 @@ export function SampleXmlDialog() {
     setError(null);
     withSchemaRetry((id) => fetchSampleXml(id, request.elementId, { includeOptional }))
       .then((result) => {
-        if (!cancelled) setSample(result);
+        if (!cancelled) setSample({ ...result, request, includeOptional });
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -94,8 +100,15 @@ export function SampleXmlDialog() {
   // sees whether it can be used as-is or which placeholders need attention.
   // The generator's own report rides along, so a sample that comes out wrong
   // is recorded with the reason (backend/app/usage/sample_issue.py).
+  //
+  // Only a sample generated for the current request and options: right after
+  // the dialog is reopened or the checkbox flips, the previous sample is still
+  // in state for one render, and checking it would record a defect under
+  // parameters it was never generated with.
   useEffect(() => {
-    if (!request || sample === null || !isDocumentRoot) {
+    const current =
+      sample !== null && sample.request === request && sample.includeOptional === includeOptional;
+    if (!request || !current || !isDocumentRoot) {
       setValidation(null);
       return;
     }
