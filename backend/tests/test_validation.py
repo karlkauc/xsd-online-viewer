@@ -138,3 +138,106 @@ def test_a_compile_error_names_files_relative_to_the_schema() -> None:
     message = str(raised.value)
     assert "parts/missing.xsd" in message
     assert "xsdval-" not in message and "/tmp" not in message
+
+
+_DSIG_NS = "http://www.w3.org/2000/09/xmldsig#"
+_SIGNATURE = (
+    f'<ds:Signature xmlns:ds="{_DSIG_NS}"><ds:SignedInfo>'
+    '<ds:CanonicalizationMethod Algorithm="urn:c14n"/>'
+    '<ds:SignatureMethod Algorithm="urn:rsa"/>'
+    '<ds:Reference><ds:DigestMethod Algorithm="urn:sha"/><ds:DigestValue>AA==</ds:DigestValue>'
+    "</ds:Reference></ds:SignedInfo><ds:SignatureValue>AA==</ds:SignatureValue></ds:Signature>"
+)
+
+
+def _bundled_import(location: str) -> bytes:
+    return (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:tns="urn:t" '
+        'targetNamespace="urn:t" elementFormDefault="qualified">'
+        f'<xs:import namespace="{_DSIG_NS}"{location}/>'
+        '<xs:element name="Doc" type="xs:string"/>'
+        "</xs:schema>"
+    ).encode()
+
+
+@pytest.mark.parametrize(
+    "location", ["", ' schemaLocation="xmldsig-core-schema_v01.xsd"'], ids=["none", "stale"]
+)
+def test_an_element_of_a_bundled_import_can_be_the_validation_root(location: str) -> None:
+    """A sample rooted at ds:Signature read "No matching global declaration available
+    for the validation root": the parser satisfies such an import from app/parser/w3c,
+    but libxml2 was left with the import the schema wrote (TiposNFe_v02.xsd)."""
+    model = parse_single(_bundled_import(location), "main.xsd")
+    assert [f.filename for f in model.files] == ["main.xsd", "xmldsig-core-schema.xsd"]
+
+    result = validate_xml(model, _SIGNATURE.encode())
+
+    assert result.is_valid, [e.message for e in result.errors]
+
+
+def test_a_reference_into_a_bundled_import_compiles() -> None:
+    """Worse than an unusable root: the whole schema stopped compiling, so neither a
+    sample nor the user's own XML could be checked at all."""
+    model = parse_single(
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:tns="urn:t" '
+        f'xmlns:ds="{_DSIG_NS}" targetNamespace="urn:t" elementFormDefault="qualified">'
+        f'<xs:import namespace="{_DSIG_NS}"/>'
+        '<xs:element name="Doc"><xs:complexType><xs:sequence>'
+        '<xs:element ref="ds:Signature"/></xs:sequence></xs:complexType></xs:element>'
+        "</xs:schema>".encode(),
+        "main.xsd",
+    )
+
+    result = validate_xml(model, f'<tns:Doc xmlns:tns="urn:t">{_SIGNATURE}</tns:Doc>'.encode())
+
+    assert result.is_valid, [e.message for e in result.errors]
+
+
+def test_a_bundled_import_of_an_imported_file_is_repaired_too() -> None:
+    """The import may sit in any loaded file, not just the main one."""
+    files = {
+        "main.xsd": (
+            b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:s="urn:s" '
+            b'xmlns:tns="urn:t" targetNamespace="urn:t" elementFormDefault="qualified">'
+            b'<xs:import namespace="urn:s" schemaLocation="signed.xsd"/>'
+            b'<xs:element name="Doc" type="s:SignedType"/>'
+            b"</xs:schema>"
+        ),
+        "signed.xsd": (
+            '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+            f'xmlns:ds="{_DSIG_NS}" targetNamespace="urn:s" elementFormDefault="qualified">'
+            f'<xs:import namespace="{_DSIG_NS}"/>'
+            '<xs:complexType name="SignedType"><xs:sequence>'
+            '<xs:element ref="ds:Signature"/></xs:sequence></xs:complexType>'
+            "</xs:schema>"
+        ).encode(),
+    }
+    model = parse_files_map(files, "main.xsd")
+
+    result = validate_xml(model, f'<tns:Doc xmlns:tns="urn:t">{_SIGNATURE}</tns:Doc>'.encode())
+
+    assert result.is_valid, [e.message for e in result.errors]
+
+
+def test_a_bundled_schema_can_reach_the_bundled_schema_it_imports() -> None:
+    """xlink.xsd imports xml.xsd by its w3.org URL, and the loader serves that from
+    the bundle as well: the copy libxml2 compiles has to reach it without a network."""
+    model = parse_single(
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+        b'xmlns:xl="http://www.w3.org/1999/xlink" xmlns:tns="urn:t" '
+        b'targetNamespace="urn:t" elementFormDefault="qualified">'
+        b'<xs:import namespace="http://www.w3.org/1999/xlink"/>'
+        b'<xs:element name="Link"><xs:complexType>'
+        b'<xs:attributeGroup ref="xl:simpleAttrs"/></xs:complexType></xs:element>'
+        b"</xs:schema>",
+        "main.xsd",
+    )
+    assert "xml.xsd" in [f.filename for f in model.files]
+
+    result = validate_xml(
+        model,
+        b'<tns:Link xmlns:tns="urn:t" xmlns:xl="http://www.w3.org/1999/xlink" '
+        b'xl:type="simple" xl:href="urn:x"/>',
+    )
+
+    assert result.is_valid, [e.message for e in result.errors]

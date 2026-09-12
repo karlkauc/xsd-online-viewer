@@ -12,6 +12,7 @@ the frontend shows back to the user.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from io import BytesIO
 from pathlib import Path, PurePosixPath
@@ -21,6 +22,7 @@ from lxml import etree
 from pydantic import BaseModel, Field
 
 from app.parser.model import (
+    XSD_NS,
     AttributeDecl,
     AttributeGroup,
     ComplexType,
@@ -200,6 +202,59 @@ def largest_substitution_group(model: SchemaModel) -> tuple[str, int] | None:
     )
 
 
+def _location_resolves(location: str | None, path: Path, by_url: dict[str, Path]) -> bool:
+    """Whether libxml2 would find ``location`` as written in the file at ``path``."""
+    if not location:
+        return False
+    if "://" in location:
+        return _url_key(location) in by_url
+    return (path.parent / location).exists()
+
+
+def _repair_imports(
+    path: Path,
+    data: bytes,
+    by_namespace: dict[str, Path],
+    by_url: dict[str, Path],
+    parser: etree.XMLParser,
+) -> bytes | None:
+    """Point an import at the file the loader actually satisfied it with.
+
+    The loader fills an ``<xs:import>`` whose schemaLocation is absent or does
+    not resolve from the bundled W3C schemas or from another loaded file of
+    that namespace (``app/parser/w3c``, ``xsd_parser._follow_references``), so
+    the model holds a file libxml2 would never load: it only ever sees the
+    location the schema wrote. The whole namespace was then missing from the
+    compiled schema -- a sample rooted in it read "No matching global
+    declaration available for the validation root", and a schema that referred
+    to it did not compile at all (TiposNFe_v02.xsd + xmldsig).
+
+    Returns the patched bytes, or ``None`` when nothing had to change.
+    """
+    if b"import" not in data:
+        return None
+    try:
+        tree = etree.parse(BytesIO(data), parser)
+    except etree.XMLSyntaxError:
+        return None  # the compile step reports it, with a better message
+    changed = False
+    for elem in tree.getroot().findall(f"{{{XSD_NS}}}import"):
+        materialised = by_namespace.get(elem.get("namespace") or "")
+        if materialised is None or materialised == path:
+            continue
+        if _location_resolves(elem.get("schemaLocation"), path, by_url):
+            continue
+        elem.set("schemaLocation", os.path.relpath(materialised, path.parent))
+        changed = True
+    if not changed:
+        return None
+    # Keep the line numbers a compile error reports: an added attribute stays
+    # on its own line, but an added XML declaration would shift every line.
+    return etree.tostring(
+        tree, xml_declaration=data.lstrip()[:5] == b"<?xml", encoding="UTF-8"
+    )
+
+
 def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
     """Compile ``model``'s source files into an ``etree.XMLSchema``.
 
@@ -227,6 +282,8 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
         unavailable: list[str] = []
         main_has_entities = False
         by_url: dict[str, Path] = {}
+        by_namespace: dict[str, Path] = {}
+        written: list[tuple[Path, bytes]] = []
 
         for idx, source in enumerate(model.files):
             if source.content is None:
@@ -248,16 +305,26 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
                 )
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
+            written.append((target, data))
             if "://" in source.filename:
                 by_url.setdefault(_url_key(source.filename), target)
             if source.relationship == "main":
                 main_on_disk = target
+            elif source.target_namespace:
+                by_namespace.setdefault(source.target_namespace, target)
 
         if main_on_disk is None:  # pragma: no cover - guarded above
             raise ValidationSetupError("schema source is unavailable; cannot validate")
 
+        parser = make_parser(internal_entities=main_has_entities)
+        # Nothing was loaded that an import could point at: a single-file schema
+        # never needs the repair below, and re-reading it would be wasted work.
+        for path, data in written if by_namespace else ():
+            repaired = _repair_imports(path, data, by_namespace, by_url, parser)
+            if repaired is not None:
+                path.write_bytes(repaired)
+
         try:
-            parser = make_parser(internal_entities=main_has_entities)
             parser.resolvers.add(_MaterialisedUrlResolver(by_url))
             parser.resolvers.add(_BundledW3cResolver())
             xsd_tree = etree.parse(str(main_on_disk), parser)
