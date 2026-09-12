@@ -198,6 +198,31 @@ The latter two share `backend/app/parser/walk.py` — read-only generators
 particles, inline types, XSD 1.1 alternatives) without following named
 references, originally split out of `validation.py` for exactly this reuse.
 
+### Validation (`backend/app/parser/validation.py`)
+
+The cache holds each source file's text, so validating means handing the file
+set back to libxml2: every file is written into a temp directory under its own
+relative path, then `etree.XMLSchema` compiles the main one. Two things the
+loader did have to be replayed there, because libxml2 only ever sees what the
+schema itself wrote:
+
+- Absolute `schemaLocation` URLs are mapped onto the materialised copies
+  (`_MaterialisedUrlResolver`), so no request goes to the network.
+- An `xs:import` whose location is absent or does not resolve was satisfied by
+  the loader from the bundled W3C schemas or another loaded file of that
+  namespace (`app/parser/w3c`); `_repair_imports` points it at the materialised
+  file, in every loaded file rather than only the main one. Without it the
+  namespace is missing from the compiled schema, which shows up either as "No
+  matching global declaration available for the validation root" or, when the
+  schema refers to it, as a schema that does not compile at all.
+
+A compile failure raises `ValidationSetupError` (HTTP 422), and its message is
+the only thing the user gets, so `_compile_failure` classifies it instead of
+passing libxml2's wording through: files that never loaded (name them, say how
+to load the schema completely), XSD 1.1 (libxml2 does 1.0 only — the schema is
+fine), or a schema that really is malformed (name the file and line). The same
+message is recorded in `sample_issue.errors` for a generated sample.
+
 ### Data model
 
 `backend/app/parser/model.py` defines the Pydantic models. `SchemaModel` holds:

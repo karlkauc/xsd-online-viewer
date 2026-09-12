@@ -202,6 +202,98 @@ def largest_substitution_group(model: SchemaModel) -> tuple[str, int] | None:
     )
 
 
+# The loader's own warnings for imports and includes it could not fetch. The
+# same extraction runs in the frontend (SampleXmlDialog), which shows them
+# before a sample is even checked.
+_UNLOADED_FILE = re.compile(
+    r"(?:unresolved (?:import|include|redefine|override) schemaLocation=|could not load )'([^']+)'"
+)
+# Listing every one of them helps nobody; the first few say what kind of file is missing.
+_MAX_LISTED_FILES = 5
+
+
+def unloaded_files(model: SchemaModel) -> list[str]:
+    """Imports and includes the loader could not fetch, as the schema named them."""
+    found = (_UNLOADED_FILE.search(d.message) for d in model.diagnostics)
+    return list(dict.fromkeys(m.group(1) for m in found if m is not None))
+
+
+_NAMESPACE_IN_MESSAGE = re.compile(r"\{([^}]+)\}")
+
+
+def _unloaded_namespace(detail: str, model: SchemaModel) -> str | None:
+    """The namespace a reference could not be resolved in, when nothing loaded declares it.
+
+    ``<xs:import namespace="urn:x"/>`` without a schemaLocation leaves nothing to
+    resolve and therefore no warning: the only trace is libxml2 refusing the
+    reference into it, and "does not resolve to a(n) element declaration" gives
+    the user nothing to act on.
+    """
+    if "resolve" not in detail:
+        return None
+    declared = {f.target_namespace for f in model.files} | {XSD_NS}
+    return next((ns for ns in _NAMESPACE_IN_MESSAGE.findall(detail) if ns not in declared), None)
+
+
+def _first_error(exc: etree.XMLSchemaParseError, names_by_path: dict[str, str]) -> str | None:
+    """libxml2's first complaint, prefixed with the schema file and line it is in."""
+    entry = next(iter(exc.error_log), None)  # type: ignore[call-overload]
+    if entry is None:
+        return None
+    filename = (entry.filename or "").removeprefix("file://")
+    where = names_by_path.get(filename, filename if filename != "<string>" else "")
+    if entry.line:
+        where = f"{where} line {entry.line}".strip()
+    return f"{where}: {entry.message}" if where else entry.message
+
+
+def _compile_failure(
+    exc: etree.XMLSchemaParseError,
+    model: SchemaModel,
+    names_by_path: dict[str, str],
+    tmp_root: Path,
+    unavailable: list[str],
+) -> ValidationSetupError:
+    """Say why the schema does not compile in terms the user can act on.
+
+    libxml2's own wording ("The content is not valid. Expected is (annotation?,
+    ...") reads as if the viewer were at fault and never says what to do. The
+    three causes that actually occur need three different answers: files that
+    were never loaded (load them), XSD 1.1 (libxml2 does 1.0 only, and the
+    schema is fine), and a schema that really is malformed (fix it, here).
+    """
+    # libxml2 names the temporary copies; show paths relative to the schema
+    # instead, which also keeps the message stable across calls.
+    detail = (_first_error(exc, names_by_path) or str(exc)).replace(f"{tmp_root}/", "")
+    if unavailable:
+        detail += f" (unavailable referenced files: {', '.join(unavailable)})"
+
+    missing = unloaded_files(model)
+    namespace = None if missing else _unloaded_namespace(detail, model)
+    if missing or namespace:
+        if missing:
+            listed = ", ".join(missing[:_MAX_LISTED_FILES])
+            if len(missing) > _MAX_LISTED_FILES:
+                listed += ", …"
+            noun = "file" if len(missing) == 1 else "files"
+            what = f"{len(missing)} imported or included {noun} did not load ({listed})"
+        else:
+            what = f"nothing loaded declares the namespace {namespace!r} it imports"
+        # "failed to load 'x.xsd'" only repeats what was just said, in temp-dir terms.
+        stopped = "" if detail.startswith("failed to load") else f" The compiler stopped at: {detail}"
+        return ValidationSetupError(
+            f"the schema is incomplete: {what}, so it does not compile. Load the schema "
+            f"together with its imported and included files (ZIP upload or URL).{stopped}"
+        )
+    if model.xsd_version == "1.1":
+        return ValidationSetupError(
+            "the schema uses XSD 1.1 (xs:assert, xs:alternative, …), and the validator here "
+            "is libxml2, which implements XSD 1.0 only — so documents cannot be checked "
+            f"against this schema. It stopped at: {detail}"
+        )
+    return ValidationSetupError(f"the schema itself is not valid XSD: {detail}")
+
+
 def _location_resolves(location: str | None, path: Path, by_url: dict[str, Path]) -> bool:
     """Whether libxml2 would find ``location`` as written in the file at ``path``."""
     if not location:
@@ -284,6 +376,7 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
         by_url: dict[str, Path] = {}
         by_namespace: dict[str, Path] = {}
         written: list[tuple[Path, bytes]] = []
+        names_by_path: dict[str, str] = {}
 
         for idx, source in enumerate(model.files):
             if source.content is None:
@@ -306,6 +399,7 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
             written.append((target, data))
+            names_by_path[str(target)] = source.filename
             if "://" in source.filename:
                 by_url.setdefault(_url_key(source.filename), target)
             if source.relationship == "main":
@@ -330,14 +424,7 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
             xsd_tree = etree.parse(str(main_on_disk), parser)
             return etree.XMLSchema(xsd_tree)
         except etree.XMLSchemaParseError as exc:
-            # libxml2 names the temporary copies; show paths relative to the
-            # schema instead, which also keeps the message stable across calls.
-            detail = str(exc).replace(f"{tmp_root}/", "")
-            if unavailable:
-                detail += f" (unavailable referenced files: {', '.join(unavailable)})"
-            raise ValidationSetupError(
-                f"the loaded schema does not compile: {detail}"
-            ) from exc
+            raise _compile_failure(exc, model, names_by_path, tmp_root, unavailable) from exc
         except etree.XMLSyntaxError as exc:
             detail = str(exc).replace(f"{tmp_root}/", "")
             raise ValidationSetupError(

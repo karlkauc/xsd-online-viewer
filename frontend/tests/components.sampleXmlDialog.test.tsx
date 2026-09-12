@@ -219,14 +219,20 @@ describe("SampleXmlDialog", () => {
         ? {
             ok: false,
             status: 422,
-            json: async () => ({ detail: "the loaded schema does not compile: Element 'A': no type 'B'" }),
+            json: async () => ({
+              detail:
+                "the schema itself is not valid XSD: a.xsd line 4: Element '{...}complexType': The content is not valid.",
+            }),
           }
         : { ok: true, status: 200, text: async () => "<Person/>", headers: new Headers() },
     );
     render(<SampleXmlDialog />);
     act(() => openSampleXml({ elementId: "element:Person", name: "Person" }));
     expect(
-      await screen.findByText("Cannot check the sample: the loaded schema does not compile: Element 'A': no type 'B'"),
+      await screen.findByText(
+        "Cannot check the sample: the schema itself is not valid XSD: a.xsd line 4: " +
+          "Element '{...}complexType': The content is not valid.",
+      ),
     ).toBeInTheDocument();
   });
 

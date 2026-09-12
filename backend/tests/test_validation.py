@@ -120,7 +120,7 @@ def test_a_schema_that_does_not_compile_says_so_plainly() -> None:
         b'<xs:element name="A" type="Missing"/></xs:schema>',
         "a.xsd",
     )
-    with pytest.raises(ValidationSetupError, match="^the loaded schema does not compile: "):
+    with pytest.raises(ValidationSetupError, match="^the schema itself is not valid XSD: "):
         build_xmlschema(model)
 
 
@@ -241,3 +241,112 @@ def test_a_bundled_schema_can_reach_the_bundled_schema_it_imports() -> None:
     )
 
     assert result.is_valid, [e.message for e in result.errors]
+
+
+def test_an_incomplete_schema_names_the_files_that_did_not_load() -> None:
+    """libxml2's "does not resolve to a(n) element declaration" says nothing a user can
+    act on; what they need is which files are missing and how to load them (UBL)."""
+    model = parse_single(
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:cac="urn:cac" '
+        b'xmlns:tns="urn:t" targetNamespace="urn:t" elementFormDefault="qualified">'
+        b'<xs:import namespace="urn:cac" schemaLocation="common/cac.xsd"/>'
+        b'<xs:element name="Invoice"><xs:complexType><xs:sequence>'
+        b'<xs:element ref="cac:Party"/></xs:sequence></xs:complexType></xs:element>'
+        b"</xs:schema>",
+        "invoice.xsd",
+    )
+
+    with pytest.raises(ValidationSetupError) as raised:
+        build_xmlschema(model)
+
+    message = str(raised.value)
+    assert message.startswith("the schema is incomplete: ")
+    assert "common/cac.xsd" in message
+    assert "ZIP" in message  # how to load the schema completely
+    # libxml2's own "failed to load ...: No such file or directory" only repeats that,
+    # in terms of the temporary copies, so it is left out.
+    assert "No such file" not in message
+
+
+def test_a_schema_that_is_not_valid_xsd_says_so_with_file_and_line() -> None:
+    """A hand-written schema with a misplaced element compiled to a bare libxml2 dump
+    ("Element '{...}element': The content is not valid. Expected is (annotation?, ..."),
+    which reads as if the viewer were at fault and never says where to look."""
+    model = parse_single(
+        b'<?xml version="1.0"?>\n'
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">\n'
+        b'  <xs:element name="Zaznamy">\n'
+        b'    <xs:sequence>\n'
+        b'      <xs:element name="Zaznam" type="xs:string"/>\n'
+        b"    </xs:sequence>\n"
+        b"  </xs:element>\n"
+        b"</xs:schema>",
+        "schema.xsd",
+    )
+
+    with pytest.raises(ValidationSetupError) as raised:
+        build_xmlschema(model)
+
+    message = str(raised.value)
+    assert message.startswith("the schema itself is not valid XSD: ")
+    assert "schema.xsd" in message and "line 4" in message  # the misplaced xs:sequence
+    assert "The content is not valid" in message
+
+
+def test_an_xsd_11_schema_says_the_validator_only_does_1_0() -> None:
+    """XSD 1.1 is the most common reason a schema does not compile here; "does not
+    compile" makes a perfectly good 1.1 schema look broken."""
+    model = parse_single(
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+        b'<xs:element name="A"><xs:complexType><xs:sequence>'
+        b'<xs:element name="B" type="xs:string"/></xs:sequence>'
+        b'<xs:assert test="B &gt; 0"/></xs:complexType></xs:element>'
+        b"</xs:schema>",
+        "assert.xsd",
+    )
+    assert model.xsd_version == "1.1"
+
+    with pytest.raises(ValidationSetupError) as raised:
+        build_xmlschema(model)
+
+    message = str(raised.value)
+    assert "XSD 1.1" in message and "1.0" in message
+    assert "libxml2" in message
+
+
+def test_an_import_of_a_namespace_nothing_declares_reads_as_incomplete() -> None:
+    """<xs:import namespace="…"/> without a location leaves no "unresolved" warning --
+    the only trace is libxml2's "does not resolve", which the user cannot act on."""
+    model = parse_single(
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:cac="urn:cac" '
+        b'xmlns:tns="urn:t" targetNamespace="urn:t" elementFormDefault="qualified">'
+        b'<xs:import namespace="urn:cac"/>'
+        b'<xs:element name="Invoice"><xs:complexType><xs:sequence>'
+        b'<xs:element ref="cac:Party"/></xs:sequence></xs:complexType></xs:element>'
+        b"</xs:schema>",
+        "invoice.xsd",
+    )
+    assert model.diagnostics == []  # nothing warned: there was no location to resolve
+
+    with pytest.raises(ValidationSetupError) as raised:
+        build_xmlschema(model)
+
+    message = str(raised.value)
+    assert message.startswith("the schema is incomplete: ")
+    assert "urn:cac" in message
+    assert "ZIP" in message
+
+
+def test_a_type_the_schema_itself_never_defines_is_not_called_incomplete() -> None:
+    """The counterpart: a name that resolves to nothing in the schema's own namespace
+    is a defect in the schema, and telling the user to load more files would mislead."""
+    model = parse_single(
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:tns="urn:t" '
+        b'targetNamespace="urn:t"><xs:element name="A" type="tns:Missing"/></xs:schema>',
+        "a.xsd",
+    )
+
+    with pytest.raises(ValidationSetupError) as raised:
+        build_xmlschema(model)
+
+    assert str(raised.value).startswith("the schema itself is not valid XSD: ")

@@ -575,7 +575,7 @@ def test_uncompilable_schema_is_kept_apart(client: TestClient, issues: IssueReco
     # Why it does not compile is the whole point of the row.
     (error,) = json.loads(issue.errors)
     assert error["kind"] == "schema-setup"
-    assert error["message"].startswith("the loaded schema does not compile: ")
+    assert error["message"].startswith("the schema uses XSD 1.1")
 
 
 def test_an_uncompilable_schema_is_one_defect_whatever_the_root(
