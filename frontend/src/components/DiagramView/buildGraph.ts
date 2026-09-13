@@ -350,6 +350,10 @@ function placeElement(
 
   const elementFlowId = nextId(context);
 
+  // Everything the recursion pushes from here on is this element's subtree,
+  // so we can translate it as a block once we know where the element lands.
+  const subtreeStart = context.nodes.length;
+
   context.pathIds.add(element.id);
   const particleResult = placeParticle(
     expandedParticle,
@@ -372,9 +376,27 @@ function placeElement(
     }
   }
 
-  const center = particleResult.span.centerY;
+  // Parent element sits on the same midline as the compositor. When the
+  // element is taller than its whole expanded subtree — GLEIF's `Extension`,
+  // a documented element whose type is just `<xs:sequence><xs:any/></…>` —
+  // that midline would lift it above `topY` and straight over the sibling
+  // placed before it. Callers stack siblings by advancing past `span.bottomY`,
+  // so a subtree must never draw above the `topY` it was handed: push the
+  // children down instead, keeping element and compositor on one midline.
+  const overshoot = topY + display.height / 2 - particleResult.span.centerY;
+  if (overshoot > 0) {
+    for (let i = subtreeStart; i < context.nodes.length; i++) {
+      const node = context.nodes[i];
+      node.position = { x: node.position.x, y: node.position.y + overshoot };
+    }
+    particleResult.span = {
+      topY: particleResult.span.topY + overshoot,
+      bottomY: particleResult.span.bottomY + overshoot,
+      centerY: particleResult.span.centerY + overshoot,
+    };
+  }
 
-  // Parent element sits on the same midline as the compositor.
+  const center = particleResult.span.centerY;
   const elementTopY = center - display.height / 2;
   addElementNode(elementFlowId, display, x, elementTopY, context);
   addEdge(context, elementFlowId, particleResult.rootFlowId);
