@@ -11,3 +11,7 @@ export const FREEXMLTOOLKIT_URL = "https://karlkauc.github.io/FreeXmlToolkit/";
 export const FREEXMLTOOLKIT_RELEASES_URL = "https://github.com/karlkauc/FreeXmlToolkit/releases";
 export const FREEXMLTOOLKIT_GO = "/go/freexmltoolkit";
 export const FREEXMLTOOLKIT_DOWNLOAD_GO = "/go/freexmltoolkit?to=releases";
+
+/** GitHub Sponsors — donations keep the site free of ads; counted via `/go/sponsor`. */
+export const SPONSOR_URL = "https://github.com/sponsors/karlkauc";
+export const SPONSOR_GO = "/go/sponsor";

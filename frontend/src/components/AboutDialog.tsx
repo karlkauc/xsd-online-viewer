@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchHealth } from "../api/client";
-import { FREEXMLTOOLKIT_GO, GITHUB_REPO_URL, XML_VIEWER_URL } from "../lib/links";
+import { FREEXMLTOOLKIT_GO, GITHUB_REPO_URL, SPONSOR_GO, XML_VIEWER_URL } from "../lib/links";
 import { openFeedback } from "./UploadError";
 import { API_DOCS_PATH } from "../lib/modeRoute";
 import { KindBadge } from "./TreeView/KindBadge";
@@ -166,6 +166,12 @@ export function AboutDialog() {
               FreeXmlToolkit
             </a>
             {" — free desktop XML workstation by the same author: schema-aware editor, XSLT, Schematron, signatures"}
+          </li>
+          <li>
+            <a className={linkClass} href={SPONSOR_GO} target="_blank" rel="noopener noreferrer">
+              Support this project
+            </a>
+            {" — free, no ads, no tracking; GitHub Sponsors helps cover hosting"}
           </li>
           <li>
             <a className={linkClass} href={`${GITHUB_REPO_URL}/blob/master/LICENSE`} target="_blank" rel="noopener noreferrer">

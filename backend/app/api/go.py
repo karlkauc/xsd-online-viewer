@@ -1,7 +1,8 @@
 """Outbound links that should be counted: ``/go/<name>`` redirects.
 
-The site promotes FreeXmlToolkit, the author's desktop app. The frontend
-links to this same-origin route instead of the external URL so each click
+The site promotes FreeXmlToolkit, the author's desktop app, and links to the
+author's GitHub Sponsors page. The frontend links to these same-origin routes
+instead of the external URLs so each click
 becomes a ``page_view`` row with ``path=/go/<name>/<target>`` and ``source=<name>`` —
 no client-side tracking, no new event type.
 """
@@ -20,6 +21,8 @@ FREEXMLTOOLKIT_TARGETS: dict[str, str] = {
     "releases": "https://github.com/karlkauc/FreeXmlToolkit/releases",
 }
 
+SPONSOR_URL = "https://github.com/sponsors/karlkauc"
+
 
 @router.get("/go/freexmltoolkit", include_in_schema=False)
 async def go_freexmltoolkit(to: str = Query("docs")) -> RedirectResponse:
@@ -28,3 +31,9 @@ async def go_freexmltoolkit(to: str = Query("docs")) -> RedirectResponse:
     # (releases) from Learn more (docs) apart.
     emit("page_view", path=f"/go/freexmltoolkit/{key}", source="freexmltoolkit", status_code=302)
     return RedirectResponse(FREEXMLTOOLKIT_TARGETS[key], status_code=302)
+
+
+@router.get("/go/sponsor", include_in_schema=False)
+async def go_sponsor() -> RedirectResponse:
+    emit("page_view", path="/go/sponsor", source="sponsor", status_code=302)
+    return RedirectResponse(SPONSOR_URL, status_code=302)

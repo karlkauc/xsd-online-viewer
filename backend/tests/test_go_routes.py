@@ -29,5 +29,11 @@ def test_releases_target_and_unknown_fallback() -> None:
     )
 
 
+def test_sponsor_goes_to_github_sponsors() -> None:
+    response = _client().get("/go/sponsor")
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://github.com/sponsors/karlkauc"
+
+
 def test_other_go_paths_are_404() -> None:
     assert _client().get("/go/unknown").status_code == 404

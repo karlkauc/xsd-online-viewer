@@ -15,7 +15,7 @@ import { ContentModelView } from "./components/ContentModelView/ContentModelView
 import { Breadcrumb } from "./components/Breadcrumb";
 import { Diagnostics } from "./components/Diagnostics";
 import { ThemeToggle } from "./components/ThemeToggle";
-import { FREEXMLTOOLKIT_GO, XML_VIEWER_URL } from "./lib/links";
+import { FREEXMLTOOLKIT_GO, SPONSOR_GO, XML_VIEWER_URL } from "./lib/links";
 import { DesktopAppCard } from "./components/DesktopAppCard";
 import { MobileNav, type MobilePane } from "./components/MobileNav";
 import { HeaderActions, type HeaderAction } from "./components/HeaderActions";
@@ -238,6 +238,15 @@ export default function App() {
         href: FREEXMLTOOLKIT_GO,
         external: true,
         // The wide header is full; the landing card and the About dialog carry the promotion there.
+        menuOnly: true,
+      },
+      {
+        key: "sponsor",
+        label: "♥ Support ↗",
+        title: "Support the Online XSD Viewer on GitHub Sponsors",
+        ariaLabel: "Support this project on GitHub Sponsors",
+        href: SPONSOR_GO,
+        external: true,
         menuOnly: true,
       },
       {
