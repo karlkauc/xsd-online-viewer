@@ -273,7 +273,11 @@ with `MD_QUERY` / `LG_QUERY` in `src/lib/useMediaQuery.ts`:
   selecting a node jumps to `view`. The breadcrumb gets its own row,
   the header keeps only Load / Search / theme and folds the rest into a
   `HeaderActions` "More" menu, and `DiagramToolbar` renders icon buttons with
-  export behind a menu. The minimap defaults to off
+  export behind a menu. (`HeaderActions` is not tied to a breakpoint: it
+  measures its controls in an invisible probe and keeps as many leading
+  actions inline as fit beside the title, so on wide screens the menu only
+  holds what really does not fit — `countInlineActions` in
+  `src/lib/headerOverflow.ts`.) The minimap defaults to off
   (`defaultMinimapVisible()` in the store) and the first `fitView` centres on
   the selected/root node at a readable zoom (`DiagramView/fitOptions.ts`).
 - **Tablet (md–lg)** — structure and view side by side (two-column grid);

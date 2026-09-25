@@ -87,6 +87,21 @@ test("the header title links back to a clean start page", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Load a different schema file" })).toHaveCount(0);
 });
 
+test("header shows the secondary actions inline while there is room for them", async ({ page }) => {
+  // The split between inline buttons and the "More" menu is measured, not a
+  // breakpoint: on the landing page at 1280 px only Search and the theme
+  // toggle compete for space, so every secondary action — Sponsor included —
+  // stays inline and there is no menu at all (it used to fold below 1536 px).
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  const banner = page.getByRole("banner");
+  await expect(banner.getByRole("link", { name: "Support this project on GitHub Sponsors" })).toBeVisible();
+  await expect(banner.getByRole("link", { name: "Source code on GitHub" })).toBeVisible();
+  await expect(banner.getByRole("button", { name: "More actions" })).toHaveCount(0);
+  const overflow = await banner.evaluate((el) => el.scrollWidth - el.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
 for (const width of [1024, 1280, 1440, 1600]) {
   test(`header actions never cover the title at ${width}px`, async ({ page }) => {
     // With a schema loaded every header action is present. Inline, they used

@@ -19,7 +19,7 @@ import { FREEXMLTOOLKIT_GO, SPONSOR_GO, XML_VIEWER_URL } from "./lib/links";
 import { DesktopAppCard } from "./components/DesktopAppCard";
 import { MobileNav, type MobilePane } from "./components/MobileNav";
 import { HeaderActions, type HeaderAction } from "./components/HeaderActions";
-import { HEADER_ACTIONS_QUERY, MD_QUERY, useMediaQuery } from "./lib/useMediaQuery";
+import { MD_QUERY, useMediaQuery } from "./lib/useMediaQuery";
 import { useSelection, type ViewTab } from "./stores/selectionStore";
 import { exportHtmlUrl } from "./api/client";
 import { downloadSchemaExport } from "./lib/schemaSession";
@@ -111,7 +111,6 @@ export default function App() {
   const [mobilePane, setMobilePane] = useState<MobilePane>("view");
   const detailsOpen = mobilePane === "details";
   const atLeastMd = useMediaQuery(MD_QUERY);
-  const wide = useMediaQuery(HEADER_ACTIONS_QUERY);
 
   useEffect(() => {
     window.localStorage.setItem("xsdv:structureCollapsed", structureCollapsed ? "1" : "0");
@@ -170,8 +169,9 @@ export default function App() {
     if (selectedId && !atLeastMd) setMobilePane("view");
   }, [selectedId, atLeastMd]);
 
-  // Secondary header actions: inline buttons on wide screens, a "More" menu
-  // below `2xl` so the header can never overflow the viewport or cover the title.
+  // Secondary header actions, in display order. HeaderActions measures how
+  // many fit next to the title and folds the trailing ones into a "More" menu,
+  // so the header never overflows the viewport or covers the title.
   const source = useSelection((s) => s.source);
   const { copied: linkCopied, copy: copyLink } = useCopy(2500);
 
@@ -237,8 +237,6 @@ export default function App() {
         ariaLabel: "FreeXmlToolkit desktop app",
         href: FREEXMLTOOLKIT_GO,
         external: true,
-        // The wide header is full; the landing card and the About dialog carry the promotion there.
-        menuOnly: true,
       },
       {
         key: "sponsor",
@@ -247,7 +245,6 @@ export default function App() {
         ariaLabel: "Support this project on GitHub Sponsors",
         href: SPONSOR_GO,
         external: true,
-        menuOnly: true,
       },
       {
         key: "api",
@@ -302,7 +299,9 @@ export default function App() {
             </a>
           </h1>
           {model?.target_namespace && (
-            <span className="hidden lg:inline min-w-0 text-sm font-mono text-slate-500 dark:text-slate-400 truncate">
+            // The namespace truncates, but keeps 10rem so the actions cannot
+            // squeeze it away entirely; HeaderActions reads that min-width.
+            <span className="hidden lg:inline min-w-[10rem] text-sm font-mono text-slate-500 dark:text-slate-400 truncate">
               {model.target_namespace}
             </span>
           )}
@@ -356,7 +355,7 @@ export default function App() {
               <span className="hidden sm:inline">Sample XML</span>
             </button>
           )}
-          <HeaderActions actions={secondaryActions} inline={wide} />
+          <HeaderActions actions={secondaryActions} />
           <ThemeToggle />
         </div>
       </header>
