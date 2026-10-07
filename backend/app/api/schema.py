@@ -22,6 +22,7 @@ from app.parser.validation import (
     ValidationErrorItem,
     ValidationResponse,
     ValidationSetupError,
+    utf8_bytes,
     validate_xml,
 )
 from app.parser.xsd_parser import parse_files_map, parse_with_url_fallback, pick_main_xsd
@@ -293,7 +294,7 @@ async def load_schema_from_url(request: Request, payload: UrlPayload) -> SchemaR
 @router.post("/schema/text", response_model=SchemaResponse)
 @limiter.limit(WRITE_LIMIT)
 async def load_schema_from_text(request: Request, payload: TextPayload) -> SchemaResponse:
-    data = payload.content.encode("utf-8")
+    data = utf8_bytes(payload.content)
     if len(data) > settings.max_upload_bytes:
         raise reject(
             "schema_load",
@@ -424,7 +425,7 @@ async def validate_xml_upload(
 async def validate_xml_text(
     request: Request, schema_id: str, payload: ValidateTextPayload
 ) -> ValidationResponse:
-    data = payload.content.encode("utf-8")
+    data = utf8_bytes(payload.content)
     if len(data) > settings.max_upload_bytes:
         raise reject("validate", payload.origin, 413, f"content exceeds {settings.max_upload_mb} MB limit")
     sample = payload.sample if payload.origin == "sample" else None

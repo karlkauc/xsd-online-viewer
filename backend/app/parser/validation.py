@@ -85,11 +85,13 @@ def _url_key(url: str) -> str:
 _ENCODING_DECLARATION = re.compile(r"""^(\ufeff?\s*<\?xml[^>]*?\sencoding\s*=\s*)(["'])[^"']*\2""")
 
 
-def _utf8_bytes(content: str) -> bytes:
+def utf8_bytes(content: str) -> bytes:
     """``content`` as UTF-8, under an XML declaration that says so.
 
-    Source files are kept as decoded text. A windows-1251 schema written back
-    as UTF-8 under its original declaration would be decoded wrongly by libxml2.
+    Source files are kept as decoded text, and pasted text arrives as a
+    string. Either one written out as UTF-8 under a declaration that names
+    windows-1251 is decoded wrongly by libxml2 ("Invalid bytes in character
+    encoding", or silently, for a single-byte encoding like ISO-8859-1).
     """
     return _ENCODING_DECLARATION.sub(r"\1\2UTF-8\2", content, count=1).encode("utf-8")
 
@@ -382,7 +384,7 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
             if source.content is None:
                 unavailable.append(source.filename)
                 continue
-            data = _utf8_bytes(source.content)
+            data = utf8_bytes(source.content)
             if inspect_dtd(data) and source.relationship == "main":
                 main_has_entities = True
 

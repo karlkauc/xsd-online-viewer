@@ -32,6 +32,7 @@ from app.parser.model import (
     SimpleType,
 )
 from app.parser.sample import SampleOptions, find_element, generate_sample_with_report
+from app.parser.validation import utf8_bytes
 from app.usage.context import emit, record_issue
 from app.usage.sample_issue import build_issue, encode_report
 
@@ -182,14 +183,14 @@ async def export_bundle(schema_id: str) -> Response:
         raise HTTPException(status_code=404, detail="schema has no source files")
     main_base = posixpath.basename(main.filename) or "schema.xsd"
     if len(files) == 1:
-        body = (main.content or "").encode("utf-8")
+        body = utf8_bytes(main.content or "")
         media_type = "application/xml; charset=utf-8"
         filename = main_base
     else:
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             for source in files:
-                archive.writestr(source.filename, (source.content or "").encode("utf-8"))
+                archive.writestr(source.filename, utf8_bytes(source.content or ""))
         body = buffer.getvalue()
         media_type = "application/zip"
         filename = f"{main_base.rsplit('.', 1)[0]}-bundle.zip"
@@ -242,7 +243,7 @@ async def export_formatted_file(schema_id: str, file_id: str) -> Response:
 
 def _pretty_xml(xml_text: str) -> str:
     parser = etree.XMLParser(remove_blank_text=True, resolve_entities=False, no_network=True)
-    tree = etree.parse(BytesIO(xml_text.encode("utf-8")), parser)
+    tree = etree.parse(BytesIO(utf8_bytes(xml_text)), parser)
     return etree.tostring(
         tree, pretty_print=True, encoding="UTF-8", xml_declaration=True
     ).decode("utf-8")

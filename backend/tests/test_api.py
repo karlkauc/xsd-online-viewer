@@ -54,6 +54,34 @@ class TestUpload:
         )
         assert response.status_code == 200
 
+    @pytest.mark.parametrize("declared", ["windows-1251", "ISO-8859-1", "UTF-16"])
+    def test_pasted_text_ignores_its_declared_encoding(self, client: TestClient, declared: str) -> None:
+        # Pasted text travels as a JSON string and is UTF-8 by the time it is
+        # parsed; a declaration copied along with it no longer applies.
+        content = (
+            f'<?xml version="1.0" encoding="{declared}"?>\n'
+            '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+            '<xs:element name="Größe"/><xs:element name="Имя"/></xs:schema>'
+        )
+        response = client.post("/api/schema/text", json={"filename": "s.xsd", "content": content})
+        assert response.status_code == 200, response.text
+        model = response.json()["model"]
+        assert {e["name"] for e in model["elements"]} == {"Größe", "Имя"}
+        assert "Größe" in model["files"][0]["content"]
+
+    def test_formatted_export_of_a_non_utf8_upload(self, client: TestClient) -> None:
+        xsd = (
+            '<?xml version="1.0" encoding="windows-1251"?>'
+            '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="Имя"/></xs:schema>'
+        ).encode("windows-1251")
+        loaded = client.post("/api/schema/upload", files={"file": ("s.xsd", xsd, "application/xml")})
+        assert loaded.status_code == 200, loaded.text
+        body = loaded.json()
+        file_id = body["model"]["files"][0]["id"]
+        formatted = client.get(f"/api/schema/{body['schema_id']}/file/{file_id}/formatted")
+        assert formatted.status_code == 200, formatted.text
+        assert "Имя" in formatted.text
+
     def test_model_validation_error_is_not_shown_raw(self, client: TestClient) -> None:
         # A value the model has no room for must not surface as pydantic's
         # "1 validation error for SchemaModel … [type=literal_error, …]".
