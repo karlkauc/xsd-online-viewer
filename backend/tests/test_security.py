@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+from lxml import etree
 
 from app import config as config_module
 from app.parser.security import (
@@ -12,6 +13,7 @@ from app.parser.security import (
     fetch_schema_url,
     parse_bytes,
 )
+from app.parser.validation import validate_xml
 from app.parser.xsd_parser import parse_single
 
 
@@ -120,6 +122,43 @@ class TestInternalDtdSubset:
     def test_unsafe_subsets_rejected(self, subset: bytes) -> None:
         with pytest.raises(SecurityError, match="DTD"):
             parse_bytes(b"<!DOCTYPE schema [" + subset + b"]>" + self.XS, "s.xsd")
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            # An internal subset typing ``id`` as ID, as the W3C schemas do.
+            b"<!DOCTYPE xs:schema [<!ATTLIST xs:element id ID #IMPLIED>]>"
+            b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+            b'<xs:element name="a" id="Name"/><xs:element name="b" id="Name"/></xs:schema>',
+            b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+            b'<xs:element name="a" xml:id="Name"/><xs:element name="b" xml:id="Name"/></xs:schema>',
+        ],
+        ids=["attlist-id", "xml-id"],
+    )
+    def test_duplicate_ids_do_not_fail_the_parse(self, data: bytes) -> None:
+        # Uniqueness of IDs is a validity constraint, not well-formedness; a
+        # viewer should still show such a schema ("ID Name already defined").
+        assert len(parse_bytes(data, "s.xsd").getroot()) == 2
+
+    def test_duplicate_ids_survive_validation_setup(self) -> None:
+        # xml:id is a foreign attribute to the schema compiler, so this one
+        # validates; and a compile on the same thread must not confuse the
+        # next load (lxml's exception log leaks across operations).
+        data = (
+            b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+            b'<xs:element name="a" xml:id="Name"/><xs:element name="b" xml:id="Name"/></xs:schema>'
+        )
+        for _ in range(2):
+            model = parse_single(data, "s.xsd")
+            assert validate_xml(model, b"<a/>").is_valid
+
+    def test_duplicate_id_does_not_excuse_other_errors(self) -> None:
+        data = (
+            b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+            b'<xs:element xml:id="Name"/><xs:element xml:id="Name"/><xs:oops></xs:schema>'
+        )
+        with pytest.raises(etree.XMLSyntaxError):
+            parse_bytes(data, "s.xsd")
 
     def test_entity_declaration_outside_doctype_rejected(self) -> None:
         with pytest.raises(SecurityError):

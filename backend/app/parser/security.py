@@ -55,7 +55,7 @@ FETCH_HEADERS = {
 # ---------------------------------------------------------------------------
 
 
-def make_parser(*, internal_entities: bool = False) -> etree.XMLParser:
+def make_parser(*, internal_entities: bool = False, recover: bool = False) -> etree.XMLParser:
     """Return a parser configured to block XXE and external network access.
 
     - ``resolve_entities`` is off by default (no entity substitution ⇒ no XXE).
@@ -68,6 +68,11 @@ def make_parser(*, internal_entities: bool = False) -> etree.XMLParser:
     - ``huge_tree=False`` leaves lxml's internal XML-bomb mitigations active.
     - ``remove_comments=False`` so comments are preserved in the tree; we
       want to show them in the viewer.
+    - ``collect_ids`` stays at its default: switching it off sets libxml2's
+      ``XML_SKIP_IDS`` bit in ``loadsubset``, which libxml2 2.14 reads as "load
+      the external DTD subset" — exactly what ``load_dtd=False`` forbids.
+    - ``recover`` is only ever set by :func:`parse_bytes`, for a document
+      whose sole fault is a repeated ID.
     """
     return etree.XMLParser(
         resolve_entities=internal_entities,
@@ -78,7 +83,7 @@ def make_parser(*, internal_entities: bool = False) -> etree.XMLParser:
         huge_tree=False,
         remove_blank_text=False,
         remove_comments=False,
-        recover=False,
+        recover=recover,
     )
 
 
@@ -93,8 +98,27 @@ def parse_bytes(data: bytes, filename: str | None = None) -> etree._ElementTree:
     except etree.XMLSyntaxError as exc:
         if "Detected an entity reference loop" in str(exc) or "Entities" in str(exc):
             raise SecurityError(f"rejected dangerous XML construct: {exc}") from exc
-        raise
+        if not only_duplicate_ids(parser):
+            raise
+        # The strict pass logged nothing else, so recovery has nothing to
+        # paper over: it only keeps lxml from raising on the validity error.
+        root = etree.fromstring(data, make_parser(internal_entities=has_safe_subset, recover=True))
     return etree.ElementTree(root)
+
+
+def only_duplicate_ids(parser: etree.XMLParser) -> bool:
+    """True when ``parser``'s last parse failed on nothing but "ID … already defined".
+
+    libxml2 registers every ``xml:id`` and DTD-typed ID attribute while
+    parsing and reports a repeat as a validity error; the document is still
+    well-formed and fully parsed, but lxml raises on any logged error. Schemas
+    with such repeats are in circulation, and a viewer should show them.
+
+    Reads the parser's own log: the one on the exception also carries entries
+    of earlier operations on the same thread (a schema compile, for one).
+    """
+    errors = [entry for entry in parser.error_log if entry.level >= etree.ErrorLevels.ERROR]
+    return bool(errors) and all(entry.type == etree.ErrorTypes.DTD_ID_REDEFINED for entry in errors)
 
 
 # ---------------------------------------------------------------------------

@@ -32,7 +32,7 @@ from app.parser.model import (
     SchemaModel,
     SimpleType,
 )
-from app.parser.security import inspect_dtd, make_parser
+from app.parser.security import inspect_dtd, make_parser, only_duplicate_ids
 from app.parser.w3c import bytes_for_location
 from app.parser.walk import _iter_declarations, iter_elements
 
@@ -418,10 +418,20 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
             if repaired is not None:
                 path.write_bytes(repaired)
 
-        try:
+        def read_main(parser: etree.XMLParser) -> etree._ElementTree:
             parser.resolvers.add(_MaterialisedUrlResolver(by_url))
             parser.resolvers.add(_BundledW3cResolver())
-            xsd_tree = etree.parse(str(main_on_disk), parser)
+            return etree.parse(str(main_on_disk), parser)
+
+        try:
+            try:
+                xsd_tree = read_main(parser)
+            except etree.XMLSyntaxError:
+                # The loader let a repeated ID through (security.parse_bytes);
+                # whether it also breaks the schema is the compiler's call.
+                if not only_duplicate_ids(parser):
+                    raise
+                xsd_tree = read_main(make_parser(internal_entities=main_has_entities, recover=True))
             return etree.XMLSchema(xsd_tree)
         except etree.XMLSchemaParseError as exc:
             raise _compile_failure(exc, model, names_by_path, tmp_root, unavailable) from exc
