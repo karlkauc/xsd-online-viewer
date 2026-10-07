@@ -248,7 +248,7 @@ change on one side must be reflected on the other — there is no codegen.
 ### Cache
 
 `backend/app/cache.py` is an in-memory LRU + TTL cache (OrderedDict + Lock).
-Defaults: 32 entries, 60-minute TTL. Keys are the SHA-256 hash of the
+Defaults: 32 entries, 60-minute TTL counted from the last use. Keys are the SHA-256 hash of the
 serialized model, so identical uploads collapse to one entry. There is **no
 persistence**: restarting the container evicts everything, which is fine given
 the upload-driven UX.

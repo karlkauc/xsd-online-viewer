@@ -1,4 +1,4 @@
-"""In-memory LRU cache for parsed schemas with TTL eviction."""
+"""In-memory LRU cache for parsed schemas, evicted after a TTL of disuse."""
 
 from __future__ import annotations
 
@@ -35,6 +35,8 @@ class SchemaCache:
             if entry.expires_at <= now:
                 self._store.pop(key, None)
                 return None
+            # Sliding expiry: a schema someone is still working with stays.
+            entry.expires_at = now + self._ttl_seconds
             self._store.move_to_end(key)
             return entry.value
 

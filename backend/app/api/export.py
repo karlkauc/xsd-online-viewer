@@ -40,6 +40,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["export"])
 
+SCHEMA_EXPIRED = "schema not found or expired"
+
+
+def _expired(source: str) -> HTTPException:
+    """Record and build the 404 for a schema id this instance no longer holds."""
+    emit("export", source=source, status="rejected", status_code=404, error_detail=SCHEMA_EXPIRED)
+    return HTTPException(status_code=404, detail=SCHEMA_EXPIRED)
+
+
 # Missing references named in X-Sample-Missing; the count covers the rest.
 MAX_MISSING_NAMES = 10
 
@@ -48,8 +57,7 @@ MAX_MISSING_NAMES = 10
 async def export_html(schema_id: str) -> Response:
     model = schema_cache.get(schema_id)
     if model is None:
-        emit("export", source="html", status="rejected", status_code=404)
-        raise HTTPException(status_code=404, detail="schema not found or expired")
+        raise _expired("html")
     document = _render_html(model)
     emit("export", source="html", status="ok", status_code=200, file_count=len(model.files))
     return Response(
@@ -70,8 +78,7 @@ async def export_sample_xml(
     """A skeleton XML instance document for one element of the schema."""
     model = schema_cache.get(schema_id)
     if model is None:
-        emit("export", source="sample", status="rejected", status_code=404)
-        raise HTTPException(status_code=404, detail="schema not found or expired")
+        raise _expired("sample")
     main_file = next((f.filename for f in model.files if f.relationship == "main"), None)
     declaration = find_element(model, element)
     if declaration is None:
@@ -175,8 +182,7 @@ async def export_bundle(schema_id: str) -> Response:
     """
     model = schema_cache.get(schema_id)
     if model is None:
-        emit("export", source="bundle", status="rejected", status_code=404)
-        raise HTTPException(status_code=404, detail="schema not found or expired")
+        raise _expired("bundle")
     files = [f for f in model.files if f.content is not None]
     main = next((f for f in files if f.relationship == "main"), files[0] if files else None)
     if main is None:
@@ -219,8 +225,7 @@ async def export_bundle(schema_id: str) -> Response:
 async def export_formatted_file(schema_id: str, file_id: str) -> Response:
     model = schema_cache.get(schema_id)
     if model is None:
-        emit("export", source="formatted", status="rejected", status_code=404)
-        raise HTTPException(status_code=404, detail="schema not found or expired")
+        raise _expired("formatted")
     for source in model.files:
         if source.id == file_id and source.content is not None:
             pretty = _pretty_xml(source.content)

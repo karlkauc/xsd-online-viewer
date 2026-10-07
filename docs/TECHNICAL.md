@@ -37,7 +37,7 @@ sizing, env vars, smoke test, rollback) lives in
 | `PORT` | `8080` | HTTP listen port |
 | `MAX_UPLOAD_MB` | `50` | Maximum upload size in MB |
 | `ALLOWED_SCHEMA_HOSTS` | *(empty)* | Empty = any public host allowed. Set to a regex (or comma-separated list of regexes) to lock URL fetching down to a whitelist. |
-| `SCHEMA_CACHE_TTL_MIN` | `60` | In-memory parse-cache TTL in minutes |
+| `SCHEMA_CACHE_TTL_MIN` | `60` | In-memory parse-cache TTL in minutes, counted from the last use |
 | `SCHEMA_CACHE_MAX_ENTRIES` | `32` | Max. number of cached parsed schemas |
 | `LOG_LEVEL` | `INFO` | Log level (DEBUG, INFO, WARNING, ERROR) |
 

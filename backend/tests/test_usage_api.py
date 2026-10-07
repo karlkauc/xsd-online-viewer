@@ -80,6 +80,7 @@ def test_text_and_validate_and_export(
         ("export", "html", "rejected"),
     ]
     assert recorder.events[1].error_count and recorder.events[1].error_count > 0
+    assert recorder.events[3].error_detail == "schema not found or expired"
 
 
 def test_sample_xml_is_recorded(
