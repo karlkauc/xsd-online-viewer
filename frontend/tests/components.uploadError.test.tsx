@@ -14,6 +14,15 @@ describe("UploadError", () => {
     expect(link).toHaveAttribute("target", "_blank");
   });
 
+  it("shows how to wrap a pasted schema fragment", () => {
+    render(
+      <UploadError message="schema.xsd: Namespace prefix xs on element is not defined, line 1, column 21 — the prefix …" />,
+    );
+    expect(screen.getByText(/A namespace prefix is not declared/)).toBeInTheDocument();
+    expect(screen.getByText(/xmlns:xs="http:\/\/www\.w3\.org\/2001\/XMLSchema"/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /XML Viewer/ })).not.toBeInTheDocument();
+  });
+
   it("offers 'Upload anyway' only for client-side rejections", async () => {
     const anyway = vi.fn();
     const { rerender } = render(<UploadError message="x.xml: looks like an XML document" onUploadAnyway={anyway} />);

@@ -98,10 +98,79 @@ def humanize_syntax_error(exc: etree.XMLSyntaxError, filename: str, content: byt
             return f"{filename}: not an XML file — it starts with binary data ({head!r}), not text"
         return f"{filename}: not an XML file (it starts with {head!r} instead of '<')"
     message = _LXML_LOCATION_RE.sub("", str(exc))
-    return f"{filename}: {message}"
+    hint = _syntax_hint(message)
+    return f"{filename}: {message} — {hint}" if hint else f"{filename}: {message}"
 
 
 XSD_NS = "http://www.w3.org/2001/XMLSchema"
+
+# libxml2's wording for the well-formedness errors users actually hit, with
+# what to do about each. The original text stays in front: it carries the line
+# and column, and it is what a search engine knows.
+_SYNTAX_HINTS: tuple[tuple[str, str], ...] = (
+    (
+        "Extra content at the end of the document",
+        "something follows the end of the root element. An XML file has exactly one root: "
+        "two documents pasted together, or text after the closing tag, cause this",
+    ),
+    (
+        "XML declaration allowed only at the start of the document",
+        "the <?xml …?> line must be the very first thing in the file. Remove whatever "
+        "precedes it (a comment, stray text, or another document pasted in above)",
+    ),
+    ("xmlParseEntityRef: no name", "a bare '&' in the text; write it as &amp;"),
+    ("EntityRef: expecting ';'", "an '&' that does not start an entity; write it as &amp;"),
+    (
+        "attributes construct error",
+        'an attribute is not written as name="value" with straight quotes. Typographic '
+        "quotes pasted from a word processor or a web page cause this",
+    ),
+    (
+        "AttValue: \" or ' expected",
+        'an attribute value is not in straight quotes (name="value"). Typographic quotes '
+        "pasted from a word processor or a web page cause this",
+    ),
+    (
+        "Invalid bytes in character encoding",
+        "the file's bytes do not match the encoding its <?xml … encoding=\"…\"?> line "
+        "declares (UTF-8 when it declares none). Re-save the file in that encoding",
+    ),
+    (
+        "Input is not proper UTF-8",
+        "the file is not UTF-8 but does not declare another encoding. Re-save it as UTF-8, "
+        'or declare the real one in the first line (<?xml version="1.0" encoding="…"?>)',
+    ),
+    ("Premature end of data", "the file ends before its root element is closed; it looks cut off"),
+)
+
+_UNDECLARED_PREFIX_RE = re.compile(r"Namespace prefix (\S+) (?:on|for) (\S+) is not defined")
+# Enough to tell a piece of a schema from any other XML with an undeclared prefix.
+_XSD_ELEMENT_NAMES = frozenset(
+    {
+        "schema", "element", "attribute", "complexType", "simpleType", "sequence", "choice",
+        "all", "group", "attributeGroup", "annotation", "documentation", "restriction",
+        "extension", "enumeration", "import", "include",
+    }
+)  # fmt: skip
+
+
+def _syntax_hint(message: str) -> str | None:
+    undeclared = _UNDECLARED_PREFIX_RE.search(message)
+    if undeclared:
+        prefix, local = undeclared.groups()
+        if prefix in ("xs", "xsd") or local in _XSD_ELEMENT_NAMES:
+            return (
+                f'the prefix "{prefix}" is used but never declared. Add '
+                f'xmlns:{prefix}="{XSD_NS}" to the root element; if this is only a part of '
+                f'a schema, wrap it in <{prefix}:schema xmlns:{prefix}="{XSD_NS}"> … '
+                f"</{prefix}:schema>"
+            )
+        return (
+            f'the prefix "{prefix}" is used but never declared. Add its xmlns:{prefix}="…" '
+            "declaration to the root element"
+        )
+    return next((hint for needle, hint in _SYNTAX_HINTS if needle in message), None)
+
 
 # Namespaces of the pre-Recommendation drafts. Schemas written against them are
 # still in circulation, and their root really is a schema — just an old one.
@@ -123,7 +192,8 @@ def not_a_schema_message(filename: str, root_tag: object) -> str:
     A root named ``schema`` in the wrong (or no) namespace is not an XML
     document that was mistaken for a schema — it *is* a schema, written with a
     missing or outdated ``xmlns``. Saying "not <xs:schema>" there reads as if
-    the prefix were the problem, so name the actual namespace instead.
+    the prefix were the problem, so name the actual namespace instead. Nor is
+    a lone ``<xs:element>`` an XML document: it is a schema without its wrapper.
     """
     tag = str(root_tag)
     local = _local_name(tag)
@@ -144,6 +214,11 @@ def not_a_schema_message(filename: str, root_tag: object) -> str:
         return (
             f"{filename}: the root element <schema> is in namespace {namespace}, "
             f"not the XML Schema namespace {XSD_NS}"
+        )
+    if _namespace_of(tag) == XSD_NS:
+        return (
+            f"{filename}: the root element is <xs:{local}>, a part of an XML Schema rather "
+            f'than a whole one — wrap it in <xs:schema xmlns:xs="{XSD_NS}"> … </xs:schema>'
         )
     return (
         f"{filename}: root element is <{local}>, not <xs:schema> — "

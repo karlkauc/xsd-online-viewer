@@ -25,6 +25,29 @@ describe("classifyUploadError", () => {
       ).kind,
     ).toBe("schema-namespace");
   });
+  it("tells a schema fragment and an undeclared prefix from an XML document", () => {
+    expect(
+      classifyUploadError(
+        'schema.xsd: the root element is <xs:element>, a part of an XML Schema rather than a whole one — wrap it in <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"> … </xs:schema>',
+      ).kind,
+    ).toBe("schema-fragment");
+    expect(
+      classifyUploadError(
+        'schema.xsd: Namespace prefix xs on element is not defined, line 1, column 21 — the prefix "xs" is used but never declared. Add xmlns:xs="http://www.w3.org/2001/XMLSchema" to the root element; if this is only a part of a schema, wrap it in <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"> … </xs:schema>',
+      ).kind,
+    ).toBe("undeclared-prefix");
+  });
+  it("groups libxml2's well-formedness errors", () => {
+    for (const message of [
+      "a.xsd: Extra content at the end of the document, line 2, column 1 — something follows …",
+      "a.xsd: XML declaration allowed only at the start of the document, line 2, column 6 — …",
+      "a.xsd: xmlParseEntityRef: no name, line 1, column 6 — a bare '&' …",
+      "a.xsd: Invalid bytes in character encoding, line 1, column 44 — …",
+      "a.xsd: Opening and ending tag mismatch: b line 1 and a, line 1, column 11",
+    ]) {
+      expect(classifyUploadError(message).kind).toBe("not-well-formed");
+    }
+  });
   it("flags URLs that served an HTML page", () => {
     expect(
       classifyUploadError(

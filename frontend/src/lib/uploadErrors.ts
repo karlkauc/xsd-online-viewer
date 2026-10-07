@@ -5,6 +5,9 @@ export { XML_VIEWER_URL } from "./links";
 export type UploadErrorKind =
   | "xml-document"
   | "schema-namespace"
+  | "schema-fragment"
+  | "undeclared-prefix"
+  | "not-well-formed"
   | "cross-stitch"
   | "browser-copy"
   | "binary-file"
@@ -28,11 +31,19 @@ const RULES: Array<[RegExp, UploadErrorKind, string]> = [
   // Must precede the xml-document rule: this root *is* a schema, only its xmlns is off.
   [/the root element <schema>/i, "schema-namespace", "The schema's XML namespace is missing or wrong"],
   [/not <xs:schema>|looks like an XML document|root element is not xs:schema/i, "xml-document", "This is an XML document, not an XML Schema"],
+  [/a part of an XML Schema/i, "schema-fragment", "This is a part of a schema, not a whole one"],
+  [/Namespace prefix \S+ (?:on|for) \S+ is not defined/i, "undeclared-prefix", "A namespace prefix is not declared"],
   // Both must precede binary-file / not-xml: their messages also say "not an XML file".
   [/cross-stitch pattern|Pattern Maker/i, "cross-stitch", "This is a cross-stitch pattern, not an XML Schema"],
   [/rendered XML view/i, "browser-copy", "This is the browser's rendered view, not the file"],
   [/not an XML file.*binary/i, "binary-file", "This is a binary file, not a schema"],
   [/not an XML file|Start tag expected|the file is empty/i, "not-xml", "The file is not XML"],
+  // libxml2's well-formedness errors; the backend appends what to do about each.
+  [
+    /Extra content at the end|XML declaration allowed only|EntityRef|attributes construct error|AttValue|Invalid bytes in character encoding|not proper UTF-8|Premature end of data|tag mismatch|xml namespace URI cannot be the default namespace/i,
+    "not-well-formed",
+    "The file is not well-formed XML",
+  ],
   [/ZIP archive contains no/i, "zip-no-xsd", "The ZIP contains no schema"],
   [/DTD construct/i, "dtd", "The schema uses DTD declarations we cannot accept"],
   [/exceeds .* MB limit|HTTP 413/i, "too-large", "The file is too large"],

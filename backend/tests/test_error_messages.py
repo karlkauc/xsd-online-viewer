@@ -196,3 +196,47 @@ def test_schema_root_in_a_foreign_namespace() -> None:
 def test_namespaceless_schema_reaches_the_new_message() -> None:
     with pytest.raises(ValueError, match="declares no namespace"):
         parse_single(b'<schema><element name="a"/></schema>', "HU_LABEL_E.xsd")
+
+
+@pytest.mark.parametrize(
+    ("data", "libxml2_says", "hint"),
+    [
+        (b"<a/><b/>", "Extra content at the end of the document", "exactly one root"),
+        (b"<!-- x -->\n<?xml version='1.0'?><a/>", "XML declaration allowed only", "very first thing"),
+        (b"<a>R & D</a>", "xmlParseEntityRef: no name", "&amp;"),
+        (b"<a>R&D</a>", "EntityRef: expecting ';'", "&amp;"),
+        (b"<a b=\xe2\x80\x9cc\xe2\x80\x9d/>", "", "straight quotes"),
+        (b"<?xml version='1.0' encoding='UTF-8'?><a>\xfc</a>", "", "encoding"),
+        (b"<a><b>", "Premature end of data", "cut off"),
+    ],
+    ids=[
+        "two-roots",
+        "late-declaration",
+        "bare-ampersand",
+        "ampersand-word",
+        "curly-quotes",
+        "wrong-encoding",
+        "truncated",
+    ],
+)
+def test_common_syntax_errors_say_what_to_do(data: bytes, libxml2_says: str, hint: str) -> None:
+    msg = humanize_syntax_error(_syntax_error(data), "x.xsd", data)
+    assert libxml2_says in msg and hint in msg, msg
+    assert "line " in msg  # libxml2's position survives
+
+
+def test_undeclared_schema_prefix_names_the_missing_xmlns() -> None:
+    data = b'<xs:element name="a"/>'
+    msg = humanize_syntax_error(_syntax_error(data), "schema.xsd", data)
+    assert msg.startswith("schema.xsd: Namespace prefix xs on element is not defined")
+    assert 'xmlns:xs="http://www.w3.org/2001/XMLSchema"' in msg and "wrap it in <xs:schema" in msg
+
+    data = b"<p:order/>"
+    msg = humanize_syntax_error(_syntax_error(data), "o.xml", data)
+    assert 'Add its xmlns:p="…" declaration' in msg and "XMLSchema" not in msg
+
+
+def test_schema_fragment_is_not_called_an_xml_document() -> None:
+    msg = not_a_schema_message("schema.xsd", "{http://www.w3.org/2001/XMLSchema}complexType")
+    assert "a part of an XML Schema" in msg and "wrap it in <xs:schema" in msg
+    assert "looks like an XML document" not in msg

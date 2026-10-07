@@ -108,6 +108,26 @@ export function UploadError({ message, onUploadAnyway, schemaName, file }: Props
             </p>
           </>
         )}
+        {(kind === "schema-fragment" || kind === "undeclared-prefix") && (
+          <>
+            <p>
+              A schema is a complete XML file: one <code>&lt;xs:schema&gt;</code> root element that
+              declares the prefix it uses, with the elements and types inside it.
+            </p>
+            <pre className="overflow-x-auto rounded bg-white/60 dark:bg-black/20 p-2 font-mono text-xs">
+              {'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">\n  …your elements and types…\n</xs:schema>'}
+            </pre>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              If you copied only a piece of a schema, wrap it like this and load it again.
+            </p>
+          </>
+        )}
+        {kind === "not-well-formed" && (
+          <p>
+            The XML parser stopped at the line and column above. An XML Schema has to be
+            well-formed XML before it can be read: fix that spot and load the file again.
+          </p>
+        )}
         {kind === "cross-stitch" && (
           <>
             <p>
