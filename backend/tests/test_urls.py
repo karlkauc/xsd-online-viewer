@@ -29,6 +29,10 @@ from app.parser.urls import html_response_message, looks_like_html, normalize_sc
             "https://gitlab.com/group/sub/project/-/raw/main/schemas/a.xsd",
         ),
         (
+            "https://forge.etsi.org/rep/li/schemas-definitions/-/blob/draft/xsd/ts_103120_Task.xsd?ref_type=heads",
+            "https://forge.etsi.org/rep/li/schemas-definitions/-/raw/draft/xsd/ts_103120_Task.xsd",
+        ),
+        (
             "https://bitbucket.org/ws/repo/src/main/x.xsd",
             "https://bitbucket.org/ws/repo/raw/main/x.xsd",
         ),

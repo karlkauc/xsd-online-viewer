@@ -63,6 +63,13 @@ def normalize_schema_url(url: str) -> str:
             return f"https://bitbucket.org/{workspace}/{repo}/raw/{rest}"
         return url
 
+    # Self-hosted GitLab (forge.etsi.org, gitlab.<company>): "/-/blob/" is
+    # GitLab's own path marker, so the host needs no list.
+    m = _GITLAB_BLOB_RE.match(path)
+    if m:
+        project, rest = m.groups()
+        return str(parsed.copy_with(path=f"{project}/-/raw/{rest}", query=None, fragment=None))
+
     return url
 
 
