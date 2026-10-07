@@ -14,9 +14,11 @@ from __future__ import annotations
 import logging
 import os
 import re
+from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
+from urllib.parse import quote
 
 from lxml import etree
 from pydantic import BaseModel, Field
@@ -35,6 +37,7 @@ from app.parser.model import (
 from app.parser.security import inspect_dtd, make_parser, only_duplicate_ids
 from app.parser.w3c import bytes_for_location
 from app.parser.walk import _iter_declarations, iter_elements
+from app.parser.xsd_parser import ZipResolver
 
 logger = logging.getLogger(__name__)
 
@@ -305,40 +308,54 @@ def _location_resolves(location: str | None, path: Path, by_url: dict[str, Path]
     return (path.parent / location).exists()
 
 
-def _repair_imports(
+_REFERENCE_TAGS = tuple(f"{{{XSD_NS}}}{tag}" for tag in ("import", "include", "redefine", "override"))
+
+
+def _repair_references(
     path: Path,
     data: bytes,
     by_namespace: dict[str, Path],
     by_url: dict[str, Path],
+    resolve: Callable[[str], Path | None],
     parser: etree.XMLParser,
 ) -> bytes | None:
-    """Point an import at the file the loader actually satisfied it with.
+    """Point a reference at the file the loader actually satisfied it with.
 
-    The loader fills an ``<xs:import>`` whose schemaLocation is absent or does
-    not resolve from the bundled W3C schemas or from another loaded file of
-    that namespace (``app/parser/w3c``, ``xsd_parser._follow_references``), so
-    the model holds a file libxml2 would never load: it only ever sees the
-    location the schema wrote. The whole namespace was then missing from the
-    compiled schema -- a sample rooted in it read "No matching global
-    declaration available for the validation root", and a schema that referred
-    to it did not compile at all (TiposNFe_v02.xsd + xmldsig).
+    The loader is more forgiving than libxml2, which only ever sees the
+    location the schema wrote:
+
+    - an ``<xs:import>`` whose schemaLocation is absent or does not resolve is
+      filled from the bundled W3C schemas or from another loaded file of that
+      namespace (``app/parser/w3c``, ``xsd_parser._follow_references``). The
+      whole namespace was then missing from the compiled schema -- a sample
+      rooted in it read "No matching global declaration available for the
+      validation root", and a schema that referred to it did not compile at
+      all (TiposNFe_v02.xsd + xmldsig);
+    - any schemaLocation is also tried as a Windows path (``..\\Base.xsd``),
+      percent-decoded, case-insensitively and by bare file name
+      (``xsd_parser.ZipResolver``), which read "Failed to load the document …
+      for inclusion" here. ``resolve`` is that same lookup.
 
     Returns the patched bytes, or ``None`` when nothing had to change.
     """
-    if b"import" not in data:
+    if not any(tag in data for tag in (b"import", b"include", b"redefine", b"override")):
         return None
     try:
         tree = etree.parse(BytesIO(data), parser)
     except etree.XMLSyntaxError:
         return None  # the compile step reports it, with a better message
     changed = False
-    for elem in tree.getroot().findall(f"{{{XSD_NS}}}import"):
-        materialised = by_namespace.get(elem.get("namespace") or "")
+    for elem in tree.getroot().iterchildren(*_REFERENCE_TAGS):
+        location = (elem.get("schemaLocation") or "").strip()
+        if _location_resolves(location, path, by_url):
+            continue
+        materialised = resolve(location) if location else None
+        if materialised is None and elem.tag == _REFERENCE_TAGS[0]:
+            materialised = by_namespace.get(elem.get("namespace") or "")
         if materialised is None or materialised == path:
             continue
-        if _location_resolves(elem.get("schemaLocation"), path, by_url):
-            continue
-        elem.set("schemaLocation", os.path.relpath(materialised, path.parent))
+        # A schemaLocation is a URI: libxml2 refuses one with a raw space in it.
+        elem.set("schemaLocation", quote(os.path.relpath(materialised, path.parent)))
         changed = True
     if not changed:
         return None
@@ -379,6 +396,7 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
         by_namespace: dict[str, Path] = {}
         written: list[tuple[Path, bytes]] = []
         names_by_path: dict[str, str] = {}
+        paths_by_name: dict[str, Path] = {}
 
         for idx, source in enumerate(model.files):
             if source.content is None:
@@ -402,6 +420,7 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
             target.write_bytes(data)
             written.append((target, data))
             names_by_path[str(target)] = source.filename
+            paths_by_name.setdefault(source.filename, target)
             if "://" in source.filename:
                 by_url.setdefault(_url_key(source.filename), target)
             if source.relationship == "main":
@@ -413,10 +432,18 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
             raise ValidationSetupError("schema source is unavailable; cannot validate")
 
         parser = make_parser(internal_entities=main_has_entities)
-        # Nothing was loaded that an import could point at: a single-file schema
+        # The loader's own lookup, over the names it loaded the files under.
+        loaded_names = ZipResolver(files=dict.fromkeys(paths_by_name, b""))
+        # Nothing was loaded that a reference could point at: a single-file schema
         # never needs the repair below, and re-reading it would be wasted work.
-        for path, data in written if by_namespace else ():
-            repaired = _repair_imports(path, data, by_namespace, by_url, parser)
+        for path, data in written if len(written) > 1 else ():
+            name = names_by_path[str(path)]
+
+            def resolve(location: str, name: str = name) -> Path | None:
+                found = loaded_names.resolve(name, location)
+                return paths_by_name[found[0]] if found else None
+
+            repaired = _repair_references(path, data, by_namespace, by_url, resolve, parser)
             if repaired is not None:
                 path.write_bytes(repaired)
 

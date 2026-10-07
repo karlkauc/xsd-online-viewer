@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from app.parser.validation import unloaded_files, validate_xml
 from app.parser.walk import iter_elements
 from app.parser.xsd_parser import parse_files_map, parse_single, parse_zip
 
@@ -540,6 +541,56 @@ class TestIncludeResolution:
         assert "types.xsd" in filenames
         # ISBNType from types.xsd must be visible as a simple type
         assert _find_simple(model, "ISBNType") is not None
+
+    @pytest.mark.parametrize(
+        ("stored_as", "location"),
+        [
+            ("base/types.xsd", "..\\base\\types.xsd"),  # authored on Windows
+            ("base/my types.xsd", "../base/my%20types.xsd"),  # a schemaLocation is a URI
+            ("types.xsd", "shared/types.xsd"),  # loose files, uploaded without folders
+        ],
+        ids=["backslash", "percent-encoded", "bare-name"],
+    )
+    def test_include_location_spellings(self, stored_as: str, location: str) -> None:
+        files = {
+            "main/main.xsd": (
+                '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+                f'<xs:include schemaLocation="{location}"/>'
+                '<xs:element name="root" type="T"/></xs:schema>'
+            ).encode(),
+            stored_as: (
+                b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+                b'<xs:simpleType name="T"><xs:restriction base="xs:string"/></xs:simpleType>'
+                b"</xs:schema>"
+            ),
+        }
+        model = parse_files_map(files, "main/main.xsd")
+        assert _find_simple(model, "T") is not None
+        assert not model.diagnostics
+        # libxml2 reads the location as written; the validator has to bridge that.
+        assert validate_xml(model, b"<root>x</root>").is_valid
+
+    def test_same_named_file_in_another_folder_is_not_a_match(self) -> None:
+        files = {
+            "main.xsd": (
+                b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+                b'<xs:include schemaLocation="a/types.xsd"/></xs:schema>'
+            ),
+            "b/types.xsd": b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"/>',
+        }
+        model = parse_files_map(files, "main.xsd")
+        assert [d.message for d in model.diagnostics] == [
+            "main.xsd: unresolved include schemaLocation='a/types.xsd'"
+        ]
+
+    def test_unresolved_windows_location_is_named_as_written(self) -> None:
+        model = parse_single(
+            b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+            b'<xs:include schemaLocation="..\\LetterBase.xsd"/></xs:schema>',
+            "letter.xsd",
+        )
+        assert model.diagnostics[0].message.endswith("schemaLocation='..\\LetterBase.xsd'")
+        assert unloaded_files(model) == ["..\\LetterBase.xsd"]
 
     def test_missing_include_is_reported(self, library_xsd_bytes: bytes) -> None:
         # Single-file parse of library.xsd cannot find types.xsd — must emit a warning

@@ -17,7 +17,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Literal
-from urllib.parse import urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 from lxml import etree
 
@@ -153,6 +153,16 @@ class SchemaResolver:
         raise NotImplementedError
 
 
+def _location_spellings(location: str) -> list[str]:
+    """``location`` as written, then read as a Windows path and percent-decoded.
+
+    Schemas authored on Windows say ``..\\Base.xsd``, and a schemaLocation is
+    a URI, so ``My%20Types.xsd`` names the file ``My Types.xsd``.
+    """
+    slashed = location.replace("\\", "/")
+    return list(dict.fromkeys((location, slashed, unquote(location), unquote(slashed))))
+
+
 @dataclass
 class ZipResolver(SchemaResolver):
     """Resolves locations against a ZIP archive of uploaded files."""
@@ -161,12 +171,12 @@ class ZipResolver(SchemaResolver):
 
     def resolve(self, base_location: str | None, location: str) -> tuple[str, bytes] | None:
         candidates: list[str] = []
-        if base_location:
-            base_dir = posixpath.dirname(base_location)
+        base_dir = posixpath.dirname(base_location) if base_location else ""
+        for spelling in _location_spellings(location):
             if base_dir:
-                candidates.append(posixpath.normpath(posixpath.join(base_dir, location)))
-        candidates.append(posixpath.normpath(location))
-        candidates.append(location)
+                candidates.append(posixpath.normpath(posixpath.join(base_dir, spelling)))
+            candidates.append(posixpath.normpath(spelling))
+            candidates.append(spelling)
         for name in candidates:
             if name in self.files:
                 return name, self.files[name]
@@ -179,6 +189,13 @@ class ZipResolver(SchemaResolver):
             real = lowered.get(candidate.lower())
             if real is not None:
                 return real, self.files[real]
+        # Loose files are uploaded without their folders, so ``sub/types.xsd``
+        # can only be the top-level ``types.xsd``. Not so inside an archive
+        # that kept its folders: there a same-named file elsewhere is another file.
+        wanted = {posixpath.basename(candidate).lower() for candidate in candidates} - {""}
+        for name in self.files:
+            if "/" not in name and name.lower() in wanted:
+                return name, self.files[name]
         return None
 
 
@@ -192,7 +209,8 @@ class UrlResolver(SchemaResolver):
         base = base_location or self.base_url
         if not base:
             return None
-        absolute = urljoin(base, location)
+        # A Windows-authored ``..\\types.xsd`` is a path, not a file name with backslashes.
+        absolute = urljoin(base, location.replace("\\", "/"))
         if urlparse(absolute).scheme not in ("http", "https"):
             return None
         try:
@@ -495,7 +513,7 @@ class XsdParser:
                         Diagnostic(
                             severity="warning",
                             message=(
-                                f"{loaded.filename}: could not load {location!r}: {exc}"
+                                f"{loaded.filename}: could not load '{location}': {exc}"
                             ),
                             file_id=loaded.file_id,
                             line=elem.sourceline,
@@ -510,7 +528,7 @@ class XsdParser:
                             severity="warning",
                             message=(
                                 f"{loaded.filename}: unresolved {tag} "
-                                f"schemaLocation={location!r}"
+                                f"schemaLocation='{location}'"
                             ),
                             file_id=loaded.file_id,
                             line=elem.sourceline,
@@ -1415,7 +1433,7 @@ def _referenced_locations(name: str, content: bytes) -> set[str]:
     base = posixpath.dirname(name)
     found: set[str] = set()
     for raw in _SCHEMA_LOCATION_RE.findall(content[:512_000]):
-        location = raw.decode("utf-8", "replace").strip()
+        location = raw.decode("utf-8", "replace").strip().replace("\\", "/")
         if not location or "://" in location:
             continue
         found.add(posixpath.normpath(posixpath.join(base, location)))

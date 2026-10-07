@@ -141,7 +141,7 @@ export function referencedLocations(name: string, content: string): Set<string> 
   const base = dirname(name);
   const found = new Set<string>();
   for (const match of content.slice(0, 512_000).matchAll(SCHEMA_LOCATION_RE)) {
-    const location = match[1].trim();
+    const location = match[1].trim().replace(/\\/g, "/");
     if (!location || location.includes("://")) continue;
     found.add(normalize(base ? `${base}/${location}` : location));
     found.add(basename(location));
