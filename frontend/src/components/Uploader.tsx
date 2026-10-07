@@ -127,7 +127,9 @@ export function Uploader() {
     setError(null);
     setErrorFile(undefined);
     setPendingFile(null);
-    setLastFile(null);
+    // Pasted text has no file, but an XML document pasted here by mistake can
+    // still be handed to the XML viewer as one.
+    setLastFile(new File([text], "pasted.xml", { type: "application/xml" }));
     setBusy(true);
     try {
       const response = await uploadSchemaText(text);
