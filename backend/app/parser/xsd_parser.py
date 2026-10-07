@@ -305,6 +305,34 @@ def _strip_markdown_fence(content: bytes) -> tuple[bytes, bool]:
     return _FENCE_CLOSE_RE.sub(b"", content[opening.end() :]), True
 
 
+# What the browser's own XML rendering adds when its text is copied: a banner
+# above the document and a "-" in front of every collapsible element.
+_BROWSER_BANNER_RE = re.compile(
+    rb"\A(?:\xef\xbb\xbf)?\s*This XML file does not appear to have any style information "
+    rb"associated with it\.\s*The document tree is shown below\.\s*"
+)
+_MARKED_ROOT_RE = re.compile(rb"\A(?:\xef\xbb\xbf)?\s*(?:<\?xml[^>]*\?>\s*)?-[ \t]*<")
+_FOLD_MARKER_RE = re.compile(rb"^([ \t]*)-[ \t]*(?=<)", re.MULTILINE)
+_FOLDED_NODE_RE = re.compile(rb"^[ \t]*\+[ \t]*<", re.MULTILINE)
+
+
+def _strip_browser_view(content: bytes) -> tuple[bytes, bool]:
+    """Undo a copy of the browser's rendered XML view; report whether it was one.
+
+    Only when the banner or a marker on the root element says so: a "-" at
+    the start of an inner line alone can be text. A "+" marks a node that was
+    collapsed when copied — its children are not in the text, so there is
+    nothing to restore and the content is left for the parser to refuse.
+    """
+    banner = _BROWSER_BANNER_RE.match(content)
+    body = content[banner.end() :] if banner else content
+    if banner is None and _MARKED_ROOT_RE.match(body) is None:
+        return content, False
+    if _FOLDED_NODE_RE.search(body):
+        return content, False
+    return _FOLD_MARKER_RE.sub(rb"\1", body), True
+
+
 def _strip_whitespace_before_xml_declaration(content: bytes) -> tuple[bytes, bool]:
     """Drop whitespace that precedes ``<?xml`` so lxml accepts the document.
 
@@ -433,6 +461,20 @@ class XsdParser:
                     message=(
                         f"{filename}: a Markdown code fence (```) around the content was "
                         "removed. Paste the schema itself, not the code block it came in."
+                    ),
+                    file_id=file_id,
+                    line=1,
+                )
+            )
+        content, browser_copy = _strip_browser_view(content)
+        if browser_copy:
+            self.state.diagnostics.append(
+                Diagnostic(
+                    severity="warning",
+                    message=(
+                        f"{filename}: this is a copy of the browser's rendered XML view; its "
+                        "banner and fold markers ('-') were removed. 'View page source' "
+                        "(Ctrl+U) shows the file itself."
                     ),
                     file_id=file_id,
                     line=1,

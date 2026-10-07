@@ -85,6 +85,47 @@ def test_browser_view_copy_is_explained(data: bytes) -> None:
     assert msg == f"schema.xsd: {BROWSER_COPY_HINT}"
 
 
+XSD_PLAIN = b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="a"/></xs:schema>'
+BANNER = (
+    b"This XML file does not appear to have any style information associated with it. "
+    b"The document tree is shown below.\n"
+)
+MARKED = (
+    b'-<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">\n'
+    b'  -<xs:element name="a">\n    <xs:annotation/>\n  </xs:element>\n</xs:schema>'
+)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [BANNER + XSD_PLAIN, MARKED, BANNER + MARKED, b'<?xml version="1.0"?>\n' + MARKED],
+    ids=["banner", "fold-markers", "both", "after-declaration"],
+)
+def test_browser_view_copy_is_cleaned_up_with_a_warning(data: bytes) -> None:
+    model = parse_single(data, "schema.xsd")
+    assert [e.name for e in model.elements] == ["a"]
+    assert model.files[0].content.lstrip().startswith("<")
+    warnings = [d.message for d in model.diagnostics if d.severity == "warning"]
+    assert any("rendered XML view" in w for w in warnings), warnings
+
+
+def test_collapsed_browser_view_cannot_be_restored() -> None:
+    # "+" stands for children that were folded away when the text was copied.
+    data = b'-<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">\n  +<xs:element name="a">\n</xs:schema>'
+    with pytest.raises(ValueError, match="rendered XML view"):
+        parse_single(data, "schema.xsd")
+
+
+def test_a_dash_before_an_inner_tag_alone_is_left_alone() -> None:
+    data = (
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:annotation><xs:documentation>\n'
+        b"-<b>first</b>\n</xs:documentation></xs:annotation></xs:schema>"
+    )
+    model = parse_single(data, "schema.xsd")
+    assert "-<b>first</b>" in model.files[0].content
+    assert not model.diagnostics
+
+
 def test_plain_dash_text_is_not_mistaken_for_a_browser_copy() -> None:
     data = b"-- comment --\n"
     msg = humanize_syntax_error(_syntax_error(data), "n.xsd", data)
