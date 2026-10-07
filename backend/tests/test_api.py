@@ -5,11 +5,13 @@ from __future__ import annotations
 import io
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.parser.model import SchemaModel
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -51,6 +53,19 @@ class TestUpload:
             json={"filename": "simple.xsd", "content": simple_xsd_bytes.decode("utf-8")},
         )
         assert response.status_code == 200
+
+    def test_model_validation_error_is_not_shown_raw(self, client: TestClient) -> None:
+        # A value the model has no room for must not surface as pydantic's
+        # "1 validation error for SchemaModel … [type=literal_error, …]".
+        with patch(
+            "app.api.schema.parse_with_url_fallback",
+            side_effect=lambda *a, **k: SchemaModel(schema_id="x", element_form_default="odd"),
+        ):
+            response = client.post("/api/schema/text", json={"filename": "s.xsd", "content": "<x/>"})
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert "'odd'" in detail and "element_form_default" in detail
+        assert "validation error for" not in detail and "type=" not in detail
 
     def test_upload_dtd_rejected(self, client: TestClient, xxe_attack_bytes: bytes) -> None:
         response = client.post(

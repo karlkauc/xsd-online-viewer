@@ -246,8 +246,8 @@ def _file_settings(file_id: str, content: str | None) -> _FileSettings | None:
             for m in _ATTRIBUTE.finditer(match.group(1))
         }
         settings = _FileSettings(
-            element_form=attributes.get("elementFormDefault", "unqualified"),
-            attribute_form=attributes.get("attributeFormDefault", "unqualified"),
+            element_form=attributes.get("elementFormDefault", "unqualified").strip(),
+            attribute_form=attributes.get("attributeFormDefault", "unqualified").strip(),
             prefixes={k[len("xmlns:"):]: v for k, v in attributes.items() if k.startswith("xmlns:")},
             default_namespace=attributes.get("xmlns"),
             has_default_namespace="xmlns" in attributes,

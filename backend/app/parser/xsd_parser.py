@@ -310,22 +310,53 @@ def _text(elem: etree._Element | None) -> str:
     return text
 
 
+def _token(elem: etree._Element, name: str, default: str | None = None) -> str | None:
+    """An attribute value as ``xs:token`` reads it: trimmed, inner runs collapsed.
+
+    lxml hands attribute values back as written, but every enumerated, QName
+    and NCName attribute of XSD collapses whitespace, and schemas with
+    ``elementFormDefault="qualified "`` are out there. Not for ``default``,
+    ``fixed``, facet ``value`` or XPath attributes, where whitespace is data.
+    """
+    raw = elem.get(name)
+    if raw is None:
+        return default
+    return " ".join(raw.split())
+
+
+def _choice[T](elem: etree._Element, name: str, allowed: tuple[str, ...], default: T) -> str | T:
+    """An enumerated attribute; anything outside ``allowed`` reads as absent."""
+    value = _token(elem, name)
+    return value if value in allowed else default
+
+
+_FORMS = ("qualified", "unqualified")
+_PROCESS_CONTENTS = ("strict", "lax", "skip")
+
+
 def _bool_attr(elem: etree._Element, name: str, default: bool = False) -> bool:
     raw = elem.get(name)
     if raw is None:
         return default
-    return raw.lower() in ("true", "1")
+    return raw.strip().lower() in ("true", "1")
 
 
 def _occurs(value: str | None, default: int) -> int | Literal["unbounded"]:
     if value is None:
         return default
+    value = value.strip()
     if value == "unbounded":
         return "unbounded"
     try:
         return int(value)
     except ValueError:
         return default
+
+
+def _min_occurs(value: str | None) -> int:
+    """``minOccurs`` has no ``unbounded``; a schema that writes it anyway reads as the default."""
+    occurs = _occurs(value, 1)
+    return occurs if isinstance(occurs, int) else 1
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +479,7 @@ class XsdParser:
         ]
         for tag, relationship in mapping:
             for elem in loaded.root.findall(f"{{{XSD_NS}}}{tag}"):
-                location = elem.get("schemaLocation")
+                location = (elem.get("schemaLocation") or "").strip() or None
                 target_ns = elem.get("namespace") if tag == "import" else loaded.target_ns
                 if not location:
                     # <xs:import namespace="…"/> without a location: only the
@@ -525,11 +556,11 @@ class XsdParser:
             schema_id="pending",
             target_namespace=main.target_ns,
             namespaces=_collect_namespaces(self.state.files),
-            element_form_default=main.root.get("elementFormDefault", "unqualified"),  # type: ignore[arg-type]
-            attribute_form_default=main.root.get("attributeFormDefault", "unqualified"),  # type: ignore[arg-type]
+            element_form_default=_choice(main.root, "elementFormDefault", _FORMS, "unqualified"),  # type: ignore[arg-type]
+            attribute_form_default=_choice(main.root, "attributeFormDefault", _FORMS, "unqualified"),  # type: ignore[arg-type]
             xsd_version=_detect_xsd_version(self.state.files, main),
             xpath_default_namespace=main.root.get("xpathDefaultNamespace"),
-            default_attributes=main.root.get("defaultAttributes"),
+            default_attributes=_token(main.root, "defaultAttributes"),
             default_open_content=default_open_content,
         )
 
@@ -577,7 +608,7 @@ class XsdParser:
         """
         for loaded in self.state.files:
             for override_elem in loaded.root.findall(_xsd("override")):
-                location = override_elem.get("schemaLocation")
+                location = (override_elem.get("schemaLocation") or "").strip()
                 if not location:
                     continue
                 # Re-resolve the schemaLocation to find the loaded target file.
@@ -670,9 +701,9 @@ class XsdParser:
         *,
         is_global: bool,
     ) -> ElementDecl:
-        name = elem.get("name")
-        ref = elem.get("ref")
-        type_name = elem.get("type")
+        name = _token(elem, "name")
+        ref = _token(elem, "ref")
+        type_name = _token(elem, "type")
         annotation = self._collect_annotation(elem)
 
         type_inline_simple: SimpleType | None = None
@@ -704,14 +735,14 @@ class XsdParser:
             type_name=type_name,
             type_inline_simple=type_inline_simple,
             type_inline_complex=type_inline_complex,
-            min_occurs=_occurs(elem.get("minOccurs"), 1) if not is_global else 1,
+            min_occurs=_min_occurs(elem.get("minOccurs")) if not is_global else 1,
             max_occurs=_occurs(elem.get("maxOccurs"), 1) if not is_global else 1,
             default=elem.get("default"),
             fixed=elem.get("fixed"),
             nillable=_bool_attr(elem, "nillable"),
             abstract=_bool_attr(elem, "abstract"),
-            substitution_group=elem.get("substitutionGroup"),
-            form=elem.get("form"),  # type: ignore[arg-type]
+            substitution_group=_token(elem, "substitutionGroup"),
+            form=_choice(elem, "form", _FORMS, None),  # type: ignore[arg-type]
             target_namespace=loaded.target_ns if is_global else None,
             is_global=is_global,
             annotation=annotation,
@@ -745,15 +776,15 @@ class XsdParser:
             if local not in self._IDENTITY_CONSTRAINT_TAGS:
                 continue
             kind: IdentityConstraintKind = local  # type: ignore[assignment]
-            name = child.get("name")
-            ref = child.get("ref")  # XSD 1.1 identity-constraint sharing
+            name = _token(child, "name")
+            ref = _token(child, "ref")  # XSD 1.1 identity-constraint sharing
             if not name and ref:
                 name = ref.rpartition(":")[2]
             name = name or ""
             selector_elem = child.find(_xsd("selector"))
             selector = selector_elem.get("xpath", "") if selector_elem is not None else ""
             fields = [f.get("xpath", "") for f in child.findall(_xsd("field"))]
-            refer = child.get("refer")
+            refer = _token(child, "refer")
             qname = self._compose_qname(loaded, name)
             identifier = self._make_id("identityConstraint", qname)
             constraints.append(
@@ -804,7 +835,7 @@ class XsdParser:
                 type_inline_complex = self._parse_complex_type(child, loaded)
         return Alternative(
             test=elem.get("test"),
-            type_name=elem.get("type"),
+            type_name=_token(elem, "type"),
             type_inline_simple=type_inline_simple,
             type_inline_complex=type_inline_complex,
             xpath_default_namespace=elem.get("xpathDefaultNamespace"),
@@ -820,9 +851,9 @@ class XsdParser:
         *,
         is_global: bool,
     ) -> AttributeDecl:
-        name = elem.get("name")
-        ref = elem.get("ref")
-        type_name = elem.get("type")
+        name = _token(elem, "name")
+        ref = _token(elem, "ref")
+        type_name = _token(elem, "type")
         annotation = self._collect_annotation(elem)
 
         type_inline: SimpleType | None = None
@@ -838,7 +869,7 @@ class XsdParser:
             "attribute", qname or ref or f"anon-{self.state.next_anon()}"
         )
 
-        use = elem.get("use", "optional")
+        use = _token(elem, "use", "optional")
         if use not in ("required", "optional", "prohibited"):
             use = "optional"
 
@@ -852,7 +883,7 @@ class XsdParser:
             use=use,  # type: ignore[arg-type]
             default=elem.get("default"),
             fixed=elem.get("fixed"),
-            form=elem.get("form"),  # type: ignore[arg-type]
+            form=_choice(elem, "form", _FORMS, None),  # type: ignore[arg-type]
             target_namespace=loaded.target_ns if is_global else None,
             is_global=is_global,
             annotation=annotation,
@@ -864,7 +895,7 @@ class XsdParser:
     def _parse_simple_type(
         self, elem: etree._Element, loaded: _LoadedFile
     ) -> SimpleType:
-        name = elem.get("name")
+        name = _token(elem, "name")
         anonymous = name is None
         annotation = self._collect_annotation(elem)
         qname = self._compose_qname(loaded, name) if name else f"anon-simple-{self.state.next_anon()}"
@@ -885,7 +916,7 @@ class XsdParser:
 
         if restriction is not None:
             derivation = "restriction"
-            base = restriction.get("base")
+            base = _token(restriction, "base")
             inline_base = restriction.find(_xsd("simpleType"))
             if inline_base is not None and base is None:
                 member_inline.append(self._parse_simple_type(inline_base, loaded))
@@ -894,7 +925,7 @@ class XsdParser:
                 assertions.append(self._parse_assertion(assertion_elem, loaded))
         elif list_elem is not None:
             derivation = "list"
-            item_type = list_elem.get("itemType")
+            item_type = _token(list_elem, "itemType")
             inline_item = list_elem.find(_xsd("simpleType"))
             if inline_item is not None:
                 item_inline = self._parse_simple_type(inline_item, loaded)
@@ -925,7 +956,7 @@ class XsdParser:
     def _parse_complex_type(
         self, elem: etree._Element, loaded: _LoadedFile
     ) -> ComplexType:
-        name = elem.get("name")
+        name = _token(elem, "name")
         anonymous = name is None
         annotation = self._collect_annotation(elem)
         qname = (
@@ -966,7 +997,7 @@ class XsdParser:
             inner = restr if restr is not None else ext
             if inner is not None:
                 derivation = "restriction" if restr is not None else "extension"
-                base = inner.get("base")
+                base = _token(inner, "base")
                 simple_content_base = base
                 if restr is not None:
                     simple_content_facets = self._parse_facets(restr)
@@ -983,7 +1014,7 @@ class XsdParser:
             inner = restr if restr is not None else ext
             if inner is not None:
                 derivation = "restriction" if restr is not None else "extension"
-                base = inner.get("base")
+                base = _token(inner, "base")
                 particle = self._parse_content_model(inner, loaded)
                 attrs, groups = self._parse_attribute_children(inner, loaded)
                 attributes.extend(attrs)
@@ -1037,8 +1068,8 @@ class XsdParser:
     def _parse_group(
         self, elem: etree._Element, loaded: _LoadedFile
     ) -> Group:
-        name = elem.get("name")
-        ref = elem.get("ref")
+        name = _token(elem, "name")
+        ref = _token(elem, "ref")
         annotation = self._collect_annotation(elem)
         qname = (
             self._compose_qname(loaded, name)
@@ -1060,8 +1091,8 @@ class XsdParser:
     def _parse_attribute_group(
         self, elem: etree._Element, loaded: _LoadedFile
     ) -> AttributeGroup:
-        name = elem.get("name")
-        ref = elem.get("ref")
+        name = _token(elem, "name")
+        ref = _token(elem, "ref")
         annotation = self._collect_annotation(elem)
         qname = (
             self._compose_qname(loaded, name)
@@ -1104,7 +1135,7 @@ class XsdParser:
         kind = local  # sequence | choice | all
         particle = Particle(
             kind=kind,  # type: ignore[arg-type]
-            min_occurs=_occurs(elem.get("minOccurs"), 1),  # type: ignore[arg-type]
+            min_occurs=_min_occurs(elem.get("minOccurs")),  # type: ignore[arg-type]
             max_occurs=_occurs(elem.get("maxOccurs"), 1),
             annotation=self._collect_annotation(elem),
             version_constraints=_vc_attrs(elem),
@@ -1116,7 +1147,7 @@ class XsdParser:
             if child_local == "element":
                 inner = Particle(
                     kind="element",
-                    min_occurs=_occurs(child.get("minOccurs"), 1),  # type: ignore[arg-type]
+                    min_occurs=_min_occurs(child.get("minOccurs")),  # type: ignore[arg-type]
                     max_occurs=_occurs(child.get("maxOccurs"), 1),
                     element=self._parse_element(child, loaded, is_global=False),
                     version_constraints=_vc_attrs(child),
@@ -1132,10 +1163,10 @@ class XsdParser:
                 particle.children.append(
                     Particle(
                         kind="any",
-                        min_occurs=_occurs(child.get("minOccurs"), 1),  # type: ignore[arg-type]
+                        min_occurs=_min_occurs(child.get("minOccurs")),  # type: ignore[arg-type]
                         max_occurs=_occurs(child.get("maxOccurs"), 1),
                         wildcard_namespace=child.get("namespace"),
-                        wildcard_process_contents=child.get("processContents"),  # type: ignore[arg-type]
+                        wildcard_process_contents=_choice(child, "processContents", _PROCESS_CONTENTS, None),  # type: ignore[arg-type]
                         annotation=self._collect_annotation(child),
                         version_constraints=_vc_attrs(child),
                     )
@@ -1145,10 +1176,10 @@ class XsdParser:
     def _parse_group_ref_particle(
         self, elem: etree._Element, loaded: _LoadedFile
     ) -> Particle:
-        ref = elem.get("ref")
+        ref = _token(elem, "ref")
         return Particle(
             kind="group-ref",
-            min_occurs=_occurs(elem.get("minOccurs"), 1),  # type: ignore[arg-type]
+            min_occurs=_min_occurs(elem.get("minOccurs")),  # type: ignore[arg-type]
             max_occurs=_occurs(elem.get("maxOccurs"), 1),
             group_ref=ref,
             group_inline=(
@@ -1174,7 +1205,7 @@ class XsdParser:
                     self._parse_attribute(child, loaded, is_global=False)
                 )
             elif local == "attributeGroup":
-                ref = child.get("ref")
+                ref = _token(child, "ref")
                 if ref is not None:
                     group_refs.append(ref)
         return attributes, group_refs
@@ -1193,7 +1224,7 @@ class XsdParser:
             namespace=elem.get("namespace"),
             not_namespace=elem.get("notNamespace"),
             not_qname=elem.get("notQName"),
-            process_contents=elem.get("processContents"),  # type: ignore[arg-type]
+            process_contents=_choice(elem, "processContents", _PROCESS_CONTENTS, None),  # type: ignore[arg-type]
             annotation=self._collect_annotation(elem),
         )
 
@@ -1207,7 +1238,7 @@ class XsdParser:
         """
         any_elem = elem.find(_xsd("any"))
         wildcard = self._parse_wildcard(any_elem) if any_elem is not None else None
-        mode_raw = elem.get("mode", "interleave")
+        mode_raw = _token(elem, "mode", "interleave")
         mode = mode_raw if mode_raw in ("interleave", "suffix", "none") else "interleave"
         return OpenContent(
             mode=mode,  # type: ignore[arg-type]

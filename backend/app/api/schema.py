@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.cache import schema_cache
 from app.config import settings
@@ -95,6 +95,25 @@ def reject(event_type: str, source: str, status_code: int, detail: str, **fields
     return HTTPException(status_code=status_code, detail=detail)
 
 
+def _parse_error_detail(exc: Exception) -> str:
+    """What the user is told about a failed load.
+
+    A pydantic ``ValidationError`` is a ``ValueError`` too, but its text ("1
+    validation error for SchemaModel … [type=literal_error, …]") describes our
+    model, not their schema. It means the parser read a value the model has no
+    room for, so name the value and log the rest.
+    """
+    if not isinstance(exc, ValidationError):
+        return str(exc)
+    logger.error("schema model rejected a parsed value", exc_info=exc)
+    first = exc.errors()[0]
+    where = ".".join(str(part) for part in first["loc"])
+    return (
+        f"the schema uses a value the viewer cannot represent: {first['input']!r} "
+        f"for {where} ({first['msg']})"
+    )
+
+
 def ingest_schema(
     *, source: str, schema_name: str | None, input_bytes: int, parse: Callable[[], SchemaModel]
 ) -> SchemaResponse:
@@ -104,6 +123,7 @@ def ingest_schema(
     try:
         model = parse()
     except (SecurityError, ValueError) as exc:
+        detail = _parse_error_detail(exc)
         emit(
             "schema_load",
             source=source,
@@ -112,9 +132,9 @@ def ingest_schema(
             duration_ms=_ms(started),
             status="parse_error",
             status_code=400,
-            error_detail=str(exc),
+            error_detail=detail,
         )
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=detail) from exc
     response = finalize_schema_response(model)
     emit(
         "schema_load",

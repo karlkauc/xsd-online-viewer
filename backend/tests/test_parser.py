@@ -888,3 +888,44 @@ class TestIdentityConstraints:
 
         # No dangling keyrefs anywhere in the real-world schema.
         assert not any("unknown key" in d.message for d in model.diagnostics)
+
+
+class TestAttributeWhitespace:
+    """Enumerated and QName attributes collapse whitespace (xs:token); lxml does not."""
+
+    PADDED = b"""<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+        elementFormDefault="qualified " attributeFormDefault=" unqualified">
+      <xs:complexType name=" T ">
+        <xs:sequence>
+          <xs:element name="a" type=" xs:string " form=" qualified" nillable="true "
+                      minOccurs=" 0" maxOccurs="unbounded "/>
+          <xs:any processContents="lax " minOccurs="unbounded"/>
+        </xs:sequence>
+        <xs:attribute name="x" type="xs:int" use="required " form="unqualified "/>
+      </xs:complexType>
+      <xs:element name="root" type=" T"/>
+    </xs:schema>"""
+
+    def test_padded_values_load_as_written_without_the_padding(self) -> None:
+        model = parse_single(self.PADDED, "padded.xsd")
+        assert model.element_form_default == "qualified"
+        assert model.attribute_form_default == "unqualified"
+        assert _find_element(model, "root").type_name == "T"
+
+        complex_type = _find_complex(model, "T")
+        assert complex_type is not None
+        child_particle, wildcard = complex_type.particle.children
+        child = child_particle.element
+        assert (child.type_name, child.form, child.nillable) == ("xs:string", "qualified", True)
+        assert (child.min_occurs, child.max_occurs) == (0, "unbounded")
+        assert wildcard.wildcard_process_contents == "lax"
+        assert wildcard.min_occurs == 1  # "unbounded" is no minOccurs
+        attribute = complex_type.attributes[0]
+        assert (attribute.use, attribute.form) == ("required", "unqualified")
+
+    def test_unknown_enumerated_value_reads_as_absent(self) -> None:
+        xsd = self.PADDED.replace(b'"qualified "', b'"sometimes"').replace(b'"lax "', b'"maybe"')
+        model = parse_single(xsd, "odd.xsd")
+        assert model.element_form_default == "unqualified"
+        wildcard = _find_complex(model, "T").particle.children[1]
+        assert wildcard.wildcard_process_contents is None
