@@ -50,8 +50,12 @@ side by side, all linked to the same selection.
   switches between them.
 - **Sample XML.** Pick any element and generate a skeleton instance
   document — required content, first choice branch, first enumeration
-  value, placeholders for the built-in types — with an option to include
-  everything optional. Copy it, download it, or open it in the XML Viewer.
+  value — with an option to include everything optional and to show
+  repeatable elements up to three times. Values are examples that fit the
+  declared types and facets: element and attribute names suggest them
+  (`Currency` → `EUR`, `Email` → an address), and dates and numbers vary
+  from one occurrence to the next. Copy it, download it, or open it in the
+  XML Viewer.
 - **Export.** Diagram as PNG or SVG, the whole schema as standalone HTML
   documentation, or pretty-printed XML.
 - **Light, Dark, Desktop, Tablet, Mobile.** The UI follows

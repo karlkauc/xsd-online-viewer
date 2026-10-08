@@ -71,7 +71,7 @@ def test_multi_file_schema_with_pattern_facet() -> None:
     ns = "{http://example.com/library}"
     book = root.find(f"{ns}Book")
     assert book is not None
-    assert book.find(f"{ns}ISBN").text == "000-0000000000"
+    assert book.find(f"{ns}ISBN").text == "012-3456789012"
     assert validate_xml(model, xml.encode("utf-8")).is_valid
 
 

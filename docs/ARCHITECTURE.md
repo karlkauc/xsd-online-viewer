@@ -143,7 +143,7 @@ and opened from anywhere via window events (`xsdv:open-search`,
 | POST   | `/api/schema/url`                                   | Fetch XSD from URL (SSRF-guarded, browse-link rewrite, HTML rejected) |
 | GET    | `/api/schema/{schema_id}`                           | Retrieve cached schema                          |
 | POST   | `/api/schema/{schema_id}/validate/{upload,text,url}` | Validate an XML document against the schema   |
-| GET    | `/api/schema/{schema_id}/sample?element=<id>`       | Sample XML instance for one element             |
+| GET    | `/api/schema/{schema_id}/sample?element=<id>`       | Sample XML instance for one element (`optional`, `repeat` 1–5, `depth`) |
 | GET    | `/api/schema/{schema_id}/export/html`               | Standalone HTML export                          |
 | GET    | `/api/schema/{schema_id}/file/{file_id}/formatted`  | Pretty-printed source of one file               |
 | GET    | `/api/fundsxml/releases`                            | FundsXML releases from GitHub (cached)          |

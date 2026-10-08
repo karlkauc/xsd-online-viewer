@@ -110,7 +110,7 @@ def test_unsupported_pattern_is_a_generator_limit() -> None:
     body = (
         '<xs:element name="A" type="Code"/>'
         '<xs:simpleType name="Code"><xs:restriction base="xs:string">'
-        '<xs:pattern value="\\p{Lu}{3}"/>'
+        '<xs:pattern value="\\p{IsGreek}{3}"/>'
         "</xs:restriction></xs:simpleType>"
     )
     model = parse_single(_schema(body), "t.xsd")
@@ -488,7 +488,7 @@ def _sample_then_validate(
 PATTERN_XSD = _schema(
     '<xs:element name="A" type="Code"/>'
     '<xs:simpleType name="Code"><xs:restriction base="xs:string">'
-    '<xs:pattern value="\\p{Lu}{3}"/>'
+    '<xs:pattern value="\\p{IsGreek}{3}"/>'
     "</xs:restriction></xs:simpleType>"
 )
 
@@ -503,7 +503,7 @@ def test_invalid_sample_is_recorded_with_the_reason(
     assert issue.kind == "invalid"
     assert issue.error_count == 1
     assert issue.element_qname == "{urn:t}A"
-    assert issue.sample_xml is not None and "<ns1:A" in issue.sample_xml
+    assert issue.sample_xml is not None and "<A xmlns" in issue.sample_xml
     assert json.loads(issue.report)["counts"] == {"pattern_unsupported": 1}
     assert "pattern" in json.loads(issue.errors)[0]["message"]
     # The offending declaration is quoted, the whole schema is not.

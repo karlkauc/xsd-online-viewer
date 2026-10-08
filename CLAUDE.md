@@ -32,7 +32,11 @@ cd frontend && npm ci && npm run dev
 
 ## Tests
 
-- Backend: `cd backend && pytest` (also `ruff check`).
+- Backend: `cd backend && pytest` (also `ruff check`). The `dev` extra brings
+  `xmlschema`, used **only by tests and `tools/sample_audit.py`** as a second
+  validator for generated samples (XSD 1.1, IDREF targets — neither of which
+  libxml2 checks). The app never imports it and the Docker image does not
+  install it; tests that need it skip when it is missing.
 - Frontend: `cd frontend && npm run test` (Vitest) and `npm run build` for
   the TS typecheck via `tsc --noEmit`.
 - E2E: `cd e2e && npm ci && npx playwright test` — boots the backend with
@@ -80,8 +84,8 @@ cached and a soft reload can keep showing the old UI.
 - **Model contract**: `SchemaModel` is mirrored by hand between
   `backend/app/parser/model.py` and `frontend/src/types/schema.ts`. Keep them
   in sync when changing shapes — this now also covers `IdentityConstraint`
-  (`ElementDecl.identity_constraints`) and `IdRole` (`ElementDecl.id_role` /
-  `AttributeDecl.id_role`).
+  (`ElementDecl.identity_constraints`), `IdRole` (`ElementDecl.id_role` /
+  `AttributeDecl.id_role`) and `ComplexType.simple_content_inline`.
 - **Parser choice**: we use lxml, not `xmlschema`, because we need to preserve
   annotations, appinfo, comments, and source line numbers.
 - **Default tab is `diagram`** (`selectionStore.ts`), enforced by the e2e

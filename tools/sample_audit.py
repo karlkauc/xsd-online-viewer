@@ -24,12 +24,21 @@ Usage:
     python3 tools/sample_audit.py --urls urls.txt --out audit/before --cache-dir audit/cache
     python3 tools/sample_audit.py --urls urls.txt --out audit/after --cache-dir audit/cache --skip-over 5000
     python3 tools/sample_audit.py --compare audit/before audit/after   # exit 1 on regressions
+
+--second-validator additionally checks every sample with the ``xmlschema``
+package (a dev dependency, never used by the app). It reads XSD 1.1, which
+libxml2 cannot compile, and it checks that an IDREF points at an ID, which
+libxml2 does not. Each record then carries ``second`` (valid / invalid /
+error) and, when invalid, ``second_errors``; the summary lists the samples on
+which the two validators disagree. The primary ``status`` is unchanged, so
+--compare keeps working across runs with and without the option.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 import re
 import signal
@@ -38,7 +47,9 @@ import time
 import traceback
 from collections import Counter, defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -116,6 +127,55 @@ class _SampleTimeoutError(Exception):
     pass
 
 
+def build_second_validator(model: SchemaModel):  # noqa: ANN201 - xmlschema.XMLSchema11
+    """The schema compiled by ``xmlschema``, from the files the model carries.
+
+    Best effort: the files are laid out by the last part of their names and
+    imports are resolved by namespace, which covers the usual layouts but not
+    every one. Raises whatever xmlschema raises when that does not compile.
+    """
+    import xmlschema
+
+    main = next((f for f in model.files if f.relationship == "main"), None)
+    if main is None or main.content is None:
+        raise ValueError("schema has no main file with content")
+    with TemporaryDirectory(prefix="xsdaudit-") as tmp:
+        root = Path(tmp)
+        paths: dict[str, Path] = {}
+        locations: list[tuple[str, str]] = []
+        for index, source in enumerate(model.files):
+            if source.content is None:
+                continue
+            name = PurePosixPath(urlsplit(source.filename).path).name or f"file-{index}.xsd"
+            target = root / name
+            if target.exists():
+                target = root / f"{index}-{name}"
+            target.write_text(source.content, encoding="utf-8")
+            paths[source.id] = target
+            if source is not main and source.target_namespace:
+                locations.append((source.target_namespace, str(target)))
+        # Everything is read while compiling, so the files can go afterwards.
+        return xmlschema.XMLSchema11(str(paths[main.id]), locations=locations, allow="local")
+
+
+def _second_opinion(record: dict, second, xml: str) -> None:  # noqa: ANN001
+    if second is None:
+        return
+    started = time.perf_counter()
+    try:
+        errors = list(itertools.islice(second.iter_errors(xml), 10))
+    except _SampleTimeoutError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        record["second"] = "error"
+        record["second_errors"] = [f"{type(exc).__name__}: {exc}"[:300]]
+        return
+    record["second_ms"] = round((time.perf_counter() - started) * 1000, 1)
+    record["second"] = "invalid" if errors else "valid"
+    if errors:
+        record["second_errors"] = [f"{e.reason} @ {e.path}"[:300] for e in errors]
+
+
 def _on_alarm(_signum, _frame):  # noqa: ANN001, ANN202
     raise _SampleTimeoutError()
 
@@ -140,6 +200,7 @@ def _one_sample(
     index: int,
     sample_dir: Path,
     timeout: float,
+    second=None,  # noqa: ANN001 - xmlschema.XMLSchema11 | None
 ) -> dict:
     record: dict = {
         "element_id": element.id,
@@ -159,10 +220,11 @@ def _one_sample(
         }
         data = xml.encode("utf-8")
         record["sample_bytes"] = len(data)
+        phase = "validate"
+        _second_opinion(record, second, xml)
         if schema is None:
             record["status"] = "unvalidated"
             return record
-        phase = "validate"
         started = time.perf_counter()
         result = validate_xml(model, data, schema=schema)
         record["val_ms"] = round((time.perf_counter() - started) * 1000, 1)
@@ -194,7 +256,12 @@ def _one_sample(
 
 
 def audit_schema(
-    meta: dict, out_dir: Path, max_elements: int | None, sample_timeout: float, budget: float
+    meta: dict,
+    out_dir: Path,
+    max_elements: int | None,
+    sample_timeout: float,
+    budget: float,
+    second_validator: bool = False,
 ) -> dict:
     """Generate and validate every sample of one schema; write its results file."""
     signal.signal(signal.SIGALRM, _on_alarm)
@@ -207,6 +274,12 @@ def audit_schema(
     except ValidationSetupError as exc:
         schema, setup_error = None, str(exc)[:1000]
     compile_ms = int((time.monotonic() - started) * 1000)
+    second, second_setup_error = None, None
+    if second_validator:
+        try:
+            second = build_second_validator(model)
+        except Exception as exc:  # noqa: BLE001
+            second_setup_error = f"{type(exc).__name__}: {exc}"[:1000]
 
     elements = [e for e in model.elements if e.name]
     if max_elements:
@@ -225,12 +298,15 @@ def audit_schema(
                         "status": "skipped_budget",
                     }
                 else:
-                    record = _one_sample(model, schema, element, mode, index, sample_dir, sample_timeout)
+                    record = _one_sample(
+                        model, schema, element, mode, index, sample_dir, sample_timeout, second
+                    )
                 record["schema"] = meta["url"]
                 counts[f"{mode}:{record['status']}"] += 1
                 fh.write(json.dumps(record, ensure_ascii=False) + "\n")
     return meta | {
         "setup_error": setup_error,
+        "second_setup_error": second_setup_error,
         "compile_ms": compile_ms,
         "audited_elements": len(elements),
         "counts": dict(counts),
@@ -263,9 +339,22 @@ def summarise(out_dir: Path, schemas: list[dict]) -> dict:
     totals: Counter[str] = Counter()
     clusters: dict[str, dict] = {}
     reasons: dict[str, dict] = {}
+    second: Counter[str] = Counter()
+    disagreements: list[dict] = []
     for record in _iter_records(out_dir):
         status, mode = record["status"], record["mode"]
         totals[f"{mode}:{status}"] += 1
+        if "second" in record:
+            second[f"{status}/{record['second']}"] += 1
+            # libxml2 could not judge (XSD 1.1) or judged differently.
+            judged_apart = record["second"] == "invalid" and status in ("valid", "unvalidated")
+            if judged_apart and len(disagreements) < 200:
+                disagreements.append(
+                    {
+                        k: record.get(k)
+                        for k in ("schema", "element", "mode", "status", "second_errors", "report")
+                    }
+                )
         failed = status in FAILED
         for reason, info in (record.get("report") or {}).items():
             entry = reasons.setdefault(
@@ -322,6 +411,7 @@ def summarise(out_dir: Path, schemas: list[dict]) -> dict:
     return {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "totals": dict(totals),
+        "second_validator": {"totals": dict(second), "only_second_invalid": disagreements},
         "schemas": schemas,
         "clusters": sorted((_jsonable(c) for c in clusters.values()), key=lambda c: -c["samples"]),
         "reasons": dict(
@@ -351,6 +441,13 @@ def _print_summary(summary: dict) -> None:
             or (meta["status"] if meta["status"] != "loaded" else "")
         )
         print(f"  {'  '.join(cells):24} {note:12} {meta['url']}")
+    second = summary.get("second_validator") or {}
+    if second.get("totals"):
+        print("\nSecond validator (libxml2 status/xmlschema verdict):")
+        print("  " + "  ".join(f"{k}={v}" for k, v in sorted(second["totals"].items())))
+        for item in second["only_second_invalid"][:25]:
+            first = (item.get("second_errors") or [""])[0]
+            print(f"  {item['mode']:9} {item['element']}  {first[:110]}")
     print("\nTop clusters:")
     for cluster in summary["clusters"][:25]:
         print(f"  {cluster['samples']:6}  {len(cluster['schemas']):2} schemas  {cluster['key'][:150]}")
@@ -421,7 +518,13 @@ def run(args: argparse.Namespace) -> int:
         # Largest first, so the long runs start before the pool is busy with small ones.
         futures = {
             pool.submit(
-                audit_schema, meta, out_dir, args.max_elements, args.sample_timeout, args.budget
+                audit_schema,
+                meta,
+                out_dir,
+                args.max_elements,
+                args.sample_timeout,
+                args.budget,
+                args.second_validator,
             ): meta
             for meta in sorted(unique.values(), key=lambda m: -m["elements"])
         }
@@ -467,6 +570,11 @@ def main() -> int:
     parser.add_argument("--sample-timeout", type=float, default=30.0, help="seconds per generate+validate")
     parser.add_argument(
         "--budget", type=float, default=3600.0, help="seconds per schema before skipping the rest"
+    )
+    parser.add_argument(
+        "--second-validator",
+        action="store_true",
+        help="also validate with the xmlschema package (XSD 1.1, IDREF); needs the dev extra",
     )
     parser.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"), help="diff two output directories")
     args = parser.parse_args()

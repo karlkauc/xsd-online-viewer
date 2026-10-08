@@ -15,12 +15,18 @@ test("generate a sample XML document for the selected element", async ({ page })
 
   const dialog = page.getByRole("dialog", { name: "Sample XML for <Person>" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator(".cm-content")).toContainText("<tns:FirstName>string</tns:FirstName>");
+  await expect(dialog.locator(".cm-content")).toContainText("<tns:FirstName>Max</tns:FirstName>");
   await expect(dialog.locator(".cm-content")).not.toContainText("<tns:Age>");
   await expect(dialog.getByRole("status")).toContainText("Schema-valid");
 
   await dialog.getByRole("checkbox", { name: /Include optional/ }).check();
   await expect(dialog.locator(".cm-content")).toContainText("<tns:Age>0</tns:Age>");
+
+  // Repeatable elements can be shown more than once; the result still validates.
+  await expect(dialog.locator(".cm-content")).not.toContainText("erika.musterfrau@example.com");
+  await dialog.getByRole("combobox", { name: "Occurrences of repeatable elements" }).selectOption("2");
+  await expect(dialog.locator(".cm-content")).toContainText("erika.musterfrau@example.com");
+  await expect(dialog.getByRole("status")).toContainText("Schema-valid");
 
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();

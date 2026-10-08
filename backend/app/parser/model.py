@@ -321,6 +321,9 @@ class ComplexType(BaseModel):
     attribute_group_refs: list[QName] = Field(default_factory=list)
     simple_content_base: QName | None = None  # when content_kind == "simple"
     simple_content_facets: list[Facet] = Field(default_factory=list)
+    # <xs:simpleContent><xs:restriction base="…"><xs:simpleType>…: the anonymous
+    # type that replaces the base's content type before the facets apply.
+    simple_content_inline: SimpleType | None = None
     assertions: list[Assertion] = Field(default_factory=list)
     open_content: OpenContent | None = None  # XSD 1.1 xs:openContent
     # XSD 1.1: when ``SchemaModel.default_attributes`` is set, this flag

@@ -1037,6 +1037,7 @@ class XsdParser:
         attribute_group_refs: list[str] = []
         simple_content_base: str | None = None
         simple_content_facets: list[Facet] = []
+        simple_content_inline: SimpleType | None = None
         assertions: list[Assertion] = []
         open_content: OpenContent | None = None
 
@@ -1061,6 +1062,9 @@ class XsdParser:
                 simple_content_base = base
                 if restr is not None:
                     simple_content_facets = self._parse_facets(restr)
+                    inline_content = restr.find(_xsd("simpleType"))
+                    if inline_content is not None:
+                        simple_content_inline = self._parse_simple_type(inline_content, loaded)
                 attrs, groups = self._parse_attribute_children(inner, loaded)
                 attributes.extend(attrs)
                 attribute_group_refs.extend(groups)
@@ -1115,6 +1119,7 @@ class XsdParser:
             attribute_group_refs=attribute_group_refs,
             simple_content_base=simple_content_base,
             simple_content_facets=simple_content_facets,
+            simple_content_inline=simple_content_inline,
             assertions=assertions,
             open_content=open_content,
             default_attributes_apply=_bool_attr(

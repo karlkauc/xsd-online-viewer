@@ -32,6 +32,7 @@ export interface SampleRequest extends SampleTarget {
 interface GeneratedSample extends SampleXmlResult {
   request: SampleRequest;
   includeOptional: boolean;
+  repeat: number;
 }
 
 const EXTENSIONS = [xml(), EditorView.lineWrapping];
@@ -72,6 +73,10 @@ export function SampleXmlDialog() {
   const [request, setRequest] = useState<SampleRequest | null>(null);
   const [validation, setValidation] = useState<Validation | null>(null);
   const [includeOptional, setIncludeOptional] = useState(false);
+  const [repeatChoice, setRepeatChoice] = useState(1);
+  // Repeating only applies to optional content: without it every element
+  // appears exactly as often as the schema requires.
+  const repeat = includeOptional ? repeatChoice : 1;
   const [sample, setSample] = useState<GeneratedSample | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -94,9 +99,9 @@ export function SampleXmlDialog() {
     let cancelled = false;
     setSample(null);
     setError(null);
-    withSchemaRetry((id) => fetchSampleXml(id, request.elementId, { includeOptional }))
+    withSchemaRetry((id) => fetchSampleXml(id, request.elementId, { includeOptional, repeat }))
       .then((result) => {
-        if (!cancelled) setSample({ ...result, request, includeOptional });
+        if (!cancelled) setSample({ ...result, request, includeOptional, repeat });
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -104,7 +109,7 @@ export function SampleXmlDialog() {
     return () => {
       cancelled = true;
     };
-  }, [request, schemaId, includeOptional]);
+  }, [request, schemaId, includeOptional, repeat]);
 
   // Only a document root yields a complete instance document. A sample for a
   // nested element is a fragment and can never validate, so checking it would
@@ -125,7 +130,10 @@ export function SampleXmlDialog() {
   // parameters it was never generated with.
   useEffect(() => {
     const current =
-      sample !== null && sample.request === request && sample.includeOptional === includeOptional;
+      sample !== null &&
+      sample.request === request &&
+      sample.includeOptional === includeOptional &&
+      sample.repeat === repeat;
     // A schema that references declarations it never loaded cannot compile;
     // checking it would only return a compiler error, so the dialog says what
     // is missing instead.
@@ -140,6 +148,7 @@ export function SampleXmlDialog() {
       validateXmlText(id, sample.xml, filename, "sample", {
         element_id: request.elementId,
         include_optional: includeOptional,
+        repeat,
         generation_ms: sample.generationMs,
         report: sample.report,
       }),
@@ -161,7 +170,7 @@ export function SampleXmlDialog() {
     return () => {
       cancelled = true;
     };
-  }, [request, sample, isDocumentRoot, includeOptional]);
+  }, [request, sample, isDocumentRoot, includeOptional, repeat]);
 
   const close = useCallback(() => setRequest(null), []);
 
@@ -251,8 +260,9 @@ export function SampleXmlDialog() {
               Sample XML for &lt;{request.name}&gt;
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Required content only, first choice branch, first enumeration value. Placeholder
-              values need replacing; comments mark what could not be resolved.
+              Required content only unless optional content is ticked; first choice branch, first
+              enumeration value. Values are examples that fit the declared types — replace them
+              with real data. Comments mark what could not be generated.
             </p>
           </div>
           <button
@@ -289,6 +299,23 @@ export function SampleXmlDialog() {
               onChange={(e) => setIncludeOptional(e.target.checked)}
             />
             Include optional elements and attributes
+          </label>
+          <label
+            className={`inline-flex items-center gap-2 ${includeOptional ? "" : "opacity-50"}`}
+            title="How often to show elements that may repeat (never more than the schema allows)"
+          >
+            Repeat
+            <select
+              aria-label="Occurrences of repeatable elements"
+              className="px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
+              value={repeatChoice}
+              disabled={!includeOptional}
+              onChange={(e) => setRepeatChoice(Number(e.target.value))}
+            >
+              <option value={1}>1×</option>
+              <option value={2}>2×</option>
+              <option value={3}>3×</option>
+            </select>
           </label>
           <div className="ml-auto flex flex-wrap gap-2">
             <button type="button" className="btn text-xs" disabled={!xml} onClick={() => void copy()}>

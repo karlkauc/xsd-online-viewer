@@ -236,6 +236,7 @@ export interface ComplexType {
   attribute_group_refs: QName[];
   simple_content_base: QName | null;
   simple_content_facets: Facet[];
+  simple_content_inline?: SimpleType | null;
   annotation: Annotation | null;
   source_ref: SourceRef | null;
   version_constraints?: VersionConstraints | null;

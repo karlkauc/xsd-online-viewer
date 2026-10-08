@@ -28,6 +28,8 @@ dev = [
     "pytest-cov>=5.0",
     "httpx>=0.27",
     "ruff>=0.7",
+    # Second validator for tests only (XSD 1.1, IDREF checks); never imported by app/.
+    "xmlschema>=4.1",
 ]
 
 [tool.setuptools.packages.find]

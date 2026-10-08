@@ -210,7 +210,7 @@ class TestSampleXml:
         assert response.headers["content-type"].startswith("application/xml")
         assert 'filename="Person-sample.xml"' in response.headers["content-disposition"]
         body = response.text
-        assert "<tns:FirstName>string</tns:FirstName>" in body
+        assert "<tns:FirstName>Max</tns:FirstName>" in body
         assert 'xmlns:tns="http://example.com/simple"' in body
         assert "<tns:Age>" not in body
 

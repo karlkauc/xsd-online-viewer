@@ -174,6 +174,14 @@ python3 tools/sample_audit.py --urls urls.txt --out audit/after --cache-dir audi
 python3 tools/sample_audit.py --compare audit/before audit/after   # exit 1 on regressions
 ```
 
+Add `--second-validator` to check every sample with the `xmlschema` package as
+well (dev extra, `pip install -e "backend[dev]"`). libxml2 cannot compile XSD
+1.1 and does not check that an IDREF points at an ID; `xmlschema` does both.
+Each record then carries `second` (`valid`/`invalid`/`error`) and
+`second_errors`, and `summary.json` lists under `second_validator` the samples
+only the second validator rejects. The primary `status` — and with it
+`--compare` — is unaffected.
+
 Keep the output and cache outside the repo — they hold the publishers' schemas.
 A parser change needs a fresh `--cache-dir`: the cache stores parsed models.
 

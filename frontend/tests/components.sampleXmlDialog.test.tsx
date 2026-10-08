@@ -106,6 +106,31 @@ describe("SampleXmlDialog", () => {
     expect(body.sample.generation_ms).toBeGreaterThanOrEqual(0);
   });
 
+  it("asks for repeated occurrences only together with optional content", async () => {
+    respondWith("<Person/>");
+    const user = userEvent.setup();
+    render(<SampleXmlDialog />);
+    act(() => openSampleXml({ elementId: "element:Person", name: "Person" }));
+    await screen.findByRole("status");
+
+    const repeat = screen.getByRole("combobox", { name: "Occurrences of repeatable elements" });
+    expect(repeat).toBeDisabled();
+
+    await user.click(screen.getByRole("checkbox", { name: /Include optional/ }));
+    expect(repeat).toBeEnabled();
+    await user.selectOptions(repeat, "3");
+    await waitFor(() =>
+      expect(String(sampleCalls().at(-1)![0])).toBe(
+        "/api/schema/abc/sample?element=element%3APerson&optional=true&repeat=3",
+      ),
+    );
+    // The check that follows records the options the sample was generated with.
+    await waitFor(() => {
+      const body = JSON.parse(String(validateCalls().at(-1)![1].body));
+      expect(body.sample).toMatchObject({ include_optional: true, repeat: 3 });
+    });
+  });
+
   it("reports validation errors and hands them to the Validation tab", async () => {
     const invalid = {
       schema_id: "abc",
