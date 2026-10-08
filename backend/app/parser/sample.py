@@ -1574,6 +1574,9 @@ def _emit_wildcard(
     member = next((m for m in members if m.id not in ctx.open_elements), None)
     if member is None:
         parent.append(etree.Comment(" any element allowed here "))
+        # The wildcard is required, so the element around it is incomplete;
+        # when that one is optional it is left out (CFDI ComplementoConcepto).
+        ctx.cuts += 1
         if members:
             # Only the elements we are inside match; nesting one would recurse.
             ctx.note("wildcard_skipped", GENERATOR_LIMIT, "xs:any")

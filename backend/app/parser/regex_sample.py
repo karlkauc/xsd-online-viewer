@@ -287,6 +287,12 @@ class _Style:
     position: int = 0
     # Characters produced by repetitions so far, to stop runaway samples.
     length: int = 0
+    # Lengthen just one quantifier: the ``pad_at``-th one met takes ``pad``
+    # extra repetitions. Stretching all of them overshoots an exact length
+    # (\d*[1-9]\d* at length 6 would go from 3 characters straight to 13).
+    pad_at: int = -1
+    pad: int = 0
+    quantifiers: int = 0
 
 
 def _render(node: _Node, style: _Style) -> str:
@@ -308,6 +314,9 @@ def _render(node: _Node, style: _Style) -> str:
     count = lo
     if style.stretch > lo:
         count = style.stretch if hi is None else min(hi, style.stretch)
+    if style.quantifiers == style.pad_at:
+        count = lo + style.pad if hi is None else min(hi, lo + style.pad)
+    style.quantifiers += 1
     parts: list[str] = []
     for _ in range(count):
         part = _render(atom, style)
@@ -361,6 +370,23 @@ def sample_from_pattern(pattern: str, stretch: int = 0) -> str | None:
         return None
 
 
+def _padded_styles(tree: _Node, min_length: int) -> list[_Style]:
+    if min_length <= 0:
+        return []
+    try:
+        probe = _Style()
+        missing = min_length - len(_render(tree, probe))
+    except _UnsupportedError:
+        return []
+    if missing <= 0:
+        return []
+    return [
+        _Style(rotate=rotate, pad_at=index, pad=missing)
+        for index in range(min(probe.quantifiers, 6))
+        for rotate in (True, False)
+    ]
+
+
 def samples_from_pattern(pattern: str, min_length: int = 0, limit: int = 40) -> Iterator[str]:
     """Different strings matching ``pattern``, the most natural-looking first.
 
@@ -380,6 +406,16 @@ def samples_from_pattern(pattern: str, min_length: int = 0, limit: int = 40) -> 
     seen: set[str] = set()
     empty_seen = False
     produced = 0
+    # First the samples that reach min_length by lengthening a single quantifier.
+    for style in _padded_styles(tree, min_length):
+        try:
+            value = _render(tree, style)
+        except _UnsupportedError:
+            continue
+        if value and value not in seen:
+            seen.add(value)
+            produced += len(value)
+            yield value
     for branch in range(min(_branch_count(tree), 8)):
         for stretch in dict.fromkeys(stretches):
             for rotate in (True, False):

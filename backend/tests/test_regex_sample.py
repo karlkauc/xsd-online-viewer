@@ -97,3 +97,9 @@ def test_nested_repetition_cannot_run_away() -> None:
     assert sample_from_pattern("(a+b+c+)+", stretch=200_000) is None
     # A plain long repetition is still fine.
     assert sample_from_pattern("a+", stretch=50_000) == "a" * 50_000
+
+
+def test_one_quantifier_is_lengthened_to_hit_an_exact_length() -> None:
+    """TAF TSI ConsignmentNumber: \\d*[1-9]\\d* with length 6."""
+    samples = list(samples_from_pattern("\\d*[1-9]\\d*", min_length=6))
+    assert any(len(sample) == 6 for sample in samples[:4])

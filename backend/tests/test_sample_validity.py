@@ -222,6 +222,28 @@ def test_extending_any_type_is_not_a_missing_base() -> None:
     assert counts == {}
 
 
+def test_optional_element_around_an_unfillable_required_wildcard_is_left_out() -> None:
+    root, counts = _valid_sample(
+        '<xs:element name="R"><xs:complexType><xs:sequence>'
+        '<xs:element name="a" type="xs:int"/>'
+        '<xs:element name="extension" minOccurs="0"><xs:complexType><xs:sequence>'
+        '<xs:any namespace="##other" maxOccurs="unbounded"/>'
+        "</xs:sequence></xs:complexType></xs:element>"
+        "</xs:sequence></xs:complexType></xs:element>",
+        include_optional=True,
+    )
+    assert [etree.QName(child).localname for child in _children(root)] == ["a"]
+    assert counts == {"optional_subtree_dropped": 1}
+
+
+def test_exact_length_with_an_open_pattern() -> None:
+    root, counts = _valid_sample(
+        '<xs:element name="R" type="t:T"/>'
+        + _simple("T", "xs:string", '<xs:length value="6"/><xs:pattern value="\\d*[1-9]\\d*"/>')
+    )
+    assert counts == {} and len(root.text) == 6
+
+
 def test_identical_comments_in_a_row_are_merged() -> None:
     xml, _ = _generate(
         _schema(
