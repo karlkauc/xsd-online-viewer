@@ -48,11 +48,16 @@ export function collectExpandableElementIds(model: SchemaModel): Set<string> {
     const complex =
       declaration.type_inline_complex ??
       resolveComplex(declaration.type_name, index);
-    if (!complex) return;
-    result.add(element.id);
-    if (seenComplex.has(complex.id)) return;
-    seenComplex.add(complex.id);
-    if (complex.particle) visitParticle(complex.particle);
+    // XSD 1.1 xs:alternative: the diagram draws these types' content too.
+    const alternatives = (declaration.alternatives ?? [])
+      .map((a) => a.type_inline_complex ?? resolveComplex(a.type_name, index))
+      .filter((c): c is ComplexType => c != null);
+    for (const type of complex ? [complex, ...alternatives] : alternatives) {
+      result.add(element.id);
+      if (seenComplex.has(type.id)) continue;
+      seenComplex.add(type.id);
+      if (type.particle) visitParticle(type.particle);
+    }
   }
 
   function visitParticle(particle: Particle): void {

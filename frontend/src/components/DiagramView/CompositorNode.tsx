@@ -8,6 +8,10 @@ interface CompositorData {
   // XSD 1.1: when present, the owning complexType declares xs:openContent.
   // Render a dashed border + corner "+" glyph as a visual cue.
   openContentMode?: "interleave" | "suffix" | "none";
+  // For a node the diagram makes up (open content, a type alternative): what
+  // to show instead of the kind, and the tooltip that explains it.
+  caption?: string;
+  title?: string;
   // Cardinality of the particle, encoded in the border like ElementNode:
   // optional → dashed, repeating → 2px. The open-content cue takes precedence.
   optional?: boolean;
@@ -126,11 +130,11 @@ export function CompositorNode({ data }: { data: CompositorData }) {
   // XSD 1.1 relaxations (maxOccurs > 1 or wildcard children); other
   // compositors fall back to their kind name.
   const showLabel =
-    kind === "group-ref" || (kind === "all" && data.label === "all+")
-      ? data.label
-      : kind;
-  const openContentTitle =
-    openContentMode === "none"
+    data.caption ??
+    (kind === "group-ref" || (kind === "all" && data.label === "all+") ? data.label : kind);
+  const openContentTitle = data.title
+    ? data.title
+    : openContentMode === "none"
       ? `${TITLE[kind]} · open content disabled (mode="none")`
       : openContentMode
         ? `${TITLE[kind]} · open content (${openContentMode})`

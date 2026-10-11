@@ -91,6 +91,16 @@ export function buildIndex(model: SchemaModel): IndexBundle {
     }
     if (element.type_inline_complex) visitComplexType(element.type_inline_complex, element.id);
     if (element.type_inline_simple) visitSimpleType(element.type_inline_simple, element.id);
+    // XSD 1.1 xs:alternative: the types an element may take instead.
+    for (const alternative of element.alternatives ?? []) {
+      addUsage(alternative.type_name, entry);
+      if (alternative.type_inline_complex) {
+        visitComplexType(alternative.type_inline_complex, element.id);
+      }
+      if (alternative.type_inline_simple) {
+        visitSimpleType(alternative.type_inline_simple, element.id);
+      }
+    }
   };
 
   // Particles are transparent — they don't appear in the breadcrumb path, so

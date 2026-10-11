@@ -30,7 +30,8 @@ export interface TreeRow {
   constraintCount?: number;
   /** "key bookKey, keyref loanBookRef, …" — used as the ⚿ glyph's title. */
   constraintTitle?: string | null;
-  /** An xs:any / xs:anyAttribute row: no declaration of its own. */
+  /** An xs:any / xs:anyAttribute / open-content / xs:alternative row: no
+   *  declaration of its own. */
   wildcard?: boolean;
   /** What a click selects when the row itself is not a declaration. */
   selectId?: string;
@@ -147,6 +148,9 @@ export function buildTreeRows(
   const complexHasVisible = (complex: ComplexType): boolean => {
     const { particle } = effectiveParticle(complex, complexResolver);
     if (particle && particleHasVisible(particle)) return true;
+    if (complex.open_content && complex.open_content.mode !== "none" && complex.open_content.wildcard) {
+      return true;
+    }
     const attributes = effectiveAttributes(complex, complexResolver);
     return attributes.attributes.length > 0 || attributes.completeAnyAttribute != null;
   };
@@ -156,6 +160,7 @@ export function buildTreeRows(
   // simple type, an inline simple type or an unresolvable type all render
   // as leaves — expanding them would show nothing.
   const elementHasVisible = (element: ElementDecl): boolean => {
+    if (element.alternatives?.length) return true;
     if (element.type_inline_complex) return complexHasVisible(element.type_inline_complex);
     if (!element.type_name) return false;
     const complex = complexResolver(element.type_name);
@@ -216,12 +221,73 @@ export function buildTreeRows(
         stackSeen.pop();
       }
     }
+    descendAlternatives(element, depth + 1);
+  };
+
+  // XSD 1.1 xs:alternative: the type the element has when a test holds. One
+  // row per alternative, after the content of the declared type; expanding
+  // it shows what that type contains.
+  const descendAlternatives = (element: ElementDecl, depth: number) => {
+    (element.alternatives ?? []).forEach((alternative, i) => {
+      const named = alternative.type_name
+        ? resolveReference(alternative.type_name, Array.from(indexById.values()), [
+            "complexType",
+            "simpleType",
+          ])
+        : undefined;
+      const complex =
+        alternative.type_inline_complex ??
+        (named?.kind === "complexType" ? (named.node as ComplexType) : null);
+      const rowId = `alternative:${element.id}:${i}`;
+      const typeId =
+        named?.id ?? alternative.type_inline_complex?.id ?? alternative.type_inline_simple?.id;
+      rows.push({
+        id: rowId,
+        depth,
+        kind: complex || !typeId ? "complexType" : "simpleType",
+        label: alternative.test == null ? "else" : `if ${alternative.test}`,
+        hasChildren: complex != null && complexHasVisible(complex),
+        typeHint:
+          alternative.type_name ?? (typeId ? "(inline type)" : "(no type)"),
+        wildcard: true,
+        selectId: typeId ?? element.id,
+        title:
+          alternative.test == null
+            ? "xs:alternative — the type when no test holds"
+            : `xs:alternative — the type when this holds: ${alternative.test}`,
+      });
+      if (complex && expandedIds.has(rowId) && !stackSeen.includes(complex.id)) {
+        stackSeen.push(complex.id);
+        descendComplex(complex, depth + 1, typeId ?? element.id);
+        stackSeen.pop();
+      }
+    });
   };
 
   const descendComplex = (complex: ComplexType, depth: number, ownerId: string) => {
     const { particle } = effectiveParticle(complex, complexResolver);
     if (particle && particleHasVisible(particle)) {
       expandParticle(particle, depth, ownerId);
+    }
+    // XSD 1.1 open content: elements the type admits beside its content model.
+    const open = complex.open_content;
+    if (open && open.mode !== "none" && open.wildcard && filterKinds.has("element")) {
+      const namespaces = wildcardNamespaceLabel(open.wildcard);
+      rows.push({
+        id: `openContent:${ownerId}:${wildcardCount++}`,
+        depth,
+        kind: "element",
+        label: `open: any ${namespaces}`,
+        hasChildren: false,
+        occurs: "0..∞",
+        typeHint: `${open.mode} · ${open.wildcard.process_contents ?? "strict"}`,
+        wildcard: true,
+        selectId: ownerId,
+        title:
+          open.mode === "suffix"
+            ? `xs:openContent — any element from: ${namespaces}, after the declared content`
+            : `xs:openContent — any element from: ${namespaces}, anywhere between the declared content`,
+      });
     }
     const { attributes, completeAnyAttribute } = effectiveAttributes(complex, complexResolver);
     for (const attr of attributes) {

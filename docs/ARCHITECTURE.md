@@ -417,10 +417,18 @@ Everything view-related lives in a single Zustand store at
      `minOccurs="0"` → dashed, `maxOccurs > 1` → 2px instead of 1px. The
      thicker border grows an element node by 2px, which `buildGraph.ts`
      adds to its height budget (`REPEAT_BORDER_EXTRA`).
+     Two things the diagram draws have no particle in the schema and are
+     made up in `buildGraph.ts` (`typeParticle`, `alternativesParticle`, with
+     captions in `BuildContext.decor`): an `any` leaf captioned "open" for
+     XSD 1.1 open content, and for an element with `xs:alternative`s a choice
+     captioned "type?" whose branches are the candidate types' content.
    - **TreeView** is a virtualized tree over `buildTreeRows(model, ...)` with
      per-kind filter chips. `xs:any` and `xs:anyAttribute` get rows of their
      own (`TreeRow.wildcard`); they are not declarations, so a click selects
-     the component that owns them (`selectId`). `xs:notation` declarations
+     the component that owns them (`selectId`). The same goes for the open
+     content of a type (`open: any …`) and for each `xs:alternative` of an
+     element (`if <test>` / `else`, expandable to that type's content; a
+     click selects the type). `xs:notation` declarations
      are a node kind like the others (`notation:{ns}name`).
    - **TextView** holds a ref to the CodeMirror `EditorView` and re-scrolls
      whenever the selected entry's `source_ref.line` changes — including

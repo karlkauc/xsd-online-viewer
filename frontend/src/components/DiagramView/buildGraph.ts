@@ -87,6 +87,9 @@ interface BuildContext {
   // effectiveParticle/effectiveAttributes' base-chain walk (extension content
   // = sequence(base content, own content) — see lib/effectiveContent.ts).
   complexResolver: ComplexResolver;
+  // Captions for the particles this module makes up (open content, type
+  // alternatives), which have no counterpart in the schema's content model.
+  decor: WeakMap<Particle, { caption: string; title: string }>;
 }
 
 function nextId(context: BuildContext): string {
@@ -218,15 +221,16 @@ function computeElementDisplay(
   // particle makes the node expandable — a `<xs:simpleContent>` extension of
   // xs:string (OeNBCheck's Infos/Info) or an attribute-only type is a leaf.
   const expandable =
-    resolvedComplex != null &&
-    effectiveParticle(resolvedComplex, context.complexResolver).particle != null;
+    (target.alternatives?.length ?? 0) > 0 ||
+    (resolvedComplex != null &&
+      effectiveParticle(resolvedComplex, context.complexResolver).particle != null);
   const { optional, repeating } = hostParticle
     ? occursStyle(hostParticle.min_occurs, hostParticle.max_occurs)
     : { optional: false, repeating: false };
   const assertCount = countAssertions(
     collectElementAssertions(target, context.assertionResolver),
   );
-  const alternativesCount = element.alternatives?.length ?? 0;
+  const alternativesCount = target.alternatives?.length ?? 0;
   const idRole = target.id_role ?? null;
   const identityConstraints = target.identity_constraints ?? [];
   const identityConstraintCount = identityConstraints.length;
@@ -299,6 +303,8 @@ function addCompositorNode(
     optional?: boolean;
     repeating?: boolean;
     openContentMode?: "interleave" | "suffix" | "none";
+    caption?: string;
+    title?: string;
   } = {},
 ): void {
   context.nodes.push({
@@ -320,15 +326,113 @@ function addEdge(context: BuildContext, source: string, target: string): void {
   });
 }
 
+function syntheticParticle(kind: Particle["kind"], overrides: Partial<Particle> = {}): Particle {
+  return {
+    kind,
+    min_occurs: 1,
+    max_occurs: 1,
+    element: null,
+    group_ref: null,
+    group_inline: null,
+    children: [],
+    wildcard_namespace: null,
+    wildcard_process_contents: null,
+    annotation: null,
+    ...overrides,
+  };
+}
+
+// The content of a complex type as the diagram draws it: the effective
+// particle, plus one more "any" leaf for XSD 1.1 open content.
+function typeParticle(complex: ComplexType, context: BuildContext): Particle | null {
+  const particle = effectiveParticle(complex, context.complexResolver).particle;
+  const open = complex.open_content;
+  if (!particle || !open || open.mode === "none" || !open.wildcard) return particle;
+  const namespaces = wildcardNamespaceLabel(open.wildcard);
+  const leaf = syntheticParticle("any", {
+    min_occurs: 0,
+    max_occurs: "unbounded",
+    wildcard_namespace: open.wildcard.namespace,
+    wildcard_process_contents: open.wildcard.process_contents,
+  });
+  context.decor.set(leaf, {
+    caption: "open",
+    title:
+      `xs:openContent (${open.mode}) — any element from: ${namespaces}, ` +
+      (open.mode === "suffix" ? "after the declared content" : "anywhere between the declared content"),
+  });
+  // Beside the content model, not inside it: a choice must not gain a branch.
+  return particle.kind === "sequence" && particle.min_occurs === 1 && particle.max_occurs === 1
+    ? { ...particle, children: [...particle.children, leaf] }
+    : syntheticParticle("sequence", { children: [particle, leaf] });
+}
+
+function shortName(qname: string): string {
+  return qname.includes(":") ? qname.split(":").pop()! : qname;
+}
+
+// XSD 1.1 xs:alternative: the element's type depends on its attributes. Drawn
+// as a choice between the types, each branch holding that type's content; the
+// declared type is the last branch unless an alternative without a test
+// already says what applies otherwise.
+function alternativesParticle(
+  target: ElementDecl,
+  declared: ComplexType | undefined,
+  context: BuildContext,
+): Particle {
+  const branch = (
+    caption: string,
+    title: string,
+    complex: ComplexType | undefined | null,
+  ): Particle => {
+    const content = complex ? typeParticle(complex, context) : null;
+    const particle = syntheticParticle("sequence", { children: content ? [content] : [] });
+    context.decor.set(particle, { caption, title });
+    return particle;
+  };
+  const alternatives = target.alternatives ?? [];
+  const branches = alternatives.map((alternative) => {
+    const complex =
+      alternative.type_inline_complex ?? resolveComplex(alternative.type_name, context);
+    const name = alternative.type_name ? shortName(alternative.type_name) : "inline";
+    return branch(
+      name,
+      alternative.test == null
+        ? `xs:alternative — otherwise: ${alternative.type_name ?? "inline type"}`
+        : `xs:alternative — if ${alternative.test}: ${alternative.type_name ?? "inline type"}`,
+      complex,
+    );
+  });
+  if (!alternatives.some((a) => a.test == null)) {
+    branches.push(
+      branch(
+        target.type_name ? shortName(target.type_name) : "declared",
+        `otherwise the declared type${target.type_name ? `: ${target.type_name}` : ""}`,
+        declared,
+      ),
+    );
+  }
+  const root = syntheticParticle("choice", { children: branches });
+  context.decor.set(root, {
+    caption: "type?",
+    title: "XSD 1.1 type alternatives — which type applies depends on the element's attributes",
+  });
+  return root;
+}
+
+function contentParticle(element: ElementDecl, context: BuildContext): Particle | null {
+  const target = resolveRefTarget(element, context);
+  const complex = target.type_inline_complex ?? resolveComplex(target.type_name, context);
+  if (target.alternatives?.length) return alternativesParticle(target, complex, context);
+  return complex ? typeParticle(complex, context) : null;
+}
+
 function getExpandedParticle(
   element: ElementDecl,
   context: BuildContext,
 ): Particle | null {
   if (!context.expandedIds.has(element.id)) return null;
-  const target = resolveRefTarget(element, context);
-  const complex = target.type_inline_complex ?? resolveComplex(target.type_name, context);
-  if (!complex) return null;
-  return effectiveParticle(complex, context.complexResolver).particle;
+  return contentParticle(element, context);
 }
 
 function getOpenContentMode(
@@ -465,7 +569,7 @@ function placeParticle(
       compositorX,
       topY,
       context,
-      occursStyle(particle.min_occurs, particle.max_occurs),
+      { ...occursStyle(particle.min_occurs, particle.max_occurs), ...context.decor.get(particle) },
     );
     return {
       rootFlowId: flowId,
@@ -540,7 +644,7 @@ function placeParticle(
     compositorX,
     compositorY,
     context,
-    occursStyle(particle.min_occurs, particle.max_occurs),
+    { ...occursStyle(particle.min_occurs, particle.max_occurs), ...context.decor.get(particle) },
   );
   for (const child of childResults) {
     addEdge(context, compositorId, child.rootFlowId);
@@ -574,6 +678,7 @@ export function buildDiagramGraph(
     pathIds: new Set(),
     assertionResolver: makeModelResolver(model),
     complexResolver: makeComplexResolver(typeIndex, model),
+    decor: new WeakMap(),
   };
 
   let nextTopY = 0;
