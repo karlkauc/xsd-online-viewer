@@ -14,6 +14,7 @@ const ALL_KINDS: SchemaNodeKind[] = [
   "group",
   "attributeGroup",
   "attribute",
+  "notation",
 ];
 
 // Filter chips pick up the same hue as the kind's badge so the color system
@@ -31,6 +32,8 @@ const KIND_CHIP_CLASS: Record<SchemaNodeKind, string> = {
     "bg-pink-100 text-pink-800 border-pink-200 dark:bg-pink-900/40 dark:text-pink-300 dark:border-pink-800/50",
   attributeGroup:
     "bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-900/40 dark:text-rose-300 dark:border-rose-800/50",
+  notation:
+    "bg-cyan-100 text-cyan-800 border-cyan-200 dark:bg-cyan-900/40 dark:text-cyan-300 dark:border-cyan-800/50",
 };
 
 function occursPillClass(occurs: string): string {
@@ -80,7 +83,10 @@ export function TreeView() {
       </div>
       <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-800">
         <div className="flex gap-1 overflow-x-auto sm:flex-wrap">
-          {ALL_KINDS.map((kind) => {
+          {ALL_KINDS.filter(
+            // Few schemas declare notations; no chip for a kind that is not there.
+            (kind) => kind !== "notation" || (model?.notations?.length ?? 0) > 0,
+          ).map((kind) => {
             const active = filterKinds.has(kind);
             return (
               <button
@@ -120,7 +126,8 @@ export function TreeView() {
                 role="treeitem"
                 aria-selected={active}
                 aria-expanded={row.hasChildren ? expandedIds.has(row.id) : undefined}
-                onClick={() => setSelected(row.id)}
+                onClick={() => setSelected(row.selectId ?? row.id)}
+                title={row.title ?? undefined}
               >
                 {row.hasChildren ? (
                   <button
@@ -138,7 +145,14 @@ export function TreeView() {
                   <span className="inline-block w-5" />
                 )}
                 <KindBadge kind={row.kind} />
-                <span className="font-mono truncate py-0.5">{row.label}</span>
+                <span
+                  className={
+                    "font-mono truncate py-0.5" +
+                    (row.wildcard ? " italic text-slate-500 dark:text-slate-400" : "")
+                  }
+                >
+                  {row.label}
+                </span>
                 {row.constraintCount ? (
                   <span
                     className="text-teal-600 dark:text-teal-400 text-[11px] shrink-0"

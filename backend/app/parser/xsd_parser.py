@@ -227,6 +227,24 @@ def _foreign_attributes(elem: etree._Element) -> list[ForeignAttribute]:
     return found
 
 
+def _local_qualified(
+    elem: etree._Element, loaded: _LoadedFile, default_attr: str, *, is_global: bool
+) -> bool | None:
+    """Whether the local declaration ``elem`` is namespace-qualified; see ``ElementDecl.qualified``.
+
+    The default is the declaring document's: an ``xs:override`` block reads
+    the overridden file's, like everything else it inherits from there.
+    """
+    if is_global or elem.get("ref") is not None:
+        return None
+    if elem.get("targetNamespace") is not None:
+        return True  # XSD 1.1: an explicit namespace of its own
+    form = _choice(elem, "form", _FORMS, None) or _choice(
+        loaded.root, default_attr, _FORMS, "unqualified"
+    )
+    return form == "qualified"
+
+
 def _xpath_default_namespace(elem: etree._Element, loaded: _LoadedFile) -> str | None:
     """The xpathDefaultNamespace in effect on ``elem``: its own, else the file's."""
     return _token(elem, "xpathDefaultNamespace") or _token(loaded.root, "xpathDefaultNamespace")
@@ -796,6 +814,8 @@ class XsdParser:
                 filename=loaded.filename,
                 target_namespace=loaded.target_ns,
                 relationship=loaded.relationship,
+                element_form_default=_choice(loaded.root, "elementFormDefault", _FORMS, "unqualified"),  # type: ignore[arg-type]
+                attribute_form_default=_choice(loaded.root, "attributeFormDefault", _FORMS, "unqualified"),  # type: ignore[arg-type]
                 content=_decode_source(loaded.raw_content, loaded.tree),
             )
             model.files.append(source)
@@ -1158,6 +1178,7 @@ class XsdParser:
             block=_derivation_set(elem, "block", loaded, _ELEMENT_BLOCK),
             final=_derivation_set(elem, "final", loaded, _COMPLEX_DERIVATIONS) if is_global else [],
             form=_choice(elem, "form", _FORMS, None),  # type: ignore[arg-type]
+            qualified=_local_qualified(elem, loaded, "elementFormDefault", is_global=is_global),
             target_namespace=loaded.target_ns if is_global else _token(elem, "targetNamespace"),
             is_global=is_global,
             annotation=annotation,
@@ -1301,6 +1322,7 @@ class XsdParser:
             default=elem.get("default"),
             fixed=elem.get("fixed"),
             form=_choice(elem, "form", _FORMS, None),  # type: ignore[arg-type]
+            qualified=_local_qualified(elem, loaded, "attributeFormDefault", is_global=is_global),
             target_namespace=loaded.target_ns if is_global else _token(elem, "targetNamespace"),
             is_global=is_global,
             annotation=annotation,

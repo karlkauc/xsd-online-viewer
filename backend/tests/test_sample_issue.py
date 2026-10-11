@@ -110,7 +110,7 @@ def test_unsupported_pattern_is_a_generator_limit() -> None:
     body = (
         '<xs:element name="A" type="Code"/>'
         '<xs:simpleType name="Code"><xs:restriction base="xs:string">'
-        '<xs:pattern value="\\p{IsGreek}{3}"/>'
+        '<xs:pattern value="\\p{IsTibetan}{3}"/>'
         "</xs:restriction></xs:simpleType>"
     )
     model = parse_single(_schema(body), "t.xsd")
@@ -488,7 +488,7 @@ def _sample_then_validate(
 PATTERN_XSD = _schema(
     '<xs:element name="A" type="Code"/>'
     '<xs:simpleType name="Code"><xs:restriction base="xs:string">'
-    '<xs:pattern value="\\p{IsGreek}{3}"/>'
+    '<xs:pattern value="\\p{IsTibetan}{3}"/>'
     "</xs:restriction></xs:simpleType>"
 )
 

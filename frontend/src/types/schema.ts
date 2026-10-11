@@ -167,6 +167,10 @@ export interface AttributeDecl {
   default: string | null;
   fixed: string | null;
   form: "qualified" | "unqualified" | null;
+  // Whether a local declaration's name is in a namespace: its own `form`,
+  // else the declaring file's form default. null for a global declaration
+  // and for a `ref`.
+  qualified?: boolean | null;
   target_namespace: string | null;
   is_global: boolean;
   annotation: Annotation | null;
@@ -237,6 +241,10 @@ export interface ElementDecl {
   block?: string[];
   final?: string[];
   form: "qualified" | "unqualified" | null;
+  // Whether a local declaration's name is in a namespace: its own `form`,
+  // else the declaring file's form default. null for a global declaration
+  // and for a `ref`.
+  qualified?: boolean | null;
   target_namespace: string | null;
   is_global: boolean;
   annotation: Annotation | null;
@@ -319,6 +327,9 @@ export interface SourceFile {
   filename: string;
   target_namespace: string | null;
   relationship: "main" | "include" | "import" | "redefine" | "override";
+  // This file's own defaults; SchemaModel carries the main file's.
+  element_form_default?: "qualified" | "unqualified";
+  attribute_form_default?: "qualified" | "unqualified";
   content: string | null;
 }
 
@@ -452,7 +463,8 @@ export type SchemaNodeKind =
   | "complexType"
   | "simpleType"
   | "group"
-  | "attributeGroup";
+  | "attributeGroup"
+  | "notation";
 
 export type SchemaNode =
   | ElementDecl
@@ -460,7 +472,8 @@ export type SchemaNode =
   | ComplexType
   | SimpleType
   | Group
-  | AttributeGroup;
+  | AttributeGroup
+  | Notation;
 
 export interface NodeIndexEntry {
   id: string;

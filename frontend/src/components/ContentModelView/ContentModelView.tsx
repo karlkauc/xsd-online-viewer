@@ -88,7 +88,8 @@ export function ContentModelView() {
 
   const entry = selectedId ? indexById.get(selectedId) : undefined;
 
-  const complexResolver = useMemo(() => makeIndexComplexResolver(index), [index]);
+  const files = useSelection((s) => s.model?.files);
+  const complexResolver = useMemo(() => makeIndexComplexResolver(index, files), [index, files]);
 
   const onSelectBase = (qname: string) => {
     const baseEntry =
@@ -122,6 +123,7 @@ export function ContentModelView() {
               attributes={attrsResult.attributes}
               attributeGroupRefs={attrsResult.attributeGroupRefs}
               anyAttribute={attrsResult.anyAttribute}
+              completeAnyAttribute={attrsResult.completeAnyAttribute}
             />
             {complex.content_kind === "simple" && (
               <SimpleTypeCard
@@ -156,6 +158,7 @@ export function ContentModelView() {
             attributes={attrsResult.attributes}
             attributeGroupRefs={attrsResult.attributeGroupRefs}
             anyAttribute={attrsResult.anyAttribute}
+            completeAnyAttribute={attrsResult.completeAnyAttribute}
           />
           {c.content_kind === "simple" && (
             <SimpleTypeCard

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 import pytest
+from lxml import etree
 
 from app.parser.regex_sample import sample_from_pattern, samples_from_pattern
 
@@ -44,8 +45,29 @@ def test_not_name_start_escape_yields_a_non_name_start_char(pattern: str) -> Non
     assert not (sample.isalpha() or sample in "_:"), sample
 
 
+@pytest.mark.parametrize(
+    "pattern",
+    ["\\p{IsGreek}+", "\\p{IsCyrillic}{3}", "\\p{Nl}", "\\p{Sc}\\p{Mn}", "\\P{IsGreek}\\P{M}"],
+)
+def test_unicode_blocks_and_categories_are_sampled(pattern: str) -> None:
+    """Checked against libxml2, which is what validates the sample in the end."""
+    sample = sample_from_pattern(pattern)
+    assert sample
+    schema = etree.XMLSchema(
+        etree.fromstring(
+            '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="v">'
+            '<xs:simpleType><xs:restriction base="xs:string">'
+            f'<xs:pattern value="{pattern}"/></xs:restriction></xs:simpleType>'
+            "</xs:element></xs:schema>"
+        )
+    )
+    root = etree.Element("v")
+    root.text = sample
+    assert schema.validate(root), sample
+
+
 def test_unsupported_constructs_return_none() -> None:
-    assert sample_from_pattern("\\p{IsGreek}+") is None
+    assert sample_from_pattern("\\p{IsNoSuchBlock}+") is None
     assert sample_from_pattern("(?:x)") is None
     assert sample_from_pattern("[") is None
 
@@ -87,7 +109,7 @@ def test_every_sample_matches(pattern: str) -> None:
 
 
 def test_unsupported_pattern_yields_no_samples() -> None:
-    assert list(samples_from_pattern("\\p{IsGreek}+")) == []
+    assert list(samples_from_pattern("\\p{IsTibetan}+")) == []
 
 
 def test_nested_repetition_cannot_run_away() -> None:

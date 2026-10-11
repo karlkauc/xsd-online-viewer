@@ -25,12 +25,7 @@ interface ElementNodeData {
   expandable?: boolean;
   expanded?: boolean;
   selected?: boolean;
-  attributes?: {
-    id: string;
-    name: string | null;
-    type_name: string | null;
-    id_role?: IdRole | null;
-  }[];
+  attributes?: ElementNodeAttribute[];
   documentationLines?: string[];
   documentationFull?: string | null;
   assertCount?: number;
@@ -38,6 +33,14 @@ interface ElementNodeData {
   idRole?: IdRole | null;
   identityConstraintCount?: number;
   identityConstraintTitle?: string | null;
+}
+
+export interface ElementNodeAttribute {
+  id: string;
+  /** "*" for the xs:anyAttribute row, whose type_name holds the namespaces. */
+  name: string | null;
+  type_name: string | null;
+  id_role?: IdRole | null;
 }
 
 export function ElementNode({ data }: { data: ElementNodeData }) {

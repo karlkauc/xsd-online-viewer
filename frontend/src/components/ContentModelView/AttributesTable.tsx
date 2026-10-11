@@ -9,6 +9,7 @@ import {
   type ResolvedAttribute,
   type ResolvedWildcard,
 } from "../../lib/attributeGroups";
+import { sameWildcard } from "../../lib/wildcards";
 import { TapToReveal } from "../TapToReveal";
 
 interface AttributesTableProps {
@@ -18,6 +19,12 @@ interface AttributesTableProps {
   attributeGroupRefs: string[];
   /** The node's own xs:anyAttribute; those of the groups are looked up. */
   anyAttribute?: Wildcard | null;
+  /**
+   * For a complex type: the wildcard in effect once the ones listed are
+   * intersected and the base type's is added. Shown as a row of its own when
+   * it says something the listed ones do not. Leave undefined elsewhere.
+   */
+  completeAnyAttribute?: Wildcard | null;
 }
 
 function firstDocLine(attr: AttributeDecl): string {
@@ -36,6 +43,7 @@ export function AttributesTable({
   attributes,
   attributeGroupRefs,
   anyAttribute = null,
+  completeAnyAttribute,
 }: AttributesTableProps) {
   const index = useSelection((s) => s.index);
   const setSelected = useSelection((s) => s.setSelected);
@@ -56,6 +64,11 @@ export function AttributesTable({
     ],
     [anyAttribute, attributeGroupRefs, index],
   );
+
+  const showEffective =
+    completeAnyAttribute !== undefined &&
+    wildcards.length > 0 &&
+    !(wildcards.length === 1 && sameWildcard(wildcards[0].wildcard, completeAnyAttribute));
 
   if (!rows.length && !wildcards.length) return null;
 
@@ -147,6 +160,24 @@ export function AttributesTable({
               </tr>
             );
           })}
+          {showEffective && (
+            <tr
+              className="border-b border-slate-100 dark:border-slate-900"
+              title="What the wildcards above admit together, the base type's included"
+            >
+              <td className="py-1.5 pr-3 font-mono">
+                @* <span className="text-slate-500">in effect</span>
+              </td>
+              <td className="py-1.5 pr-3 font-mono text-slate-500 break-all">
+                {completeAnyAttribute ? wildcardNamespaceLabel(completeAnyAttribute) : "nothing"}
+              </td>
+              <td className="py-1.5 pr-3">
+                {completeAnyAttribute ? (completeAnyAttribute.process_contents ?? "strict") : "—"}
+              </td>
+              <td className="py-1.5 pr-3 font-mono hidden md:table-cell">—</td>
+              <td className="py-1.5 pr-3 hidden md:table-cell" />
+            </tr>
+          )}
         </tbody>
       </table>
       </div>

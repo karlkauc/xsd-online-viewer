@@ -612,3 +612,155 @@ def test_samples_validate_with_the_xsd_11_validator(path: str, include_optional:
         if "idref_without_id" in report.counts:
             continue  # a lone IDREF root can never validate, and the report says so
         assert [str(e.reason) for e in schema.iter_errors(xml)] == [], xml
+
+
+# ---------------------------------------------------------------------------
+# XSD 1.1: assertions, wildcard exclusions, xpathDefaultNamespace
+# ---------------------------------------------------------------------------
+
+
+def _errors_11(xsd: bytes, xml: str) -> list[str]:
+    return [str(e.reason) for e in xmlschema.XMLSchema11(xsd.decode()).iter_errors(xml)]
+
+
+@needs_xmlschema
+@pytest.mark.parametrize(
+    ("attributes", "test", "options"),
+    [
+        # An optional attribute the test needs is put in...
+        (
+            '<xs:attribute name="a" type="xs:int"/><xs:attribute name="b" type="xs:int"/>',
+            "@a or @b",
+            {},
+        ),
+        # ...and one it rules out is left out again.
+        (
+            '<xs:attribute name="a" type="xs:int"/><xs:attribute name="b" type="xs:int"/>',
+            "not(@a and @b)",
+            {"include_optional": True},
+        ),
+        (
+            '<xs:attribute name="a" type="xs:int"/><xs:attribute name="b" type="xs:int"/>',
+            "exists(@a) and empty(@b)",
+            {"include_optional": True},
+        ),
+        # Two values of one type the wrong way round are exchanged.
+        (
+            '<xs:attribute name="min" type="xs:int" use="required"/>'
+            '<xs:attribute name="max" type="xs:int" use="required"/>',
+            "@min gt @max",
+            {},
+        ),
+        (
+            '<xs:attribute name="min" type="xs:int" use="required"/>'
+            '<xs:attribute name="max" type="xs:int" use="required"/>',
+            "@min lt @max",
+            {},
+        ),
+    ],
+)
+def test_a_failing_assertion_is_repaired(attributes: str, test: str, options: dict) -> None:
+    xsd = _schema(
+        '<xs:element name="R"><xs:complexType>'
+        f'{attributes}<xs:assert test="{test}"/>'
+        "</xs:complexType></xs:element>"
+    )
+    xml, counts = _generate(xsd, **options)
+    assert _errors_11(xsd, xml) == [], xml
+    assert counts == {}
+
+
+@needs_xmlschema
+def test_children_named_in_an_assertion_use_the_xpath_default_namespace() -> None:
+    xsd = _schema(
+        '<xs:element name="R"><xs:complexType><xs:sequence>'
+        '<xs:element name="low" type="xs:int"/><xs:element name="high" type="xs:int"/>'
+        '</xs:sequence><xs:assert test="low gt high"/>'
+        "</xs:complexType></xs:element>",
+        attrs='elementFormDefault="qualified" xpathDefaultNamespace="##targetNamespace"',
+    )
+    xml, counts = _generate(xsd)
+    assert _errors_11(xsd, xml) == [], xml
+    assert counts == {}
+
+
+def test_an_assertion_that_cannot_be_met_or_read_is_reported() -> None:
+    xsd = _schema(
+        '<xs:element name="R"><xs:complexType>'
+        '<xs:attribute name="a" type="xs:int" use="required"/>'
+        '<xs:assert test="@a gt 1000"/>'
+        '<xs:assert test="every $x in @a satisfies $x gt 0"/>'
+        "</xs:complexType></xs:element>"
+    )
+    _, counts = _generate(xsd)
+    assert counts == {"assertion_unsettled": 1, "assertion_not_evaluated": 1}
+
+
+@needs_xmlschema
+@pytest.mark.parametrize(
+    "wildcard",
+    [
+        '<xs:any notQName="##defined" processContents="strict"/>',
+        '<xs:any notQName="t:first ##definedSibling" namespace="##targetNamespace"/>',
+        '<xs:any notNamespace="##targetNamespace urn:example:any" processContents="lax"/>',
+        '<xs:any namespace="##targetNamespace" notQName="t:any" processContents="lax"/>',
+    ],
+)
+def test_wildcard_exclusions_are_respected(wildcard: str) -> None:
+    xsd = _schema(
+        '<xs:element name="first" type="xs:int"/>'
+        '<xs:element name="sibling" type="xs:int"/>'
+        '<xs:element name="free" type="xs:int"/>'
+        '<xs:element name="R"><xs:complexType><xs:sequence>'
+        f'<xs:element ref="t:sibling"/>{wildcard}'
+        "</xs:sequence></xs:complexType></xs:element>"
+    )
+    xml, _ = _generate(xsd, "R")
+    errors = _errors_11(xsd, xml)
+    if 'notQName="##defined" processContents="strict"' in wildcard:
+        # Nothing declared may go there and nothing undeclared validates
+        # strictly: the generator says so instead of emitting an element.
+        assert "any element allowed here" in xml
+    else:
+        assert errors == [], xml
+
+
+@needs_xmlschema
+def test_key_fields_are_found_under_an_xpath_default_namespace() -> None:
+    xsd = _schema(
+        '<xs:element name="R"><xs:complexType><xs:sequence>'
+        '<xs:element name="item" maxOccurs="unbounded"><xs:complexType><xs:sequence>'
+        '<xs:element name="code" type="xs:string"/>'
+        "</xs:sequence></xs:complexType></xs:element>"
+        "</xs:sequence></xs:complexType>"
+        '<xs:key name="k"><xs:selector xpath="item"/><xs:field xpath="code"/></xs:key>'
+        "</xs:element>",
+        attrs='elementFormDefault="qualified" xpathDefaultNamespace="##targetNamespace"',
+    )
+    xml, counts = _generate(xsd, include_optional=True, repeat=3)
+    root = etree.fromstring(xml.encode("utf-8"))
+    codes = [code.text for code in root.iter(f"{{{NS}}}code")]
+    assert len(codes) == 3 and len(set(codes)) == 3
+    assert counts == {}
+    assert _errors_11(xsd, xml) == []
+
+
+@pytest.mark.parametrize(
+    "test",
+    [
+        "count(//*) ge 1",  # an absolute path means the document here, the element in XSD
+        "../@a = 1",
+        "ancestor::*/@a = 1",
+        "count(.//*//*//*) ge 0",  # more descendant searches than the generator runs
+        "matches(@a, '(a+)+$')",  # the author's regular expression is never run in the server
+    ],
+)
+def test_assertions_that_reach_outside_or_cost_too_much_are_not_evaluated(test: str) -> None:
+    xsd = _schema(
+        '<xs:element name="R"><xs:complexType>'
+        '<xs:attribute name="a" type="xs:int" use="required"/>'
+        f'<xs:assert test="{test}"/>'
+        "</xs:complexType></xs:element>"
+    )
+    _, counts = _generate(xsd)
+    assert counts == {"assertion_not_evaluated": 1}

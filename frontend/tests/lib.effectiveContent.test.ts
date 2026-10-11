@@ -318,6 +318,46 @@ describe("makeIndexComplexResolver", () => {
     expect(effectiveAttributes(closed, makeResolver([closed])).anyAttribute).toBeNull();
   });
 
+  it("works out the wildcard in effect across attribute groups and the base type", () => {
+    const wildcard = (namespace: string) => ({
+      namespace,
+      not_namespace: null,
+      not_qname: null,
+      process_contents: "lax" as const,
+      annotation: null,
+    });
+    const base = complexType({
+      id: "complexType:Base",
+      name: "Base",
+      any_attribute: wildcard("urn:a urn:b"),
+      attribute_group_refs: ["Narrow"],
+    });
+    const derived = complexType({
+      id: "complexType:Derived",
+      name: "Derived",
+      derivation: "extension",
+      base: "Base",
+      any_attribute: wildcard("urn:c"),
+    });
+    const resolver = makeResolver([base, derived]);
+    resolver.attributeGroup = (ref) =>
+      ref === "Narrow"
+        ? {
+            id: "attributeGroup:Narrow",
+            name: "Narrow",
+            ref: null,
+            attributes: [],
+            attribute_group_refs: [],
+            any_attribute: wildcard("urn:b urn:z"),
+            annotation: null,
+            source_ref: null,
+          }
+        : undefined;
+    // Base: own ∩ group; derived: its own ∪ the base's.
+    expect(effectiveAttributes(base, resolver).completeAnyAttribute?.namespace).toBe("urn:b");
+    expect(effectiveAttributes(derived, resolver).completeAnyAttribute?.namespace).toBe("urn:c urn:b");
+  });
+
   it("counts the attribute group from defaultAttributes, the base type's too", () => {
     const base = complexType({
       id: "complexType:Base",

@@ -85,6 +85,7 @@ const ALL_KINDS: SchemaNodeKind[] = [
   "simpleType",
   "group",
   "attributeGroup",
+  "notation",
 ];
 
 export const useSelection = create<SelectionState>((set, get) => ({

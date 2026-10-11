@@ -1,11 +1,14 @@
 import { useMemo } from "react";
 import { useSelection } from "../stores/selectionStore";
 import {
+  declaredName,
   findRedefineLink,
   resolveReference,
   type RedefineLink,
 } from "../lib/indexSchema";
 import { wildcardNamespaceLabel } from "../lib/attributeGroups";
+import { effectiveAttributes, makeIndexComplexResolver } from "../lib/effectiveContent";
+import { sameWildcard } from "../lib/wildcards";
 import { substitutionHeads } from "../lib/rootElements";
 import type {
   Annotation,
@@ -15,6 +18,7 @@ import type {
   ElementDecl,
   IdentityConstraint,
   NodeIndexEntry,
+  Notation,
   OpenContent,
   OverrideReplacement,
   SchemaModel,
@@ -56,6 +60,7 @@ const KIND_BAR: Record<SchemaNodeKind, string> = {
   simpleType: "bg-emerald-500",
   group: "bg-pink-500",
   attributeGroup: "bg-rose-500",
+  notation: "bg-cyan-500",
 };
 
 const KIND_RESOLVERS: { kinds: SchemaNodeKind[]; label: string }[] = [
@@ -224,6 +229,10 @@ function Header({
   setSelected: (id: string) => void;
   jumpToSource: (ref: SourceRef) => void;
 }) {
+  // A redefined original carries a made-up `Name~original` name; show the declared one.
+  const original = redefineLink?.role === "original";
+  const label = original ? declaredName(entry.label) : entry.label;
+  const qname = entry.qname && original ? declaredName(entry.qname) : entry.qname;
   return (
     <div className="relative border-b border-slate-200 dark:border-slate-800 bg-gradient-to-b from-slate-50/60 to-white dark:from-slate-900/40 dark:to-slate-950">
       <div
@@ -234,7 +243,7 @@ function Header({
         <div className="flex items-center gap-2 mb-1.5 min-w-0 flex-wrap">
           <KindBadge kind={entry.kind} />
           <h2 className="text-base font-semibold tracking-tight truncate text-slate-900 dark:text-slate-100">
-            {entry.label}
+            {label}
           </h2>
           {"version_constraints" in entry.node &&
             entry.node.version_constraints && (
@@ -245,12 +254,12 @@ function Header({
             <OverrideOriginButton replacement={overrideReplacement} jumpToSource={jumpToSource} />
           )}
         </div>
-        {entry.qname && (
+        {qname && (
           <div className="flex items-start gap-1">
             <code className="block text-[11px] font-mono text-slate-500 dark:text-slate-400 break-all leading-snug">
-              {entry.qname}
+              {qname}
             </code>
-            <CopyButton label="Copy qualified name" text={entry.qname} className="-mt-0.5 shrink-0" />
+            <CopyButton label="Copy qualified name" text={qname} className="-mt-0.5 shrink-0" />
           </div>
         )}
         <XPathBar />
@@ -313,6 +322,7 @@ export interface PanelCtx {
 }
 
 function renderSpecifics(node: SchemaNode, ctx: PanelCtx) {
+  if ("public" in node) return renderNotation(node);
   if ("type_inline_complex" in node) return renderElement(node, ctx);
   if ("use" in node) return renderAttribute(node, ctx);
   if ("content_kind" in node) return renderComplexType(node, ctx);
@@ -328,6 +338,58 @@ function renderSpecifics(node: SchemaNode, ctx: PanelCtx) {
     );
   }
   return null;
+}
+
+function renderNotation(notation: Notation) {
+  return (
+    <section>
+      <SectionHead title="Notation" />
+      <div className="space-y-3">
+        <DataRow label="Public">
+          {notation.public ? (
+            <code className="font-mono text-[12px] break-all">{notation.public}</code>
+          ) : (
+            <Muted>—</Muted>
+          )}
+        </DataRow>
+        <DataRow label="System">
+          {notation.system ? (
+            <code className="font-mono text-[12px] break-all">{notation.system}</code>
+          ) : (
+            <Muted>—</Muted>
+          )}
+        </DataRow>
+      </div>
+    </section>
+  );
+}
+
+// Whether a local element or attribute name is namespace-qualified in an
+// instance, and what decides it: its own `form` or the declaring file's default.
+function NameFormRow({
+  decl,
+  defaultName,
+  model,
+}: {
+  decl: ElementDecl | AttributeDecl;
+  defaultName: "elementFormDefault" | "attributeFormDefault";
+  model: SchemaModel | null;
+}) {
+  if (decl.qualified == null) return null;
+  const file = model?.files.find((f) => f.id === decl.source_ref?.file_id);
+  const origin = decl.target_namespace
+    ? "own targetNamespace"
+    : decl.form
+      ? "own form attribute"
+      : `${defaultName}${file && (model?.files.length ?? 0) > 1 ? ` of ${file.filename}` : ""}`;
+  return (
+    <DataRow label="Name form">
+      <code className="font-mono text-[12px]">
+        {decl.qualified ? "qualified" : "unqualified"}
+      </code>
+      <span className="ml-1.5 text-[11px] text-slate-500 dark:text-slate-400">· {origin}</span>
+    </DataRow>
+  );
 }
 
 function renderElement(element: ElementDecl, ctx: PanelCtx) {
@@ -461,6 +523,7 @@ function renderElement(element: ElementDecl, ctx: PanelCtx) {
           </DataRow>
         )}
         <DerivationRows block={declaration.block} final={declaration.final} />
+        <NameFormRow decl={declaration} defaultName="elementFormDefault" model={ctx.model} />
         {!declaration.is_global && declaration.target_namespace && (
           <DataRow label="Namespace">
             <code className="font-mono text-[12px]">{declaration.target_namespace}</code>
@@ -559,10 +622,14 @@ function renderAttribute(attr: AttributeDecl, ctx: PanelCtx) {
             <code className="font-mono text-[12px]">{attr.fixed}</code>
           </DataRow>
         )}
-        {attr.form && (
-          <DataRow label="Form">
-            <code className="font-mono text-[12px]">{attr.form}</code>
-          </DataRow>
+        {attr.qualified != null ? (
+          <NameFormRow decl={attr} defaultName="attributeFormDefault" model={ctx.model} />
+        ) : (
+          attr.form && (
+            <DataRow label="Form">
+              <code className="font-mono text-[12px]">{attr.form}</code>
+            </DataRow>
+          )
         )}
         {attr.inheritable && (
           <DataRow label="Flags">
@@ -602,6 +669,12 @@ function renderAttribute(attr: AttributeDecl, ctx: PanelCtx) {
 function renderComplexType(complex: ComplexType, ctx: PanelCtx) {
   const { index, setSelected, model } = ctx;
   const implicitGroup = resolveDefaultAttributesGroup(complex, model, index);
+  // What the type admits once its attribute groups and base type are counted in.
+  const completeAny = effectiveAttributes(
+    complex,
+    makeIndexComplexResolver(index, model?.files),
+  ).completeAnyAttribute;
+  const anyDiffers = !sameWildcard(completeAny, complex.any_attribute ?? null);
   return (
     <section>
       <SectionHead title="Complex type" />
@@ -634,6 +707,18 @@ function renderComplexType(complex: ComplexType, ctx: PanelCtx) {
         {complex.any_attribute && (
           <DataRow label="Any attribute">
             <AnyAttributeSummary wildcard={complex.any_attribute} />
+          </DataRow>
+        )}
+        {anyDiffers && (
+          <DataRow label="Any attribute, effective">
+            {completeAny ? (
+              <AnyAttributeSummary wildcard={completeAny} />
+            ) : (
+              <Muted>none — the wildcards involved have nothing in common</Muted>
+            )}
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+              with the attribute groups and the base type counted in
+            </div>
           </DataRow>
         )}
       </div>
@@ -1129,7 +1214,23 @@ function AnyAttributeSummary({ wildcard }: { wildcard: Wildcard }) {
 // XSD 1.1 — schema overview
 // ---------------------------------------------------------------------------
 
+function formDefaults(file: {
+  element_form_default?: string;
+  attribute_form_default?: string;
+}): string {
+  return (
+    `elements ${file.element_form_default ?? "unqualified"} · ` +
+    `attributes ${file.attribute_form_default ?? "unqualified"}`
+  );
+}
+
 function SchemaOverview({ model }: { model: SchemaModel }) {
+  const setSelected = useSelection((s) => s.setSelected);
+  const mainForms = formDefaults(model);
+  // Files whose form defaults are not the main file's: their local names differ.
+  const otherForms = model.files.filter(
+    (f) => f.relationship !== "main" && f.element_form_default && formDefaults(f) !== mainForms,
+  );
   const version = model.xsd_version ?? "unknown";
   const xpathDefault = model.xpath_default_namespace ?? null;
   const defaultAttrs = model.default_attributes ?? null;
@@ -1150,6 +1251,20 @@ function SchemaOverview({ model }: { model: SchemaModel }) {
               </code>
             </DataRow>
           )}
+          <DataRow label="Form defaults">
+            <span className="font-mono text-[12px] text-slate-700 dark:text-slate-200">
+              {mainForms}
+            </span>
+            {otherForms.length > 0 && (
+              <ul className="mt-1 font-mono text-[11.5px] text-slate-500 dark:text-slate-400">
+                {otherForms.map((f) => (
+                  <li key={f.id} className="break-all">
+                    {f.filename}: {formDefaults(f)}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </DataRow>
           {xpathDefault && (
             <DataRow label="xpathDefaultNamespace">
               <code className="font-mono text-[12px] break-all text-slate-700 dark:text-slate-200">
@@ -1169,7 +1284,13 @@ function SchemaOverview({ model }: { model: SchemaModel }) {
               <ul className="font-mono text-[12px] text-slate-700 dark:text-slate-200">
                 {model.notations!.map((n) => (
                   <li key={n.id}>
-                    {n.name}
+                    <button
+                      type="button"
+                      className="text-accent hover:underline"
+                      onClick={() => setSelected(n.id)}
+                    >
+                      {n.name}
+                    </button>
                     <span className="text-slate-400">
                       {" "}
                       · {[n.public, n.system].filter(Boolean).join(" · ") || "—"}

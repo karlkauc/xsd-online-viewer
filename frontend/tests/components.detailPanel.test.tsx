@@ -551,3 +551,140 @@ describe("DetailPanel annotations", () => {
     expect(screen.getByText("AnnotatedBean")).toBeInTheDocument();
   });
 });
+
+describe("DetailPanel notations, name form and redefined originals", () => {
+  const emptyType: ComplexType = {
+    id: "complexType:Thing",
+    name: "Thing",
+    anonymous: false,
+    abstract: false,
+    mixed: false,
+    content_kind: "empty",
+    derivation: "none",
+    base: null,
+    particle: null,
+    attributes: [],
+    attribute_group_refs: [],
+    simple_content_base: null,
+    simple_content_facets: [],
+    annotation: null,
+    source_ref: null,
+  };
+
+  it("shows a notation's identifiers", () => {
+    const model: SchemaModel = {
+      ...smallModel,
+      notations: [
+        {
+          id: "notation:jpeg",
+          name: "jpeg",
+          qname: "jpeg",
+          public: "image/jpeg",
+          system: "viewer.exe",
+          annotation: null,
+          source_ref: null,
+        },
+      ],
+    };
+    act(() => {
+      useSelection.getState().setSchema("notation", model);
+      useSelection.getState().setSelected("notation:jpeg");
+    });
+    render(<DetailPanel />);
+    expect(screen.getByRole("heading", { name: "jpeg" })).toBeInTheDocument();
+    expect(screen.getByText("image/jpeg")).toBeInTheDocument();
+    expect(screen.getByText("viewer.exe")).toBeInTheDocument();
+  });
+
+  it("says whether a local attribute name is qualified, and what decides it", () => {
+    const attrId = "attribute:{http://example.com/simple}PersonType/@id";
+    const model: SchemaModel = {
+      ...smallModel,
+      files: [
+        { ...smallModel.files[0], attribute_form_default: "qualified" },
+        {
+          id: "f2",
+          filename: "other.xsd",
+          target_namespace: "http://example.com/simple",
+          relationship: "include",
+          content: null,
+        },
+      ],
+      complex_types: smallModel.complex_types.map((ct) => ({
+        ...ct,
+        attributes: ct.attributes.map((a) => (a.id === attrId ? { ...a, qualified: true } : a)),
+      })),
+    };
+    act(() => {
+      useSelection.getState().setSchema("form", model);
+      useSelection.getState().setSelected(attrId);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("Name form")).toBeInTheDocument();
+    expect(screen.getByText("qualified")).toBeInTheDocument();
+    expect(screen.getByText("· attributeFormDefault of simple.xsd")).toBeInTheDocument();
+  });
+
+  it("shows a redefined original under the name it was declared with", () => {
+    const model: SchemaModel = {
+      ...smallModel,
+      elements: [],
+      simple_types: [],
+      complex_types: [
+        emptyType,
+        { ...emptyType, id: "complexType:Thing~original", name: "Thing~original" },
+      ],
+      redefines: [
+        {
+          target_file_id: null,
+          source_ref: null,
+          redefinitions: [
+            {
+              kind: "complexType",
+              qname: "Thing",
+              redefinition_id: "complexType:Thing",
+              original_id: "complexType:Thing~original",
+              source_ref: null,
+            },
+          ],
+        },
+      ],
+    };
+    act(() => {
+      useSelection.getState().setSchema("redefine", model);
+      useSelection.getState().setSelected("complexType:Thing~original");
+    });
+    render(<DetailPanel />);
+    expect(screen.getByRole("heading", { name: "Thing" })).toBeInTheDocument();
+    expect(screen.queryByText(/~original/)).not.toBeInTheDocument();
+    expect(screen.getByText("redefined by")).toBeInTheDocument();
+  });
+
+  it("lists the form defaults of files that differ from the main file", () => {
+    const model: SchemaModel = {
+      ...smallModel,
+      element_form_default: "qualified",
+      files: [
+        { ...smallModel.files[0], element_form_default: "qualified", attribute_form_default: "unqualified" },
+        {
+          id: "f2",
+          filename: "legacy.xsd",
+          target_namespace: null,
+          relationship: "import",
+          element_form_default: "unqualified",
+          attribute_form_default: "unqualified",
+          content: null,
+        },
+      ],
+    };
+    act(() => {
+      useSelection.getState().setSchema("forms", model);
+      useSelection.getState().setSelected(null);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("elements qualified · attributes unqualified")).toBeInTheDocument();
+    expect(
+      screen.getByText("legacy.xsd: elements unqualified · attributes unqualified"),
+    ).toBeInTheDocument();
+  });
+});

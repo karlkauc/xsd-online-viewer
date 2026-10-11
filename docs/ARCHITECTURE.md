@@ -208,7 +208,9 @@ document order or which file they came from), in this order:
   `ref` to itself — is rewritten to that name, so every consumer that walks a
   base chain or resolves a group ref (tree, diagram, sample generator) gets
   the combined content without knowing about redefine. `model.redefines`
-  links the two for the detail panel's badge.
+  links the two for the detail panel's badge; the frontend keeps the renamed
+  original out of the tree's top level and out of the search
+  (`redefinedOriginalIds`) and shows it under its declared name.
 - `_process_overrides` — applies every `xs:override` block: the replacement
   takes the original's id and its place in the list, and the original leaves
   the model (`OverrideReplacement.original_source_ref` still points at its
@@ -266,6 +268,19 @@ loads schema files only from the temp directory (`allow="sandbox"`; absolute
 URLs are mapped onto the copies), and XPath 2.0 as elementpath implements it
 has no function that reads a file or URL. The app itself still never imports
 `xmlschema`.
+
+The sample generator (`app/parser/sample.py`) does read schema-authored XPath
+in the server, as it always has for identity-constraint selectors and type
+alternative tests: `xs:assert` tests are translated to XPath 1.0
+(`_xpath_1`: value comparisons, `xpathDefaultNamespace` as a stand-in prefix)
+and run by libxml2 on the generated element, to repair what is cheap to
+repair — optional attributes a test asks for or rules out, two values the
+wrong way round. That is kept narrow on purpose (`_assertion_reach`): no path
+out of the element, at most two descendant searches and only on a small
+subtree, a cap on evaluations per sample, and no `matches()` — a regular
+expression from the schema never runs on Python's `re`. Whatever falls
+outside is reported (`assertion_not_evaluated`, `assertion_unsettled`) and
+left to the validator.
 
 A compile failure raises `ValidationSetupError` (HTTP 422), and its message is
 the only thing the user gets, so `_compile_failure` classifies it instead of
@@ -399,7 +414,10 @@ Everything view-related lives in a single Zustand store at
      thicker border grows an element node by 2px, which `buildGraph.ts`
      adds to its height budget (`REPEAT_BORDER_EXTRA`).
    - **TreeView** is a virtualized tree over `buildTreeRows(model, ...)` with
-     per-kind filter chips.
+     per-kind filter chips. `xs:any` and `xs:anyAttribute` get rows of their
+     own (`TreeRow.wildcard`); they are not declarations, so a click selects
+     the component that owns them (`selectId`). `xs:notation` declarations
+     are a node kind like the others (`notation:{ns}name`).
    - **TextView** holds a ref to the CodeMirror `EditorView` and re-scrolls
      whenever the selected entry's `source_ref.line` changes — including
      auto-switching the file tab if the selection points into a different
@@ -413,6 +431,11 @@ Everything view-related lives in a single Zustand store at
      schema's content model (extension base chains, group refs, element
      refs, a bounded-depth `.//` descendant search) — tokens that resolve
      become the clickable "Go to `<step>`" buttons in `IdentityConstraintsList`.
+   - `lib/effectiveContent.ts` merges a type with its base chain: content,
+     attributes, and the attribute wildcard in effect
+     (`completeAnyAttribute` — the type's `xs:anyAttribute` intersected with
+     those of its attribute groups, united with the base type's for an
+     extension; the set algebra is in `lib/wildcards.ts`).
    - `lib/assertions.ts` collects the `xs:assert`/`xs:assertion` groups a
      declaration's type contributes, including any from a base-type chain,
      so an *element* (not just its type) shows the assertions it inherits;

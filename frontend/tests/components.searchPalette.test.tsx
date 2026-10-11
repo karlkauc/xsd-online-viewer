@@ -31,7 +31,40 @@ function open() {
 describe("SearchPalette", () => {
   afterEach(() => {
     cleanup();
-    useSelection.setState({ index: [], selectedId: null });
+    useSelection.setState({ index: [], selectedId: null, model: null });
+  });
+
+  it("does not offer the definition an xs:redefine replaced", async () => {
+    useSelection.setState({
+      index: [
+        entry("complexType:Thing", "Thing", { annotation: null }),
+        entry("complexType:Thing~original", "Thing~original", { annotation: null }),
+      ],
+      model: {
+        redefines: [
+          {
+            target_file_id: null,
+            source_ref: null,
+            redefinitions: [
+              {
+                kind: "complexType",
+                qname: "Thing",
+                redefinition_id: "complexType:Thing",
+                original_id: "complexType:Thing~original",
+                source_ref: null,
+              },
+            ],
+          },
+        ],
+      } as never,
+    });
+    render(<SearchPalette />);
+    open();
+    await userEvent.type(screen.getByPlaceholderText(/Search names/), "thing");
+    const items = screen.getAllByRole("listitem");
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveTextContent("Thing");
+    expect(items[0]).not.toHaveTextContent("~original");
   });
 
   it("finds documentation matches after name matches and shows the excerpt", async () => {

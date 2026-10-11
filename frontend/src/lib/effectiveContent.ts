@@ -25,15 +25,24 @@
 
 import type {
   AttributeDecl,
+  AttributeGroup,
   ComplexType,
   NodeIndexEntry,
   Particle,
   QName,
+  SourceFile,
+  SourceRef,
   Wildcard,
 } from "../types/schema";
 import { resolveReference } from "./indexSchema";
+import { completeWildcard, type SourcedWildcard } from "./wildcards";
 
-export type ComplexResolver = (qname: string | null | undefined) => ComplexType | undefined;
+export type ComplexResolver = ((qname: string | null | undefined) => ComplexType | undefined) & {
+  /** Looks up an attribute group, for the wildcards the groups bring along. */
+  attributeGroup?: (qname: string) => AttributeGroup | undefined;
+  /** Target namespace of the file a declaration sits in; undefined when unknown. */
+  targetNamespace?: (ref: SourceRef | null | undefined) => string | null | undefined;
+};
 
 export interface EffectiveParticleResult {
   particle: Particle | null;
@@ -48,6 +57,11 @@ export interface EffectiveAttributesResult {
   attributeGroupRefs: QName[];
   /** The type's own xs:anyAttribute, else the nearest one up the base chain. */
   anyAttribute: Wildcard | null;
+  /**
+   * The wildcard in effect: the own one intersected with those of the
+   * attribute groups, united with the base type's for an extension.
+   */
+  completeAnyAttribute: Wildcard | null;
   /** Base type names contributing attributes, outermost first. */
   inheritedFrom: string[];
 }
@@ -103,25 +117,48 @@ function ownAttributeGroupRefs(complex: ComplexType): QName[] {
     : complex.attribute_group_refs;
 }
 
+// The type's own xs:anyAttribute and those of the attribute groups it uses.
+function ownWildcards(complex: ComplexType, resolve: ComplexResolver): SourcedWildcard[] {
+  const out: SourcedWildcard[] = [];
+  if (complex.any_attribute) {
+    out.push({
+      wildcard: complex.any_attribute,
+      target: resolve.targetNamespace?.(complex.source_ref),
+    });
+  }
+  const seen = new Set<string>();
+  const visit = (ref: string) => {
+    const group = resolve.attributeGroup?.(ref);
+    if (!group || seen.has(group.id)) return;
+    seen.add(group.id);
+    if (group.any_attribute) {
+      out.push({
+        wildcard: group.any_attribute,
+        target: resolve.targetNamespace?.(group.source_ref),
+      });
+    }
+    group.attribute_group_refs.forEach(visit);
+  };
+  ownAttributeGroupRefs(complex).forEach(visit);
+  return out;
+}
+
 export function effectiveAttributes(
   complex: ComplexType,
   resolve: ComplexResolver,
   seen: Set<string> = new Set(),
 ): EffectiveAttributesResult {
-  if (complex.derivation !== "extension" || !complex.base || seen.has(complex.id)) {
-    return {
-      attributes: complex.attributes,
-      attributeGroupRefs: ownAttributeGroupRefs(complex),
-      anyAttribute: complex.any_attribute ?? null,
-      inheritedFrom: [],
-    };
-  }
-  const base = resolve(complex.base);
+  const target = resolve.targetNamespace?.(complex.source_ref);
+  const base =
+    complex.derivation === "extension" && complex.base && !seen.has(complex.id)
+      ? resolve(complex.base)
+      : undefined;
   if (!base) {
     return {
       attributes: complex.attributes,
       attributeGroupRefs: ownAttributeGroupRefs(complex),
       anyAttribute: complex.any_attribute ?? null,
+      completeAnyAttribute: completeWildcard(ownWildcards(complex, resolve), null, target),
       inheritedFrom: [],
     };
   }
@@ -146,6 +183,16 @@ export function effectiveAttributes(
     attributes,
     attributeGroupRefs,
     anyAttribute: complex.any_attribute ?? baseResult.anyAttribute,
+    completeAnyAttribute: completeWildcard(
+      ownWildcards(complex, resolve),
+      baseResult.completeAnyAttribute
+        ? {
+            wildcard: baseResult.completeAnyAttribute,
+            target: resolve.targetNamespace?.(base.source_ref),
+          }
+        : null,
+      target,
+    ),
     inheritedFrom,
   };
 }
@@ -153,9 +200,12 @@ export function effectiveAttributes(
 // Resolver backed by the flat NodeIndexEntry list (TreeView, ContentModelView).
 // Memoised per qname so repeatedly walking the same base chain (e.g. the
 // tree's "expand all") doesn't rescan the index for every node.
-export function makeIndexComplexResolver(index: NodeIndexEntry[]): ComplexResolver {
+export function makeIndexComplexResolver(
+  index: NodeIndexEntry[],
+  files?: SourceFile[],
+): ComplexResolver {
   const cache = new Map<string, ComplexType | undefined>();
-  return (qname) => {
+  const resolver: ComplexResolver = (qname) => {
     if (!qname) return undefined;
     if (cache.has(qname)) return cache.get(qname);
     const entry = resolveReference(qname, index, ["complexType"]);
@@ -163,4 +213,13 @@ export function makeIndexComplexResolver(index: NodeIndexEntry[]): ComplexResolv
     cache.set(qname, result);
     return result;
   };
+  resolver.attributeGroup = (qname) => {
+    const entry = resolveReference(qname, index, ["attributeGroup"]);
+    return entry ? (entry.node as AttributeGroup) : undefined;
+  };
+  if (files) {
+    const namespaces = new Map(files.map((f) => [f.id, f.target_namespace]));
+    resolver.targetNamespace = (ref) => (ref ? namespaces.get(ref.file_id) : undefined);
+  }
+  return resolver;
 }

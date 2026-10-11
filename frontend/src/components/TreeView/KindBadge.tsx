@@ -7,6 +7,7 @@ const COLORS: Record<SchemaNodeKind, string> = {
   simpleType: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
   group: "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300",
   attributeGroup: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300",
+  notation: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300",
 };
 
 const LABELS: Record<SchemaNodeKind, string> = {
@@ -16,6 +17,7 @@ const LABELS: Record<SchemaNodeKind, string> = {
   simpleType: "ST",
   group: "G",
   attributeGroup: "AG",
+  notation: "N",
 };
 
 export function KindBadge({ kind }: { kind: SchemaNodeKind }) {

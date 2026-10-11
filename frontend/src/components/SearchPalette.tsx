@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSelection } from "../stores/selectionStore";
 import { KindBadge } from "./TreeView/KindBadge";
 import { searchableText, snippetAround } from "../lib/searchText";
+import { redefinedOriginalIds } from "../lib/indexSchema";
 import type { NodeIndexEntry } from "../types/schema";
 
 const MAX_RESULTS = 60;
@@ -13,7 +14,13 @@ interface Hit {
 }
 
 export function SearchPalette() {
-  const index = useSelection((s) => s.index);
+  const fullIndex = useSelection((s) => s.index);
+  const model = useSelection((s) => s.model);
+  // Definitions an xs:redefine replaced are not something to search for.
+  const index = useMemo(() => {
+    const hidden = redefinedOriginalIds(model);
+    return hidden.size ? fullIndex.filter((entry) => !hidden.has(entry.id)) : fullIndex;
+  }, [fullIndex, model]);
   const setSelected = useSelection((s) => s.setSelected);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");

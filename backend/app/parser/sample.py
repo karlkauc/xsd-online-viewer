@@ -15,7 +15,8 @@ invalid.
 Identity constraints (xs:key, xs:keyref, xs:unique) and ID/IDREF are settled
 on the finished tree, since they concern the whole document. XSD 1.1 type
 alternatives are followed where their tests are simple attribute
-comparisons; assertions are not evaluated. It never raises on an incomplete
+comparisons; xs:assert tests are read as XPath 1.0 where that is safe, and
+simple repairs are tried when one fails. It never raises on an incomplete
 schema: unresolved references become XML comments so the user can see what
 could not be filled in.
 """
@@ -37,6 +38,7 @@ from xml.sax.saxutils import quoteattr
 from lxml import etree
 
 from app.parser.model import (
+    Assertion,
     AttributeDecl,
     AttributeGroup,
     ComplexType,
@@ -299,7 +301,8 @@ class _Context:
     # Prefixes used inside attribute values (xsi:type), which cleanup must keep.
     value_prefixes: set[str] = field(default_factory=set)
     derived_types: dict[str, ComplexType | None] = field(default_factory=dict)
-    wildcard_members: dict[str, list[ElementDecl]] = field(default_factory=dict)
+    # The type chain whose content is being emitted, innermost last (##definedSibling).
+    content_stack: list[list[ComplexType]] = field(default_factory=list)
     file_settings: dict[str, _FileSettings] = field(default_factory=dict)
     # Files whose declarations are being expanded, innermost last. Particles
     # carry no source location, so their QNames resolve in this file.
@@ -327,6 +330,13 @@ class _Context:
     skipped_attributes: dict[etree._Element, dict[str, AttributeDecl]] = field(default_factory=dict)
     optional_attributes: set[tuple[etree._Element, str]] = field(default_factory=set)
     xpaths: dict[tuple[str, str], etree.XPath] = field(default_factory=dict)
+    # xs:assert tests to settle on the finished tree: the element, the
+    # assertion and the type that declares it.
+    assertions: dict[tuple[etree._Element, int], tuple[Assertion, ComplexType]] = field(
+        default_factory=dict
+    )
+    assertion_xpaths: dict[int, tuple[etree.XPath, bool] | None] = field(default_factory=dict)
+    assertion_evaluations: int = 0
     unusable_constraints: set[str] = field(default_factory=set)
 
     def note(
@@ -587,8 +597,11 @@ def _generated_root(ctx: _Context, element: ElementDecl) -> etree._Element:
     if element.identity_constraints:
         ctx.constraint_scopes.append((root, element))
     _fill_element(ctx, root, element, depth=0, type_stack=())
+    _settle_assertions(ctx, root, repair=True)
     _apply_identity_constraints(ctx, root)
     _resolve_idrefs(ctx, root)
+    # Once more, for the report: the two passes above changed values.
+    _settle_assertions(ctx, root, repair=False)
     if ctx.budget_hit:
         root.append(
             etree.Comment(
@@ -696,6 +709,8 @@ def _element_namespace(ctx: _Context, element: ElementDecl, *, is_root: bool) ->
         return element.target_namespace
     if element.is_global or is_root:
         return ctx.namespace_of(element)
+    if element.qualified is not None:
+        return ctx.namespace_of(element) if element.qualified else None
     settings = ctx.settings_of(element)
     form = element.form or (settings.element_form if settings else ctx.model.element_form_default)
     return ctx.namespace_of(element) if form == "qualified" else None
@@ -830,6 +845,8 @@ def _fill_by_alternative(
             node.remove(child)
         node.attrib.clear()
         node.text = None
+        for key in [k for k in ctx.assertions if k[0] is node]:
+            del ctx.assertions[key]
         del ctx.report[notes_before:]
         ctx.cuts = cuts_before
         choice = selected
@@ -997,6 +1014,8 @@ def _fill_complex(
     # Attributes: bases first so the derived type's declarations win on clash.
     for member in reversed(_attribute_chain(ctx, ct)):
         _fill_attributes(ctx, node, member.attributes, member.attribute_group_refs, set(), member)
+        for assertion in member.assertions:
+            ctx.assertions[(node, id(assertion))] = (assertion, member)
     if ct.default_attributes:
         group = ctx.lookup(ctx.attr_group_by_key, ct.default_attributes)
         if group is not None:
@@ -1034,13 +1053,19 @@ def _fill_complex(
         ctx.cuts += 1
         return
     # Content: bases first (extension appends), then the type's own particle.
-    for member in reversed(chain):
-        if member.particle is not None:
-            ctx.file_stack.append(ctx.file_of(member))
-            try:
-                _emit_particle(ctx, node, member.particle, depth=depth + 1, type_stack=type_stack)
-            finally:
-                ctx.file_stack.pop()
+    ctx.content_stack.append(chain)
+    try:
+        for member in reversed(chain):
+            if member.particle is not None:
+                ctx.file_stack.append(ctx.file_of(member))
+                try:
+                    _emit_particle(
+                        ctx, node, member.particle, depth=depth + 1, type_stack=type_stack
+                    )
+                finally:
+                    ctx.file_stack.pop()
+    finally:
+        ctx.content_stack.pop()
     if ct.mixed and len(node) == 0 and not node.text:
         node.text = "text"
 
@@ -1050,6 +1075,8 @@ def _attribute_namespace(ctx: _Context, use: AttributeDecl, decl: AttributeDecl)
         return decl.target_namespace  # XSD 1.1 targetNamespace on a local attribute
     if use.ref or decl.is_global:
         return decl.target_namespace or ctx.namespace_of(decl)
+    if decl.qualified is not None:
+        return ctx.namespace_of(decl) if decl.qualified else None
     settings = ctx.settings_of(decl)
     form = decl.form or (settings.attribute_form if settings else ctx.model.attribute_form_default)
     if form == "qualified":
@@ -1543,6 +1570,62 @@ def _wildcard_allows(constraint: str | None, namespace: str | None, target: str 
     return namespace in allowed
 
 
+def _wildcard_admits(
+    ctx: _Context, particle: Particle, namespace: str | None, name: str, target: str | None
+) -> bool:
+    """Whether the wildcard ``particle`` lets an element ``{namespace}name`` through.
+
+    ``namespace`` or its XSD 1.1 counterpart ``notNamespace`` decides on the
+    namespace, ``notQName`` then takes single names out again: the ones it
+    lists, every globally declared element (``##defined``) and the elements
+    declared next to the wildcard (``##definedSibling``).
+    """
+    if particle.wildcard_not_namespace:
+        excluded = {
+            target if t == "##targetNamespace" else None if t == "##local" else t
+            for t in particle.wildcard_not_namespace.split()
+        }
+        if namespace in excluded:
+            return False
+    elif not _wildcard_allows(particle.wildcard_namespace, namespace, target):
+        return False
+    for token in (particle.wildcard_not_qname or "").split():
+        if token == "##defined":
+            if (namespace, name) in ctx.global_element_by_key:
+                return False
+        elif token == "##definedSibling":
+            if (namespace, name) in _sibling_names(ctx):
+                return False
+        elif ctx.split_qname(token) == (namespace, name):
+            return False
+    return True
+
+
+def _sibling_names(ctx: _Context) -> set[Key]:
+    """Names of the elements declared in the content model being filled."""
+    names: set[Key] = set()
+    seen: set[str] = set()
+
+    def walk(particle: Particle) -> None:
+        if particle.element is not None:
+            declaration = _deref_element(ctx, particle.element)
+            if declaration is not None and declaration.name:
+                names.add((_element_namespace(ctx, declaration, is_root=False), declaration.name))
+        group = particle.group_inline
+        if group is None and particle.group_ref:
+            group = ctx.lookup(ctx.group_by_key, particle.group_ref)
+        if group is not None and group.particle is not None and group.id not in seen:
+            seen.add(group.id)
+            walk(group.particle)
+        for child in particle.children:
+            walk(child)
+
+    for member in ctx.content_stack[-1] if ctx.content_stack else ():
+        if member.particle is not None:
+            walk(member.particle)
+    return names
+
+
 def _emit_wildcard(
     ctx: _Context,
     parent: etree._Element,
@@ -1559,40 +1642,58 @@ def _emit_wildcard(
     constraint = particle.wildcard_namespace
     target = _wildcard_target(ctx)
     if particle.wildcard_process_contents in ("lax", "skip"):
-        first = (constraint or "##any").split()[0]
-        namespace = {
-            "##any": _FOREIGN_NAMESPACE,
-            "##other": _FOREIGN_NAMESPACE,
-            "##targetNamespace": target,
-            "##local": None,
-        }.get(first, first)
-        if _wildcard_allows(constraint, namespace, target):
-            if namespace:
-                ctx.prefix_for(namespace)
-            etree.SubElement(parent, _tag(namespace, "any"))
-            ctx.emitted += 1
-            return
-    excluded = {
-        target if t == "##targetNamespace" else None if t == "##local" else t
-        for t in (particle.wildcard_not_namespace or "").split()
-    }
-    members = [
+        namespaces: list[str | None] = [_FOREIGN_NAMESPACE, f"{_FOREIGN_NAMESPACE}:other", None]
+        if not particle.wildcard_not_namespace:
+            namespaces = [
+                {
+                    "##any": _FOREIGN_NAMESPACE,
+                    "##other": _FOREIGN_NAMESPACE,
+                    "##targetNamespace": target,
+                    "##local": None,
+                }.get(token, token)
+                for token in (constraint or "##any").split()
+            ]
+        # A lax wildcard validates what it finds a declaration for, so the
+        # made-up element must not carry a declared name.
+        lax = particle.wildcard_process_contents == "lax"
+        for namespace, name in itertools.product(namespaces, ("any", "any1", "any2", "other")):
+            if lax and (namespace, name) in ctx.global_element_by_key:
+                continue
+            if _wildcard_admits(ctx, particle, namespace, name, target):
+                if namespace:
+                    ctx.prefix_for(namespace)
+                etree.SubElement(parent, _tag(namespace, name))
+                ctx.emitted += 1
+                return
+    members = (
         m
-        for m in _wildcard_members(ctx, constraint, target)
-        if not particle.wildcard_not_namespace
-        or (m.target_namespace or ctx.namespace_of(m)) not in excluded
-    ]
-    member = next((m for m in members if m.id not in ctx.open_elements), None)
+        for m in ctx.model.elements
+        if m.name
+        and not m.abstract
+        and _wildcard_admits(
+            ctx, particle, m.target_namespace or ctx.namespace_of(m), m.name, target
+        )
+    )
+    member, matched = None, False
+    for candidate in members:
+        matched = True
+        if candidate.id not in ctx.open_elements:
+            member = candidate
+            break
     if member is None:
         parent.append(etree.Comment(" any element allowed here "))
         # The wildcard is required, so the element around it is incomplete;
         # when that one is optional it is left out (CFDI ComplementoConcepto).
         ctx.cuts += 1
-        if members:
+        if matched:
             # Only the elements we are inside match; nesting one would recurse.
             ctx.note("wildcard_skipped", GENERATOR_LIMIT, "xs:any")
         else:
-            ctx.note("wildcard_without_declaration", SCHEMA_INCOMPLETE, constraint or "##any")
+            ctx.note(
+                "wildcard_without_declaration",
+                SCHEMA_INCOMPLETE,
+                constraint or particle.wildcard_not_namespace or "##any",
+            )
         return
     _emit_element_particle(ctx, parent, member, depth=depth, type_stack=type_stack)
 
@@ -1602,22 +1703,6 @@ def _wildcard_target(ctx: _Context) -> str | None:
     if ctx.file_stack and ctx.file_stack[-1] is not None:
         return ctx.declared_namespace(ctx.file_stack[-1])
     return ctx.model.target_namespace
-
-
-def _wildcard_members(
-    ctx: _Context, constraint: str | None, target: str | None
-) -> list[ElementDecl]:
-    """Concrete global elements a strict wildcard accepts, in document order."""
-    key = f"{constraint or '##any'} {target}"
-    if key not in ctx.wildcard_members:
-        ctx.wildcard_members[key] = [
-            element
-            for element in ctx.model.elements
-            if element.name
-            and not element.abstract
-            and _wildcard_allows(constraint, element.target_namespace or ctx.namespace_of(element), target)
-        ]
-    return ctx.wildcard_members[key]
 
 
 def _substitution_member(ctx: _Context, head: ElementDecl) -> ElementDecl | None:
@@ -1653,6 +1738,207 @@ def _direct_members(ctx: _Context, head: ElementDecl) -> list[ElementDecl]:
         return exact
     # An undeclared prefix or a chameleon include: match the local name alone.
     return [m for (_, local), members in ctx.members_by_head.items() if local == head.name for m in members]
+
+
+# ---------------------------------------------------------------------------
+# Assertions (XSD 1.1)
+# ---------------------------------------------------------------------------
+
+
+# The XPath 2.0 functions assertions use most, for the XPath 1.0 engine at hand.
+# No ``matches``: its pattern is the schema author's and would run on Python's
+# backtracking ``re`` inside the server (see docs/ARCHITECTURE.md, validation).
+def _xp_string(value: object) -> str:
+    if isinstance(value, list):
+        value = value[0] if value else ""
+    if isinstance(value, etree._Element):
+        return "".join(value.itertext())
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _xp_numbers(value: object) -> list[float]:
+    items = value if isinstance(value, list) else [value]
+    return [float(_xp_string(item)) for item in items]
+
+
+_XPATH_2_FUNCTIONS = {
+    (None, "exists"): lambda _c, value: bool(value) if isinstance(value, list) else True,
+    (None, "empty"): lambda _c, value: not value if isinstance(value, list) else False,
+    (None, "lower-case"): lambda _c, value: _xp_string(value).lower(),
+    (None, "upper-case"): lambda _c, value: _xp_string(value).upper(),
+    (None, "ends-with"): lambda _c, value, end: _xp_string(value).endswith(_xp_string(end)),
+    (None, "abs"): lambda _c, value: abs(_xp_numbers(value)[0]),
+    (None, "min"): lambda _c, value: min(_xp_numbers(value)),
+    (None, "max"): lambda _c, value: max(_xp_numbers(value)),
+    (None, "avg"): lambda _c, value: sum(_xp_numbers(value)) / len(_xp_numbers(value)),
+}
+_TEST_ATTRIBUTE = re.compile(r"@(?:[\w.-]+:)?([\w.-]+)")
+_ASSERTION_REPAIRS = 24
+# What keeps a test cheap and inside the element it is declared on: an
+# assertion sees that element as the root of its own tree, so a path out of it
+# means something else here than in a validator, and a search through all
+# descendants is only run on a small subtree.
+_OUTWARD_AXES = frozenset(
+    ("ancestor", "ancestor-or-self", "parent", "preceding", "preceding-sibling", "following",
+     "following-sibling")
+)
+_DESCENDANT_STEPS = 2
+_DESCENDANT_SUBTREE = 500
+_ASSERTION_EVALUATIONS = 5000
+
+
+def _assertion_reach(test: str) -> int | None:
+    """How many descendant searches ``test`` makes; None when it looks outside its element."""
+    tokens = [t for t in _XPATH_TOKEN.findall(test) if not t.isspace()]
+    searches = 0
+    for index, token in enumerate(tokens):
+        before = tokens[index - 1] if index else None
+        after = tokens[index + 1] if index + 1 < len(tokens) else None
+        if token == ".." or (token in _OUTWARD_AXES and after == "::"):
+            return None
+        if token in ("/", "//") and not _ends_operand(before):
+            return None  # an absolute path
+        if token == "//" or (token in ("descendant", "descendant-or-self") and after == "::"):
+            searches += 1
+    return searches
+
+
+def _assertion_holds(
+    ctx: _Context, assertion: Assertion, owner: ComplexType, node: etree._Element
+) -> bool | None:
+    """Whether ``assertion`` holds on ``node``; None when XPath 1.0 cannot say.
+
+    Tests are XPath 2.0 over typed values. Read as XPath 1.0 they come out
+    the same for the common shapes -- presence of attributes and children,
+    counts, numeric and string comparisons -- and anything else (``if``,
+    quantified expressions, dates compared by order) either fails to
+    evaluate or cannot be trusted when it comes out false.
+    """
+    key = id(assertion)
+    if key not in ctx.assertion_xpaths:
+        located = assertion if assertion.source_ref is not None else owner
+        namespaces, qualify = _xpath_namespaces(ctx, located, assertion.xpath_default_namespace)
+        reach = _assertion_reach(assertion.test)
+        compiled = None
+        if reach is not None and reach <= _DESCENDANT_STEPS:
+            try:
+                compiled = etree.XPath(
+                    f"boolean({_xpath_1(assertion.test, qualify=qualify, value_operators=True)})",
+                    namespaces=namespaces,
+                    extensions=_XPATH_2_FUNCTIONS,
+                )
+            except etree.XPathError:
+                compiled = None
+        ctx.assertion_xpaths[key] = None if compiled is None else (compiled, reach > 0)
+    entry = ctx.assertion_xpaths[key]
+    if entry is None or ctx.assertion_evaluations >= _ASSERTION_EVALUATIONS:
+        return None
+    xpath, searches = entry
+    if searches and len(list(itertools.islice(node.iter(), _DESCENDANT_SUBTREE + 1))) > (
+        _DESCENDANT_SUBTREE
+    ):
+        return None
+    ctx.assertion_evaluations += 1
+    try:
+        return bool(xpath(node))
+    except (etree.XPathError, ValueError, ZeroDivisionError, IndexError, TypeError):
+        return None
+
+
+def _settle_assertions(ctx: _Context, root: etree._Element, *, repair: bool) -> None:
+    """Make the xs:assert tests of the generated elements come out true where that is cheap.
+
+    A test that fails is retried with the optional attributes it mentions
+    added or taken out, and with the values of two attributes or two child
+    elements of the same type exchanged (``@min le @max``). What still does
+    not hold, or cannot be evaluated at all, goes into the report; the XSD
+    1.1 validator has the last word either way.
+    """
+    for (node, _), (assertion, owner) in list(ctx.assertions.items()):
+        if not _in_tree(node, root):
+            continue
+        holds = _assertion_holds(ctx, assertion, owner, node)
+        if holds is False and repair:
+            holds = _repair_for_assertion(ctx, assertion, owner, node)
+        if holds is not True and not repair:
+            ctx.note(
+                "assertion_unsettled" if holds is False else "assertion_not_evaluated",
+                GENERATOR_LIMIT,
+                assertion.test,
+                assertion if assertion.source_ref is not None else owner,
+            )
+
+
+def _repair_for_assertion(
+    ctx: _Context, assertion: Assertion, owner: ComplexType, node: etree._Element
+) -> bool:
+    mentioned = set(_TEST_ATTRIBUTE.findall(assertion.test))
+    tries = 0
+
+    def holds() -> bool:
+        nonlocal tries
+        tries += 1
+        return _assertion_holds(ctx, assertion, owner, node) is True
+
+    # Optional attributes the test asks about: put the missing ones in...
+    skipped = ctx.skipped_attributes.get(node, {})
+    absent = [tag for tag in skipped if etree.QName(tag).localname in mentioned]
+    for group in [[tag] for tag in absent] + ([absent] if len(absent) > 1 else []):
+        if tries >= _ASSERTION_REPAIRS:
+            return False
+        for tag in group:
+            _set_attribute(ctx, node, tag, etree.QName(tag).namespace, skipped[tag])
+        if holds():
+            for tag in group:
+                ctx.optional_attributes.add((node, tag))
+                del skipped[tag]
+            return True
+        for tag in group:
+            del node.attrib[tag]
+            ctx.value_specs.pop((node, tag), None)
+    # ...or leave out the ones that are there.
+    present = [
+        tag
+        for owner_node, tag in ctx.optional_attributes
+        if owner_node is node and tag in node.attrib and etree.QName(tag).localname in mentioned
+    ]
+    for group in [[tag] for tag in present] + ([present] if len(present) > 1 else []):
+        if tries >= _ASSERTION_REPAIRS:
+            return False
+        saved = {tag: node.attrib.pop(tag) for tag in group}
+        if holds():
+            for tag in group:
+                ctx.optional_attributes.discard((node, tag))
+                ctx.value_specs.pop((node, tag), None)
+            return True
+        for tag, value in saved.items():
+            node.set(tag, value)
+    # Two values of the same type the wrong way round.
+    slots: list[tuple[etree._Element, str | None]] = [
+        (node, tag) for tag in node.attrib if (node, tag) in ctx.value_specs
+    ]
+    slots += [(child, None) for child in node if (child, None) in ctx.value_specs]
+    for first, second in itertools.combinations(slots, 2):
+        if tries >= _ASSERTION_REPAIRS:
+            return False
+        if (first[1] is None) != (second[1] is None):
+            continue
+        if ctx.value_specs[first] != ctx.value_specs[second]:
+            continue
+        one, other = _read(first), _read(second)
+        if one is None or other is None or one == other:
+            continue
+        _write(first, other)
+        _write(second, one)
+        if holds():
+            return True
+        _write(first, one)
+        _write(second, other)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -1694,18 +1980,95 @@ def _in_tree(node: etree._Element, root: etree._Element) -> bool:
     return node is root or any(ancestor is root for ancestor in node.iterancestors())
 
 
+_XPATH_TOKEN = re.compile(
+    r"""\s+|"[^"]*"|'[^']*'|\d+(?:\.\d+)?|::|//|\.\.|<=|>=|!=|[\w.-]+:\*|\*:[\w.-]+"""
+    r"""|[A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?|."""
+)
+_XPATH_OPERATOR_NAMES = frozenset(("and", "or", "div", "mod", "eq", "ne", "lt", "le", "gt", "ge"))
+_VALUE_OPERATORS = {"eq": "=", "ne": "!=", "lt": "<", "le": "<=", "gt": ">", "ge": ">="}
+# The prefix that stands in for xpathDefaultNamespace, which XPath 1.0 lacks.
+_DEFAULT_PREFIX = "xdn"
+
+
+def _ends_operand(token: str | None) -> bool:
+    """Whether an XPath token can end an operand, so that what follows is an operator."""
+    return (
+        token is not None
+        and token not in _XPATH_OPERATOR_NAMES
+        and (
+            token in (")", "]", ".", "..", "*")
+            or token[0] in "\"'"
+            or token[0].isalnum()
+            or token[0] == "_"
+        )
+    )
+
+
+def _xpath_1(expression: str, *, qualify: bool, value_operators: bool = False) -> str:
+    """``expression`` as XPath 1.0 can read it.
+
+    ``qualify`` gives every element name test without a prefix the stand-in
+    prefix for xpathDefaultNamespace; attribute names, functions and axes
+    stay as they are. ``value_operators`` spells ``eq``, ``lt`` and the like
+    as the general comparisons XPath 1.0 has.
+    """
+    tokens = [t for t in _XPATH_TOKEN.findall(expression) if not t.isspace()]
+    out: list[str] = []
+    for index, token in enumerate(tokens):
+        before = tokens[index - 1] if index else None
+        after = tokens[index + 1] if index + 1 < len(tokens) else None
+        if not (token[0].isalpha() or token[0] == "_") or ":" in token:
+            out.append(token)
+            continue
+        # A name after an operand is an operator; anywhere else it is a step.
+        if token in _XPATH_OPERATOR_NAMES and _ends_operand(before):
+            out.append(_VALUE_OPERATORS.get(token, token) if value_operators else token)
+        elif (
+            after in ("(", "::")
+            or before in ("@", "$")
+            or (before == "::" and index >= 2 and tokens[index - 2] in ("attribute", "namespace"))
+        ):
+            out.append(token)
+        else:
+            out.append(f"{_DEFAULT_PREFIX}:{token}" if qualify else token)
+    return " ".join(out)
+
+
+def _xpath_namespaces(
+    ctx: _Context, owner: object, default_namespace: str | None
+) -> tuple[dict[str, str], bool]:
+    """The prefixes an XPath on ``owner`` may use, and whether a default namespace applies."""
+    namespaces = {prefix: uri for prefix, uri in ctx.model.namespaces.items() if prefix}
+    settings = ctx.settings_of(owner)
+    if settings is not None:
+        namespaces.update({prefix: uri for prefix, uri in settings.prefixes.items() if prefix})
+    resolved = {
+        None: None,
+        "##local": None,
+        "##targetNamespace": ctx.namespace_of(owner),
+        "##defaultNamespace": settings.default_namespace if settings is not None else None,
+    }.get(default_namespace, default_namespace)
+    if resolved:
+        namespaces[_DEFAULT_PREFIX] = resolved
+    return namespaces, bool(resolved)
+
+
 def _run_xpath(ctx: _Context, constraint: IdentityConstraint, expression: str, node: etree._Element) -> list:
-    if constraint.xpath_default_namespace:
-        raise _UnusableConstraintError  # XPath 1.0 has no default namespace for name tests
     key = (constraint.id, expression)
     xpath = ctx.xpaths.get(key)
     if xpath is None:
-        namespaces = {prefix: uri for prefix, uri in ctx.model.namespaces.items() if prefix}
-        settings = ctx.settings_of(constraint)
-        if settings is not None:
-            namespaces.update({prefix: uri for prefix, uri in settings.prefixes.items() if prefix})
+        default_namespace = constraint.xpath_default_namespace
+        if expression != constraint.selector and expression in constraint.fields:
+            per_field = constraint.field_xpath_default_namespaces
+            position = constraint.fields.index(expression)
+            if position < len(per_field):
+                default_namespace = per_field[position]
+        namespaces, qualify = _xpath_namespaces(ctx, constraint, default_namespace)
         try:
-            xpath = etree.XPath(expression.strip(), namespaces=namespaces)
+            xpath = etree.XPath(
+                _xpath_1(expression, qualify=True) if qualify else expression.strip(),
+                namespaces=namespaces,
+            )
         except etree.XPathError as exc:
             raise _UnusableConstraintError from exc
         ctx.xpaths[key] = xpath

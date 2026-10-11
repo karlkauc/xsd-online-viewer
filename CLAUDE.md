@@ -92,8 +92,14 @@ cached and a soft reload can keep showing the old UI.
   particle fields, the schema-level `annotation`, `schema_version` and
   `notations`, `ComplexType.default_attributes`, `OpenContent.origin`,
   `OverrideReplacement.original_source_ref`, the `Annotation` extras (`xml_id`,
-  foreign `attributes`, `context` / `source_uri` on its entries) and
-  `IdentityConstraint.field_xpath_default_namespaces`.
+  foreign `attributes`, `context` / `source_uri` on its entries),
+  `IdentityConstraint.field_xpath_default_namespaces`, the effective
+  `qualified` on local `ElementDecl` / `AttributeDecl` and the per-file
+  `element_form_default` / `attribute_form_default` on `SourceFile`.
+- **Not every tree row is a declaration**: `xs:any` / `xs:anyAttribute` rows
+  carry a synthetic id and select their owner; `xs:notation` is a real node
+  kind (`notation:…`). The attribute wildcard shown is the one in effect
+  (`lib/wildcards.ts`), not just the type's own.
 - **XSD semantics are applied, not just shown**: `xs:redefine`, `xs:override`,
   `vc:*` conditional inclusion (as an XSD 1.1 processor) and the per-file
   `defaultAttributes` / `xs:defaultOpenContent`. The model holds the effective

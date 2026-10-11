@@ -1610,3 +1610,50 @@ class TestInnerAnnotations:
         key = _find_element(model, "Doc").identity_constraints[0]
         assert key.xpath_default_namespace == "urn:schema"
         assert key.field_xpath_default_namespaces == ["urn:schema", "urn:field"]
+
+
+class TestFormDefaultsPerFile:
+    """elementFormDefault / attributeFormDefault are each file's own."""
+
+    MAIN = (
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:t="urn:t" '
+        b'targetNamespace="urn:t" elementFormDefault="qualified">'
+        b'<xs:include schemaLocation="inc.xsd"/>'
+        b'<xs:element name="Root"><xs:complexType><xs:sequence>'
+        b'<xs:element name="a" type="xs:string"/>'
+        b'<xs:element name="b" type="xs:string" form="unqualified"/>'
+        b'<xs:element ref="t:Other"/>'
+        b'</xs:sequence><xs:attribute name="x" type="xs:string"/>'
+        b"</xs:complexType></xs:element></xs:schema>"
+    )
+    INCLUDED = (
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:t" '
+        b'attributeFormDefault="qualified">'
+        b'<xs:element name="Other"><xs:complexType><xs:sequence>'
+        b'<xs:element name="c" type="xs:string"/>'
+        b'</xs:sequence><xs:attribute name="y" type="xs:string"/>'
+        b'<xs:attribute name="z" type="xs:string" form="unqualified"/>'
+        b"</xs:complexType></xs:element></xs:schema>"
+    )
+
+    def _model(self):
+        return parse_files_map({"main.xsd": self.MAIN, "inc.xsd": self.INCLUDED}, "main.xsd")
+
+    def test_each_file_reports_its_own_defaults(self) -> None:
+        files = {f.filename: f for f in self._model().files}
+        assert files["main.xsd"].element_form_default == "qualified"
+        assert files["main.xsd"].attribute_form_default == "unqualified"
+        assert files["inc.xsd"].element_form_default == "unqualified"
+        assert files["inc.xsd"].attribute_form_default == "qualified"
+
+    def test_local_declarations_carry_their_effective_qualification(self) -> None:
+        model = self._model()
+        root = next(e for e in model.elements if e.name == "Root")
+        other = next(e for e in model.elements if e.name == "Other")
+        assert root.qualified is None  # global
+        children = [p.element for p in root.type_inline_complex.particle.children]
+        assert [c.qualified for c in children] == [True, False, None]  # last one is a ref
+        assert [a.qualified for a in root.type_inline_complex.attributes] == [False]
+        inner = other.type_inline_complex
+        assert [p.element.qualified for p in inner.particle.children] == [False]
+        assert [a.qualified for a in inner.attributes] == [True, False]

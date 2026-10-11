@@ -236,3 +236,139 @@ describe("buildTreeRows leaf elements", () => {
     expect(rows.find((r) => r.label === "Label")!.hasChildren).toBe(true);
   });
 });
+
+describe("buildTreeRows wildcards, notations and redefined originals", () => {
+  const wildcard = {
+    namespace: "##other",
+    not_namespace: null,
+    not_qname: null,
+    process_contents: "lax" as const,
+    annotation: null,
+  };
+  const openType: ComplexType = {
+    id: "complexType:Open",
+    name: "Open",
+    anonymous: false,
+    abstract: false,
+    mixed: false,
+    content_kind: "complex",
+    derivation: "none",
+    base: null,
+    particle: {
+      kind: "sequence",
+      min_occurs: 1,
+      max_occurs: 1,
+      element: null,
+      group_ref: null,
+      group_inline: null,
+      children: [
+        {
+          kind: "any",
+          min_occurs: 0,
+          max_occurs: "unbounded",
+          element: null,
+          group_ref: null,
+          group_inline: null,
+          children: [],
+          wildcard_namespace: "##targetNamespace",
+          wildcard_process_contents: "strict",
+          wildcard_not_qname: "t:Skip",
+          annotation: null,
+        },
+      ],
+      wildcard_namespace: null,
+      wildcard_process_contents: null,
+      annotation: null,
+    },
+    attributes: [],
+    attribute_group_refs: [],
+    any_attribute: wildcard,
+    simple_content_base: null,
+    simple_content_facets: [],
+    annotation: null,
+    source_ref: null,
+  };
+  const model: SchemaModel = {
+    ...smallModel,
+    elements: [],
+    attributes: [],
+    simple_types: [],
+    groups: [],
+    attribute_groups: [],
+    complex_types: [
+      openType,
+      { ...openType, id: "complexType:Open~original", name: "Open~original", particle: null },
+    ],
+    notations: [
+      {
+        id: "notation:jpeg",
+        name: "jpeg",
+        qname: "jpeg",
+        public: "image/jpeg",
+        system: null,
+        annotation: null,
+        source_ref: null,
+      },
+    ],
+    redefines: [
+      {
+        target_file_id: null,
+        source_ref: null,
+        redefinitions: [
+          {
+            kind: "complexType",
+            qname: "Open",
+            redefinition_id: "complexType:Open",
+            original_id: "complexType:Open~original",
+            source_ref: null,
+          },
+        ],
+      },
+    ],
+  };
+  const kinds = new Set<SchemaNodeKind>([...ALL, "notation"]);
+
+  it("lists xs:any and xs:anyAttribute as rows that select their owner", () => {
+    const { indexById } = buildIndex(model);
+    const rows = buildTreeRows(model, new Set(["complexType:Open"]), kinds, indexById);
+    const any = rows.find((r) => r.label === "any ##targetNamespace, not t:Skip");
+    expect(any).toMatchObject({
+      kind: "element",
+      wildcard: true,
+      occurs: "0..∞",
+      typeHint: "strict",
+      selectId: "complexType:Open",
+    });
+    const anyAttribute = rows.find((r) => r.label === "@any ##other");
+    expect(anyAttribute).toMatchObject({
+      kind: "attribute",
+      wildcard: true,
+      typeHint: "lax",
+      selectId: "complexType:Open",
+    });
+    // A type with nothing but wildcards is still expandable.
+    expect(rows.find((r) => r.id === "complexType:Open")?.hasChildren).toBe(true);
+  });
+
+  it("lists notations, and only when their kind is switched on", () => {
+    const { indexById } = buildIndex(model);
+    const rows = buildTreeRows(model, new Set(), kinds, indexById);
+    expect(rows.find((r) => r.id === "notation:jpeg")).toMatchObject({
+      kind: "notation",
+      label: "jpeg",
+      typeHint: "image/jpeg",
+    });
+    expect(indexById.get("notation:jpeg")?.kind).toBe("notation");
+    const without = buildTreeRows(model, new Set(), new Set(ALL), indexById);
+    expect(without.some((r) => r.kind === "notation")).toBe(false);
+  });
+
+  it("leaves out the definition an xs:redefine replaced", () => {
+    const { indexById } = buildIndex(model);
+    const rows = buildTreeRows(model, new Set(), kinds, indexById);
+    expect(rows.map((r) => r.label)).toContain("Open");
+    expect(rows.some((r) => r.label.includes("~original"))).toBe(false);
+    // It stays in the index: the redefinition's base still resolves to it.
+    expect(indexById.has("complexType:Open~original")).toBe(true);
+  });
+});

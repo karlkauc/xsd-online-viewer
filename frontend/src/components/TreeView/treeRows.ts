@@ -12,7 +12,8 @@ import type {
   SchemaNodeKind,
   SimpleType,
 } from "../../types/schema";
-import { resolveElementRef, resolveReference } from "../../lib/indexSchema";
+import { redefinedOriginalIds, resolveElementRef, resolveReference } from "../../lib/indexSchema";
+import { wildcardNamespaceLabel } from "../../lib/attributeGroups";
 import { computeRootElements } from "../../lib/rootElements";
 import { effectiveAttributes, effectiveParticle, makeIndexComplexResolver } from "../../lib/effectiveContent";
 
@@ -29,6 +30,11 @@ export interface TreeRow {
   constraintCount?: number;
   /** "key bookKey, keyref loanBookRef, …" — used as the ⚿ glyph's title. */
   constraintTitle?: string | null;
+  /** An xs:any / xs:anyAttribute row: no declaration of its own. */
+  wildcard?: boolean;
+  /** What a click selects when the row itself is not a declaration. */
+  selectId?: string;
+  title?: string | null;
 }
 
 function formatConstraintTitle(constraints: IdentityConstraint[]): string | null {
@@ -58,7 +64,10 @@ export function buildTreeRows(
   // same base chain for many nodes, and this resolver backs both the extension
   // base lookups below and effectiveParticle/effectiveAttributes' own cycle
   // guards.
-  const complexResolver = makeIndexComplexResolver(Array.from(indexById.values()));
+  const complexResolver = makeIndexComplexResolver(Array.from(indexById.values()), model.files);
+  const redefined = redefinedOriginalIds(model);
+  // Wildcards have no id of their own; a running number keeps the rows apart.
+  let wildcardCount = 0;
 
   const pushRow = (row: TreeRow) => {
     if (!filterKinds.has(row.kind)) return;
@@ -66,15 +75,35 @@ export function buildTreeRows(
   };
 
   const particleHasVisible = (particle: Particle): boolean => {
-    if (particle.element) return true;
+    if (particle.element || particle.kind === "any") return true;
     if (particle.group_inline) return true;
     if (particle.group_ref) return true;
     return particle.children.some(particleHasVisible);
   };
 
-  const expandParticle = (particle: Particle, depth: number) => {
+  const expandParticle = (particle: Particle, depth: number, ownerId?: string) => {
     if (particle.element) {
       descendElement(particle.element, depth, particle);
+      return;
+    }
+    if (particle.kind === "any") {
+      const namespaces = wildcardNamespaceLabel({
+        namespace: particle.wildcard_namespace,
+        not_namespace: particle.wildcard_not_namespace ?? null,
+        not_qname: particle.wildcard_not_qname ?? null,
+      });
+      pushRow({
+        id: `any:${ownerId ?? ""}:${wildcardCount++}`,
+        depth,
+        kind: "element",
+        label: `any ${namespaces}`,
+        hasChildren: false,
+        occurs: formatOccurs(particle.min_occurs, particle.max_occurs),
+        typeHint: particle.wildcard_process_contents ?? "strict",
+        wildcard: true,
+        selectId: ownerId,
+        title: `xs:any — any element from: ${namespaces}`,
+      });
       return;
     }
     if (particle.group_inline) {
@@ -90,7 +119,7 @@ export function buildTreeRows(
         expandedIds.has(particle.group_inline.id) &&
         particle.group_inline.particle
       ) {
-        expandParticle(particle.group_inline.particle, depth + 1);
+        expandParticle(particle.group_inline.particle, depth + 1, particle.group_inline.id);
       }
       return;
     }
@@ -107,7 +136,7 @@ export function buildTreeRows(
     }
     // Compositor (sequence/choice/all/any) — flatten its children at this depth.
     for (const child of particle.children) {
-      expandParticle(child, depth);
+      expandParticle(child, depth, ownerId);
     }
   };
 
@@ -118,7 +147,8 @@ export function buildTreeRows(
   const complexHasVisible = (complex: ComplexType): boolean => {
     const { particle } = effectiveParticle(complex, complexResolver);
     if (particle && particleHasVisible(particle)) return true;
-    return effectiveAttributes(complex, complexResolver).attributes.length > 0;
+    const attributes = effectiveAttributes(complex, complexResolver);
+    return attributes.attributes.length > 0 || attributes.completeAnyAttribute != null;
   };
 
   // Mirrors descendElementBody(): only a complex type (inline or resolved)
@@ -160,16 +190,16 @@ export function buildTreeRows(
     if (target !== element) {
       if (stackSeen.includes(target.id)) return;
       stackSeen.push(target.id);
-      descendElementBody(target, depth);
+      descendElementBody(target, depth, rowId);
       stackSeen.pop();
       return;
     }
-    descendElementBody(target, depth);
+    descendElementBody(target, depth, rowId);
   };
 
-  const descendElementBody = (element: ElementDecl, depth: number) => {
+  const descendElementBody = (element: ElementDecl, depth: number, rowId: string) => {
     if (element.type_inline_complex) {
-      descendComplex(element.type_inline_complex, depth + 1);
+      descendComplex(element.type_inline_complex, depth + 1, rowId);
     } else if (element.type_name) {
       const resolved = resolveReference(
         element.type_name,
@@ -179,7 +209,7 @@ export function buildTreeRows(
       if (resolved && !stackSeen.includes(resolved.id)) {
         stackSeen.push(resolved.id);
         if (resolved.kind === "complexType") {
-          descendComplex(resolved.node as ComplexType, depth + 1);
+          descendComplex(resolved.node as ComplexType, depth + 1, rowId);
         } else {
           describeSimple(resolved.node as SimpleType, depth + 1);
         }
@@ -188,12 +218,12 @@ export function buildTreeRows(
     }
   };
 
-  const descendComplex = (complex: ComplexType, depth: number) => {
+  const descendComplex = (complex: ComplexType, depth: number, ownerId: string) => {
     const { particle } = effectiveParticle(complex, complexResolver);
     if (particle && particleHasVisible(particle)) {
-      expandParticle(particle, depth);
+      expandParticle(particle, depth, ownerId);
     }
-    const { attributes } = effectiveAttributes(complex, complexResolver);
+    const { attributes, completeAnyAttribute } = effectiveAttributes(complex, complexResolver);
     for (const attr of attributes) {
       pushRow({
         id: attr.id,
@@ -202,6 +232,19 @@ export function buildTreeRows(
         label: "@" + (attr.name ?? attr.ref ?? "?"),
         hasChildren: false,
         typeHint: attr.type_name,
+      });
+    }
+    if (completeAnyAttribute) {
+      pushRow({
+        id: `anyAttribute:${ownerId}:${wildcardCount++}`,
+        depth,
+        kind: "attribute",
+        label: `@any ${wildcardNamespaceLabel(completeAnyAttribute)}`,
+        hasChildren: false,
+        typeHint: completeAnyAttribute.process_contents ?? "strict",
+        wildcard: true,
+        selectId: ownerId,
+        title: `xs:anyAttribute — any attribute from: ${wildcardNamespaceLabel(completeAnyAttribute)}`,
       });
     }
   };
@@ -219,6 +262,7 @@ export function buildTreeRows(
   }
   if (filterKinds.has("complexType")) {
     for (const complex of model.complex_types) {
+      if (redefined.has(complex.id)) continue;
       pushRow({
         id: complex.id,
         depth: 0,
@@ -227,12 +271,13 @@ export function buildTreeRows(
         hasChildren: complexHasVisible(complex),
       });
       if (expandedIds.has(complex.id)) {
-        descendComplex(complex, 1);
+        descendComplex(complex, 1, complex.id);
       }
     }
   }
   if (filterKinds.has("simpleType")) {
     for (const simple of model.simple_types) {
+      if (redefined.has(simple.id)) continue;
       pushRow({
         id: simple.id,
         depth: 0,
@@ -245,6 +290,7 @@ export function buildTreeRows(
   }
   if (filterKinds.has("group")) {
     for (const group of model.groups) {
+      if (redefined.has(group.id)) continue;
       pushRow({
         id: group.id,
         depth: 0,
@@ -253,18 +299,19 @@ export function buildTreeRows(
         hasChildren: group.particle != null,
       });
       if (expandedIds.has(group.id) && group.particle) {
-        expandParticle(group.particle, 1);
+        expandParticle(group.particle, 1, group.id);
       }
     }
   }
   if (filterKinds.has("attributeGroup")) {
     for (const ag of model.attribute_groups) {
+      if (redefined.has(ag.id)) continue;
       pushRow({
         id: ag.id,
         depth: 0,
         kind: "attributeGroup",
         label: ag.name ?? ag.ref ?? "(anonymous)",
-        hasChildren: ag.attributes.length > 0,
+        hasChildren: ag.attributes.length > 0 || ag.any_attribute != null,
       });
       if (expandedIds.has(ag.id)) {
         for (const attr of ag.attributes) {
@@ -275,6 +322,19 @@ export function buildTreeRows(
             label: "@" + (attr.name ?? attr.ref ?? "?"),
             hasChildren: false,
             typeHint: attr.type_name,
+          });
+        }
+        if (ag.any_attribute) {
+          pushRow({
+            id: `anyAttribute:${ag.id}:${wildcardCount++}`,
+            depth: 1,
+            kind: "attribute",
+            label: `@any ${wildcardNamespaceLabel(ag.any_attribute)}`,
+            hasChildren: false,
+            typeHint: ag.any_attribute.process_contents ?? "strict",
+            wildcard: true,
+            selectId: ag.id,
+            title: `xs:anyAttribute — any attribute from: ${wildcardNamespaceLabel(ag.any_attribute)}`,
           });
         }
       }
@@ -289,6 +349,18 @@ export function buildTreeRows(
         label: "@" + (attr.name ?? attr.ref ?? "?"),
         hasChildren: false,
         typeHint: attr.type_name,
+      });
+    }
+  }
+  if (filterKinds.has("notation")) {
+    for (const notation of model.notations ?? []) {
+      pushRow({
+        id: notation.id,
+        depth: 0,
+        kind: "notation",
+        label: notation.name,
+        hasChildren: false,
+        typeHint: notation.public ?? notation.system,
       });
     }
   }

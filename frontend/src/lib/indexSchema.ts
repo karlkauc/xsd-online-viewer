@@ -136,6 +136,12 @@ export function buildIndex(model: SchemaModel): IndexBundle {
     addUsage(simple.base, entry);
     addUsage(simple.item_type, entry);
     for (const member of simple.member_types) addUsage(member, entry);
+    // An enumeration over xs:NOTATION names the schema's xs:notation declarations.
+    if (simple.base?.split(":").pop() === "NOTATION") {
+      for (const facet of simple.facets) {
+        if (facet.kind === "enumeration") addUsage(facet.value, entry);
+      }
+    }
     if (simple.item_inline) visitSimpleType(simple.item_inline, simple.id);
     for (const m of simple.member_inline) visitSimpleType(m, simple.id);
   };
@@ -193,6 +199,16 @@ export function buildIndex(model: SchemaModel): IndexBundle {
   for (const complex of model.complex_types) visitComplexType(complex, null);
   for (const group of model.groups) visitGroup(group, null);
   for (const ag of model.attribute_groups) visitAttributeGroup(ag, null);
+  for (const notation of model.notations ?? []) {
+    entries.push({
+      id: notation.id,
+      kind: "notation",
+      label: notation.name,
+      qname: notation.qname,
+      source_ref: notation.source_ref,
+      node: notation,
+    });
+  }
 
   const indexById = new Map<string, NodeIndexEntry>();
   for (const entry of entries) indexById.set(entry.id, entry);
@@ -243,6 +259,22 @@ export function findRedefineLink(model: SchemaModel | null, id: string): Redefin
 // references. Returns null for a declaration that isn't a ref, or whose target
 // is missing (undeclared prefix, unresolved import). The caller substitutes the
 // target wherever the ref itself carries no content: type, children, docs.
+// Ids of the definitions an xs:redefine replaced. They stay in the model under
+// a made-up `Name~original` name, as the base of what redefines them, but are
+// not something to browse or search for.
+export function redefinedOriginalIds(model: SchemaModel | null): Set<string> {
+  const ids = new Set<string>();
+  for (const directive of model?.redefines ?? []) {
+    for (const r of directive.redefinitions) if (r.original_id) ids.add(r.original_id);
+  }
+  return ids;
+}
+
+// The name a redefined original was declared with, without the `~original` marker.
+export function declaredName(label: string): string {
+  return label.replace(/~original\d*$/, "");
+}
+
 export function resolveElementRef(
   element: ElementDecl,
   indexById: Map<string, NodeIndexEntry>,

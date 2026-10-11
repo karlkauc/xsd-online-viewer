@@ -1,16 +1,18 @@
 """Produce strings that match a (simple) XSD regular expression.
 
 Best effort only: literals, escapes, character classes, the common
-``\\p{…}`` categories, groups, alternation and quantifiers are understood;
-anything else (unknown categories, nested negated subtraction,
-back-references) makes the functions give up, so the caller can fall back
+``\\p{…}`` categories and blocks, groups, alternation and quantifiers are
+understood; anything else (a block this module has no range for, nested
+negated subtraction) makes the functions give up, so the caller can fall back
 to a type placeholder.
 """
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass
+from functools import lru_cache
 
 _ESCAPES = {
     "d": "0",
@@ -85,6 +87,67 @@ _OUTSIDE = {
 
 class _UnsupportedError(Exception):
     pass
+
+
+# Unicode blocks beyond Basic Latin that turn up in ``\\p{Is…}``; Python has no
+# block table of its own.
+_BLOCKS = {
+    "IsLatin-1Supplement": (0x00A0, 0x00FF),
+    "IsLatinExtended-A": (0x0100, 0x017F),
+    "IsLatinExtended-B": (0x0180, 0x024F),
+    "IsIPAExtensions": (0x0250, 0x02AF),
+    "IsGreek": (0x0370, 0x03FF),
+    "IsCyrillic": (0x0400, 0x04FF),
+    "IsArmenian": (0x0530, 0x058F),
+    "IsHebrew": (0x0590, 0x05FF),
+    "IsArabic": (0x0600, 0x06FF),
+    "IsDevanagari": (0x0900, 0x097F),
+    "IsThai": (0x0E00, 0x0E7F),
+    "IsGeorgian": (0x10A0, 0x10FF),
+    "IsLatinExtendedAdditional": (0x1E00, 0x1EFF),
+    "IsGreekExtended": (0x1F00, 0x1FFF),
+    "IsGeneralPunctuation": (0x2000, 0x206F),
+    "IsCurrencySymbols": (0x20A0, 0x20CF),
+    "IsLetterlikeSymbols": (0x2100, 0x214F),
+    "IsNumberForms": (0x2150, 0x218F),
+    "IsArrows": (0x2190, 0x21FF),
+    "IsMathematicalOperators": (0x2200, 0x22FF),
+    "IsCJKSymbolsandPunctuation": (0x3000, 0x303F),
+    "IsHiragana": (0x3040, 0x309F),
+    "IsKatakana": (0x30A0, 0x30FF),
+    "IsCJKUnifiedIdeographs": (0x4E00, 0x9FFF),
+    "IsHangulSyllables": (0xAC00, 0xD7A3),
+}
+_CLASS_SIZE = 26
+
+
+@lru_cache(maxsize=256)
+def _unicode_members(name: str, negated: bool) -> str | None:
+    """Characters in (or, negated, outside) a category or block the tables above lack."""
+    if name in _BLOCKS:
+        lo, hi = _BLOCKS[name]
+        if negated:
+            return "a"
+        found = [
+            chr(c)
+            for c in range(lo, hi + 1)
+            if unicodedata.category(chr(c))[0] in "LNPS"
+        ][:_CLASS_SIZE]
+        return "".join(found) or None
+    if not (1 <= len(name) <= 2 and name[0] in "LMNPZSC"):
+        return None
+    if negated:
+        return next(
+            (c for c in "a0 -+_" if not unicodedata.category(c).startswith(name)), None
+        )
+    # Printable members only: a control or format character is nothing to show.
+    found = []
+    for code in range(0x20, 0x3100):
+        if unicodedata.category(chr(code)).startswith(name):
+            found.append(chr(code))
+            if len(found) == _CLASS_SIZE:
+                break
+    return "".join(found) or None
 
 
 # Longest sample worth producing; a pattern that needs more goes unsampled.
@@ -194,9 +257,12 @@ class _Parser:
             raise _UnsupportedError
         self.take()
         table = _OUTSIDE if negated else _CATEGORIES
-        if name not in table:
+        if name in table:
+            return table[name]
+        members = _unicode_members(name, negated)
+        if members is None:
             raise _UnsupportedError
-        return table[name]
+        return members
 
     def escape(self) -> _Node:
         ch = self.take()

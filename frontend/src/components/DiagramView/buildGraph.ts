@@ -29,6 +29,8 @@ import {
   type TypeResolver,
 } from "../../lib/assertions";
 import { effectiveAttributes, effectiveParticle, type ComplexResolver } from "../../lib/effectiveContent";
+import { wildcardNamespaceLabel } from "../../lib/attributeGroups";
+import type { ElementNodeAttribute } from "./ElementNode";
 
 export const NODE_WIDTH = 220;
 export const COMPOSITOR_WIDTH = 70;
@@ -92,14 +94,23 @@ function nextId(context: BuildContext): string {
   return `node-${context.idCounter}`;
 }
 
-function makeComplexResolver(typeIndex: Map<string, ComplexType>): ComplexResolver {
-  return (typeRef) => {
+function makeComplexResolver(
+  typeIndex: Map<string, ComplexType>,
+  model: SchemaModel,
+): ComplexResolver {
+  const resolver: ComplexResolver = (typeRef) => {
     if (!typeRef) return undefined;
     const direct = typeIndex.get(typeRef);
     if (direct) return direct;
     const local = typeRef.includes(":") ? typeRef.split(":").pop()! : typeRef;
     return typeIndex.get(local);
   };
+  // For the xs:anyAttribute a type ends up with (effectiveAttributes).
+  const groups = new Map(model.attribute_groups.map((g) => [g.name, g]));
+  resolver.attributeGroup = (ref) => groups.get(ref.includes(":") ? ref.split(":").pop()! : ref);
+  const namespaces = new Map(model.files.map((f) => [f.id, f.target_namespace]));
+  resolver.targetNamespace = (ref) => (ref ? namespaces.get(ref.file_id) : undefined);
+  return resolver;
 }
 
 function buildTypeIndex(model: SchemaModel): Map<string, ComplexType> {
@@ -184,9 +195,22 @@ function computeElementDisplay(
   // anonymous inline *or* named (FundsXML's `FXRate type="FXRateType"`, a
   // simpleContent extension carrying fromCcy/toCcy/mulDiv). Only drawing
   // them for inline types silently dropped every named-type attribute.
-  const attrs = resolvedComplex
-    ? effectiveAttributes(resolvedComplex, context.complexResolver).attributes
-    : [];
+  const effective = resolvedComplex
+    ? effectiveAttributes(resolvedComplex, context.complexResolver)
+    : null;
+  // An xs:anyAttribute goes last, as one more attribute row: "@* : ##other".
+  const attrs: ElementNodeAttribute[] = [
+    ...(effective?.attributes ?? []),
+    ...(effective?.completeAnyAttribute
+      ? [
+          {
+            id: `anyAttribute:${element.id}`,
+            name: "*",
+            type_name: wildcardNamespaceLabel(effective.completeAnyAttribute),
+          },
+        ]
+      : []),
+  ];
   const docFull = collectDocumentation(element) ?? collectDocumentation(target);
   const docLines = truncateDocLines(docFull);
   // Expanding reveals the effective (base-merged) particle as compositor /
@@ -549,7 +573,7 @@ export function buildDiagramGraph(
     elementIndex: buildElementIndex(model),
     pathIds: new Set(),
     assertionResolver: makeModelResolver(model),
-    complexResolver: makeComplexResolver(typeIndex),
+    complexResolver: makeComplexResolver(typeIndex, model),
   };
 
   let nextTopY = 0;

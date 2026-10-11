@@ -245,6 +245,8 @@ class AttributeDecl(BaseModel):
     default: str | None = None
     fixed: str | None = None
     form: Literal["qualified", "unqualified"] | None = None
+    # As on ElementDecl.
+    qualified: bool | None = None
     # As on ElementDecl: set on a local attribute only by XSD 1.1 ``targetNamespace``.
     target_namespace: str | None = None
     is_global: bool = False
@@ -331,6 +333,11 @@ class ElementDecl(BaseModel):
     block: list[str] = Field(default_factory=list)
     final: list[str] = Field(default_factory=list)
     form: Literal["qualified", "unqualified"] | None = None
+    # Whether a local declaration's name is in a namespace: its own ``form``,
+    # else the ``elementFormDefault`` / ``attributeFormDefault`` of the file
+    # that declares it (not the main file's). ``None`` for a global
+    # declaration and for a ``ref``, whose name is the global one's.
+    qualified: bool | None = None
     # The declaring file's namespace for a global declaration; for a local one
     # only an explicit XSD 1.1 ``targetNamespace`` attribute.
     target_namespace: str | None = None
@@ -514,6 +521,9 @@ class SourceFile(BaseModel):
     filename: str
     target_namespace: str | None = None
     relationship: Literal["main", "include", "import", "redefine", "override"] = "main"
+    # This file's own defaults; ``SchemaModel`` carries the main file's.
+    element_form_default: Literal["qualified", "unqualified"] = "unqualified"
+    attribute_form_default: Literal["qualified", "unqualified"] = "unqualified"
     content: str | None = None  # populated for text view; optional if too large
 
 
