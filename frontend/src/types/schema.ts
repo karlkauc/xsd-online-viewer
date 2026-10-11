@@ -12,17 +12,34 @@ export interface DocumentationFragment {
   lang: string | null;
   text: string;
   source: "documentation" | "comment";
+  // The ``source`` attribute of xs:documentation.
+  source_uri?: string | null;
+  // Set when the annotation is written on an inner element without a node of
+  // its own ("restriction", "extension", "field", "import other.xsd", …).
+  context?: string | null;
 }
 
 export interface AppInfo {
   source_uri: string | null;
   raw_xml: string;
+  context?: string | null;
+}
+
+// An attribute from a namespace other than XSD's (jaxb:…, sch:…, xml:lang).
+export interface ForeignAttribute {
+  namespace: string;
+  name: string;
+  qname: string;
+  value: string;
 }
 
 export interface Annotation {
   documentation: DocumentationFragment[];
   appinfo: AppInfo[];
   comments: string[];
+  // The annotated element's own ``id`` attribute and foreign attributes.
+  xml_id?: string | null;
+  attributes?: ForeignAttribute[];
 }
 
 export interface Diagnostic {
@@ -102,6 +119,8 @@ export interface IdentityConstraint {
   qname: QName;
   selector: string;
   fields: string[];
+  // Per field, the xpathDefaultNamespace in effect for it.
+  field_xpath_default_namespaces?: (string | null)[];
   refer: QName | null;
   refer_id: string | null;
   xpath_default_namespace: string | null;

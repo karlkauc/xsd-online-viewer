@@ -499,3 +499,55 @@ describe("DetailPanel schema details", () => {
     expect(screen.getByText(/image\/gif/)).toBeInTheDocument();
   });
 });
+
+describe("DetailPanel annotations", () => {
+  it("shows inner annotations with their context, the documentation source, id and foreign attributes", () => {
+    const annotated: ComplexType = {
+      id: "complexType:Annotated",
+      name: "Annotated",
+      anonymous: false,
+      abstract: false,
+      mixed: false,
+      content_kind: "empty",
+      derivation: "none",
+      base: null,
+      particle: null,
+      attributes: [],
+      attribute_group_refs: [],
+      simple_content_base: null,
+      simple_content_facets: [],
+      source_ref: null,
+      annotation: {
+        documentation: [
+          { lang: "en", text: "Own text", source: "documentation", source_uri: "https://example.com/doc" },
+          { lang: null, text: "Why extended", source: "documentation", context: "extension" },
+          { lang: null, text: "Script", source: "documentation", source_uri: "javascript:alert(1)" },
+        ],
+        appinfo: [],
+        comments: [],
+        xml_id: "annotated-type",
+        attributes: [
+          { namespace: "urn:jaxb", name: "class", qname: "jaxb:class", value: "AnnotatedBean" },
+        ],
+      },
+    };
+    act(() => {
+      useSelection
+        .getState()
+        .setSchema("ann", { ...smallModel, elements: [], simple_types: [], complex_types: [annotated] });
+      useSelection.getState().setSelected(annotated.id);
+    });
+    render(<DetailPanel />);
+
+    expect(screen.getByText("on extension")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "https://example.com/doc" })).toHaveAttribute(
+      "href",
+      "https://example.com/doc",
+    );
+    // Any other URI scheme is shown, never linked.
+    expect(screen.getByText("javascript:alert(1)").tagName).toBe("CODE");
+    expect(screen.getByText("annotated-type")).toBeInTheDocument();
+    expect(screen.getByText("jaxb:class")).toBeInTheDocument();
+    expect(screen.getByText("AnnotatedBean")).toBeInTheDocument();
+  });
+});

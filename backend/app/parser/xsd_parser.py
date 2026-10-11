@@ -47,6 +47,7 @@ from app.parser.model import (
     ElementDecl,
     Facet,
     FacetKind,
+    ForeignAttribute,
     Group,
     IdentityConstraint,
     IdentityConstraintKind,
@@ -183,6 +184,52 @@ def _prune_conditional(root: etree._Element) -> list[int]:
         lines.append(elem.sourceline or 0)
         parent.remove(elem)
     return lines
+
+
+# Elements whose xs:annotation is reported with the component they are part
+# of. Particles, facets, wildcards and nested declarations carry their own.
+_INNER_ANNOTATED: frozenset[str] = frozenset(
+    {
+        "simpleContent",
+        "complexContent",
+        "restriction",
+        "extension",
+        "list",
+        "union",
+        "selector",
+        "field",
+        "import",
+        "include",
+        "redefine",
+        "override",
+    }
+)
+
+
+def _foreign_attributes(elem: etree._Element) -> list[ForeignAttribute]:
+    """Attributes of ``elem`` in a namespace other than XSD's, vc:* aside."""
+    found: list[ForeignAttribute] = []
+    prefixes = {uri: prefix for prefix, uri in (elem.nsmap or {}).items() if prefix}
+    prefixes[XML_NS] = "xml"
+    for name, value in elem.attrib.items():
+        ns, local = _namespace_and_local(name)
+        if ns is None or ns in (XSD_NS, VC_NS):
+            continue
+        prefix = prefixes.get(ns)
+        found.append(
+            ForeignAttribute(
+                namespace=ns,
+                name=local,
+                qname=f"{prefix}:{local}" if prefix else local,
+                value=value,
+            )
+        )
+    return found
+
+
+def _xpath_default_namespace(elem: etree._Element, loaded: _LoadedFile) -> str | None:
+    """The xpathDefaultNamespace in effect on ``elem``: its own, else the file's."""
+    return _token(elem, "xpathDefaultNamespace") or _token(loaded.root, "xpathDefaultNamespace")
 
 
 # 1.1-only XSD elements used by the version-detection heuristic. Includes
@@ -707,14 +754,14 @@ class XsdParser:
     def parse(self) -> SchemaModel:
         """Build a :class:`SchemaModel` from the loaded XSD file set.
 
-        XSD-version inference is heuristic, in this order: any vc:*
-        attribute anywhere in any loaded file → ``"1.1"``; any 1.1-only
-        XSD element (xs:assert, xs:assertion, xs:alternative,
-        xs:openContent, xs:defaultOpenContent, xs:override,
-        xs:explicitTimezone) → ``"1.1"``; explicit ``version`` attribute
-        on the main ``xs:schema`` matching ``^1\\.1`` → ``"1.1"``;
-        otherwise ``"1.0"``. The viewer never silently upgrades to 1.1
-        when nothing identifies the schema as such.
+        XSD-version inference is heuristic: ``"1.1"`` when anything in any
+        loaded file exists in XSD 1.1 only — a vc:* attribute, an element
+        (xs:assert, xs:alternative, xs:openContent, xs:override, …), an
+        attribute (``inheritable``, ``notQName``, ``defaultAttributes``, a
+        local ``targetNamespace``, …), a built-in type (xs:dateTimeStamp, …),
+        several substitution-group heads, or an xs:all that 1.0 does not
+        allow (see ``_is_xsd_11``) — or when the main ``xs:schema`` carries
+        ``version="1.1…"``; otherwise ``"1.0"``.
         """
         main = self._load(self.inp.main_filename, self.inp.main_content, "main", None)
         if main is None:
@@ -1151,7 +1198,8 @@ class XsdParser:
             name = name or ""
             selector_elem = child.find(_xsd("selector"))
             selector = selector_elem.get("xpath", "") if selector_elem is not None else ""
-            fields = [f.get("xpath", "") for f in child.findall(_xsd("field"))]
+            field_elems = child.findall(_xsd("field"))
+            fields = [f.get("xpath", "") for f in field_elems]
             refer = _token(child, "refer")
             qname = self._compose_qname(loaded, name)
             identifier = self._make_id("identityConstraint", qname)
@@ -1163,16 +1211,17 @@ class XsdParser:
                     qname=qname,
                     selector=selector,
                     fields=fields,
+                    field_xpath_default_namespaces=[
+                        _xpath_default_namespace(f, loaded) for f in field_elems
+                    ],
                     refer=refer,
                     refer_id=(
                         self._resolve_ref_id("identityConstraint", child, refer)
                         if refer
                         else None
                     ),
-                    xpath_default_namespace=(
-                        selector_elem.get("xpathDefaultNamespace")
-                        if selector_elem is not None
-                        else None
+                    xpath_default_namespace=_xpath_default_namespace(
+                        selector_elem if selector_elem is not None else child, loaded
                     ),
                     annotation=self._collect_annotation(child),
                     source_ref=SourceRef(file_id=loaded.file_id, line=child.sourceline),
@@ -1206,7 +1255,7 @@ class XsdParser:
             type_name=_token(elem, "type"),
             type_inline_simple=type_inline_simple,
             type_inline_complex=type_inline_complex,
-            xpath_default_namespace=elem.get("xpathDefaultNamespace"),
+            xpath_default_namespace=_xpath_default_namespace(elem, loaded),
             annotation=self._collect_annotation(elem),
             source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
             version_constraints=_vc_attrs(elem),
@@ -1678,7 +1727,7 @@ class XsdParser:
         """
         return Assertion(
             test=elem.get("test", ""),
-            xpath_default_namespace=elem.get("xpathDefaultNamespace"),
+            xpath_default_namespace=_xpath_default_namespace(elem, loaded),
             annotation=self._collect_annotation(elem),
             source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
             version_constraints=_vc_attrs(elem),
@@ -1704,36 +1753,66 @@ class XsdParser:
         return facets
 
     def _collect_annotation(self, elem: etree._Element) -> Annotation | None:
+        """Everything written about ``elem`` that is not part of its meaning.
+
+        Its own xs:annotation children and the comments right before it, the
+        annotations of the inner elements that have no node of their own in
+        the model (``_INNER_ANNOTATED``; tagged with a ``context``), and its
+        ``id`` and foreign attributes.
+        """
         documentation: list[DocumentationFragment] = []
         appinfo: list[AppInfo] = []
-        for child in elem.findall(_xsd("annotation")):
-            for sub in child:
-                if not isinstance(sub.tag, str):
+
+        def collect(owner: etree._Element, context: str | None) -> None:
+            for child in owner:
+                if not isinstance(child.tag, str):
                     continue
-                _, local = _namespace_and_local(sub.tag)
-                if local == "documentation":
-                    documentation.append(
-                        DocumentationFragment(
-                            lang=sub.get(f"{{{XML_NS}}}lang"),
-                            text=_text(sub).strip(),
+                ns, local = _namespace_and_local(child.tag)
+                if ns != XSD_NS:
+                    continue
+                if local in _INNER_ANNOTATED:
+                    # A reference says which file, not just "import".
+                    target = _token(child, "schemaLocation") or _token(child, "namespace")
+                    collect(child, f"{local} {target}" if target else local)
+                if local != "annotation":
+                    continue
+                for sub in child:
+                    if not isinstance(sub.tag, str):
+                        continue
+                    _, sub_local = _namespace_and_local(sub.tag)
+                    if sub_local == "documentation":
+                        documentation.append(
+                            DocumentationFragment(
+                                lang=sub.get(f"{{{XML_NS}}}lang"),
+                                text=_text(sub).strip(),
+                                source_uri=_token(sub, "source"),
+                                context=context,
+                            )
                         )
-                    )
-                elif local == "appinfo":
-                    appinfo.append(
-                        AppInfo(
-                            source_uri=sub.get("source"),
-                            raw_xml=etree.tostring(sub, encoding="unicode").strip(),
+                    elif sub_local == "appinfo":
+                        appinfo.append(
+                            AppInfo(
+                                source_uri=sub.get("source"),
+                                raw_xml=etree.tostring(sub, encoding="unicode").strip(),
+                                context=context,
+                            )
                         )
-                    )
+
+        collect(elem, None)
         comments: list[str] = []
         prev = elem.getprevious()
         while prev is not None and isinstance(prev, etree._Comment):
             comments.append(prev.text or "")
             prev = prev.getprevious()
         comments.reverse()
-        if not documentation and not appinfo and not comments:
-            return None
-        return Annotation(documentation=documentation, appinfo=appinfo, comments=comments)
+        annotation = Annotation(
+            documentation=documentation,
+            appinfo=appinfo,
+            comments=comments,
+            xml_id=_token(elem, "id"),
+            attributes=_foreign_attributes(elem),
+        )
+        return None if annotation.is_empty else annotation
 
     # ---- identifier helpers -------------------------------------------
 
@@ -1778,6 +1857,58 @@ def _collect_namespaces(files: list[_LoadedFile]) -> dict[str, str]:
     return merged
 
 
+_XSD_1_1_ONLY_TYPES: frozenset[str] = frozenset(
+    {"dateTimeStamp", "dayTimeDuration", "yearMonthDuration", "anyAtomicType", "error"}
+)
+# Attributes XSD 1.0 does not have, by the element they are on.
+_XSD_1_1_ONLY_ATTRS: dict[str, tuple[str, ...]] = {
+    "schema": ("defaultAttributes", "xpathDefaultNamespace"),
+    "complexType": ("defaultAttributesApply",),
+    "attribute": ("inheritable",),
+    "any": ("notNamespace", "notQName"),
+    "anyAttribute": ("notNamespace", "notQName"),
+}
+_TYPE_REFERENCES = ("type", "base", "itemType", "memberTypes")
+
+
+def _is_xsd_11(elem: etree._Element) -> bool:
+    """Whether ``elem`` uses something only XSD 1.1 has."""
+    if elem.tag in _XSD_1_1_ONLY_TAGS:
+        return True
+    ns, local = _namespace_and_local(elem.tag)
+    if ns != XSD_NS:
+        return False
+    attrib = elem.attrib
+    if any(name in attrib for name in _XSD_1_1_ONLY_ATTRS.get(local, ())):
+        return True
+    if local in ("element", "attribute"):
+        parent = elem.getparent()
+        is_global = parent is not None and parent.tag in (_xsd("schema"), _xsd("override"))
+        if "targetNamespace" in attrib and not is_global:
+            return True
+        if len((attrib.get("substitutionGroup") or "").split()) > 1:
+            return True
+    if local == "all":
+        # 1.0: only elements that occur at most once.
+        for child in elem:
+            if child.tag in (_xsd("any"), _xsd("group")):
+                return True
+            if child.tag == _xsd("element") and (child.get("maxOccurs") or "1").strip() not in (
+                "0",
+                "1",
+            ):
+                return True
+    nsmap = elem.nsmap or {}
+    for name in _TYPE_REFERENCES:
+        for qname in (attrib.get(name) or "").split():
+            prefix, sep, type_local = qname.rpartition(":")
+            if type_local in _XSD_1_1_ONLY_TYPES and (
+                nsmap.get(prefix) if sep else nsmap.get(None)
+            ) == XSD_NS:
+                return True
+    return False
+
+
 def _detect_xsd_version(files: list[_LoadedFile], main: _LoadedFile) -> XsdVersion:
     """Heuristic detection — see ``XsdParser.parse`` for the full rule chain."""
     vc_prefix = f"{{{VC_NS}}}"
@@ -1785,7 +1916,7 @@ def _detect_xsd_version(files: list[_LoadedFile], main: _LoadedFile) -> XsdVersi
         for elem in loaded.root.iter():
             if not isinstance(elem.tag, str):
                 continue
-            if elem.tag in _XSD_1_1_ONLY_TAGS:
+            if _is_xsd_11(elem):
                 return "1.1"
             for attr_name in elem.attrib:
                 if isinstance(attr_name, str) and attr_name.startswith(vc_prefix):

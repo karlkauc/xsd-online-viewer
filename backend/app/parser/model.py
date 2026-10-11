@@ -37,21 +37,45 @@ class DocumentationFragment(BaseModel):
     lang: str | None = None
     text: str
     source: Literal["documentation", "comment"] = "documentation"
+    # The ``source`` attribute of xs:documentation: a URI to read more at.
+    source_uri: str | None = None
+    # None for an annotation of the component itself; otherwise the inner
+    # element it is written on ("restriction", "extension", "field",
+    # "import other.xsd", …), which has no node of its own in the model.
+    context: str | None = None
 
 
 class AppInfo(BaseModel):
     source_uri: str | None = None
     raw_xml: str
+    context: str | None = None  # as on DocumentationFragment
+
+
+class ForeignAttribute(BaseModel):
+    """An attribute from a namespace other than XSD's, which the schema for
+    schemas allows on every element and a processor ignores (``jaxb:…``,
+    ``sch:…``, ``xml:lang``). ``vc:*`` is not among them: see ``VersionConstraints``."""
+
+    namespace: str
+    name: str  # local name
+    qname: str  # as written, prefix included
+    value: str
 
 
 class Annotation(BaseModel):
     documentation: list[DocumentationFragment] = Field(default_factory=list)
     appinfo: list[AppInfo] = Field(default_factory=list)
     comments: list[str] = Field(default_factory=list)
+    # The annotated element's own ``id`` attribute and foreign attributes; XSD
+    # counts the latter among a component's annotations.
+    xml_id: str | None = None
+    attributes: list[ForeignAttribute] = Field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
-        return not (self.documentation or self.appinfo or self.comments)
+        return not (
+            self.documentation or self.appinfo or self.comments or self.xml_id or self.attributes
+        )
 
 
 class Diagnostic(BaseModel):
@@ -127,8 +151,12 @@ class IdentityConstraint(BaseModel):
     qname: QName
     selector: str
     fields: list[str] = Field(default_factory=list)
+    # Per field, the xpathDefaultNamespace in effect for it (its own, else as
+    # for the selector). Same length as ``fields``.
+    field_xpath_default_namespaces: list[str | None] = Field(default_factory=list)
     refer: QName | None = None
     refer_id: str | None = None
+    # In effect for the selector: its own, else the declaring file's.
     xpath_default_namespace: str | None = None
     annotation: Annotation | None = None
     source_ref: SourceRef | None = None

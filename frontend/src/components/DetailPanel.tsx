@@ -785,24 +785,27 @@ function renderAnnotation(node: SchemaNode | { annotation: Annotation | null }) 
   const annotation = "annotation" in node ? node.annotation : null;
   if (!annotation) return null;
   const { documentation, appinfo, comments } = annotation;
-  if (!documentation.length && !appinfo.length && !comments.length) return null;
+  const foreign = annotation.attributes ?? [];
+  const hasText = documentation.length > 0 || appinfo.length > 0 || comments.length > 0;
+  if (!hasText && !annotation.xml_id && !foreign.length) return null;
   return (
     <section>
-      <SectionHead title="Documentation" />
+      <SectionHead title={hasText ? "Documentation" : "Schema attributes"} />
       <div className="space-y-3">
         {documentation.map((doc, i) => (
           <div
             key={`doc-${i}`}
             className="border-l-2 border-slate-200 dark:border-slate-800 pl-3 py-0.5"
           >
-            {doc.lang && (
+            {(doc.lang || doc.context) && (
               <span className="inline-block mb-1 text-[10px] uppercase tracking-wide font-semibold text-slate-400">
-                {doc.lang}
+                {[doc.context && `on ${doc.context}`, doc.lang].filter(Boolean).join(" · ")}
               </span>
             )}
             <p className="text-[13px] leading-relaxed whitespace-pre-wrap text-slate-700 dark:text-slate-200">
               {doc.text}
             </p>
+            {doc.source_uri && <DocumentationSource uri={doc.source_uri} />}
           </div>
         ))}
         {comments.length > 0 && (
@@ -821,7 +824,7 @@ function renderAnnotation(node: SchemaNode | { annotation: Annotation | null }) 
           <div key={`ai-${i}`}>
             <div className="flex items-center gap-1.5 mb-1">
               <span className="text-[10px] uppercase tracking-wide font-semibold text-amber-700 dark:text-amber-400">
-                appinfo
+                appinfo{a.context ? ` on ${a.context}` : ""}
               </span>
               {a.source_uri && (
                 <code className="text-[10px] font-mono text-slate-500 dark:text-slate-400 truncate">
@@ -834,8 +837,37 @@ function renderAnnotation(node: SchemaNode | { annotation: Annotation | null }) 
             </pre>
           </div>
         ))}
+        {(annotation.xml_id || foreign.length > 0) && (
+          <dl className="space-y-1 text-sm">
+            {annotation.xml_id && (
+              <DataRow label="id">
+                <code className="font-mono text-[12px] break-all">{annotation.xml_id}</code>
+              </DataRow>
+            )}
+            {foreign.map((attr) => (
+              <DataRow key={`${attr.namespace}#${attr.name}`} label={attr.qname}>
+                <code className="font-mono text-[12px] break-all" title={attr.namespace}>
+                  {attr.value}
+                </code>
+              </DataRow>
+            ))}
+          </dl>
+        )}
       </div>
     </section>
+  );
+}
+
+// The ``source`` of an xs:documentation: a link only when it is a web address —
+// the attribute is any URI the schema author wrote.
+function DocumentationSource({ uri }: { uri: string }) {
+  const className = "mt-1 block text-[11px] font-mono break-all text-slate-500 dark:text-slate-400";
+  return /^https?:\/\//i.test(uri) ? (
+    <a href={uri} target="_blank" rel="noopener noreferrer" className={`${className} underline`}>
+      {uri}
+    </a>
+  ) : (
+    <code className={className}>{uri}</code>
   );
 }
 

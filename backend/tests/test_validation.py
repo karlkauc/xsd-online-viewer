@@ -408,19 +408,23 @@ def test_a_document_that_is_not_well_formed_is_reported_as_such_under_xsd_11() -
 
 
 def test_a_schema_the_version_heuristic_takes_for_1_0_still_reaches_the_1_1_validator() -> None:
-    """xs:dateTimeStamp is a 1.1 type and nothing else here is: libxml2 refuses the
-    schema, and "the schema itself is not valid XSD" would be wrong."""
+    """An element next to a wildcard that also matches it breaks 1.0's unique particle
+    attribution and is fine in 1.1, where the element wins. Nothing in the markup says
+    so: libxml2 refuses the schema, and "the schema itself is not valid XSD" would be wrong."""
     model = parse_single(
-        f'<xs:schema {_XS}><xs:element name="At" type="xs:dateTimeStamp"/></xs:schema>'.encode(),
-        "at.xsd",
+        f'<xs:schema {_XS}><xs:element name="R"><xs:complexType><xs:sequence>'
+        '<xs:element name="a" type="xs:int" minOccurs="0"/>'
+        '<xs:any processContents="lax" minOccurs="0"/>'
+        "</xs:sequence></xs:complexType></xs:element></xs:schema>".encode(),
+        "weak-wildcard.xsd",
     )
     assert model.xsd_version != "1.1"
 
-    valid = validate_xml(model, b"<At>2024-01-01T00:00:00Z</At>")
-    invalid = validate_xml(model, b"<At>2024-01-01T00:00:00</At>")
+    valid = validate_xml(model, b"<R><a>1</a><other/></R>")
+    invalid = validate_xml(model, b"<R><a>x</a></R>")
 
     assert valid.is_valid and valid.validator == "xmlschema"
-    assert not invalid.is_valid and "time zone" in invalid.errors[0].message
+    assert not invalid.is_valid and invalid.errors[0].line == 3
 
 
 def test_a_broken_1_0_schema_keeps_libxml2s_complaint() -> None:

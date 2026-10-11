@@ -1481,3 +1481,132 @@ class TestSchemaDefaultsPerFile:
             main_filename="main.xsd",
         )
         assert "lang=" in generate_sample(model, _find_element(model, "Doc"))
+
+
+class TestXsd11Detection:
+    """A schema is 1.1 as soon as it uses anything 1.0 does not have."""
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            '<xs:element name="a" type="xs:dateTimeStamp"/>',
+            '<xs:simpleType name="t"><xs:restriction base="xs:dayTimeDuration"/></xs:simpleType>',
+            '<xs:simpleType name="t"><xs:union memberTypes="xs:int xs:yearMonthDuration"/>'
+            "</xs:simpleType>",
+            '<xs:attribute name="a" inheritable="true"/>',
+            '<xs:complexType name="t"><xs:sequence><xs:any notQName="##defined"/></xs:sequence>'
+            "</xs:complexType>",
+            '<xs:complexType name="t"><xs:anyAttribute notNamespace="urn:x"/></xs:complexType>',
+            '<xs:complexType name="t" defaultAttributesApply="false"/>',
+            '<xs:element name="a" substitutionGroup="b c"/>',
+            '<xs:complexType name="t"><xs:all><xs:element name="a" maxOccurs="3"/></xs:all>'
+            "</xs:complexType>",
+            '<xs:complexType name="t"><xs:all><xs:any/></xs:all></xs:complexType>',
+            '<xs:complexType name="t"><xs:sequence>'
+            '<xs:element name="a" targetNamespace="urn:other"/></xs:sequence></xs:complexType>',
+        ],
+    )
+    def test_features_without_an_element_of_their_own(self, body: str) -> None:
+        xsd = f'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">{body}</xs:schema>'
+        assert parse_single(xsd.encode(), "v.xsd").xsd_version == "1.1"
+
+    def test_a_schema_attribute(self) -> None:
+        xsd = (
+            '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+            'xpathDefaultNamespace="##targetNamespace"/>'
+        )
+        assert parse_single(xsd.encode(), "v.xsd").xsd_version == "1.1"
+
+    def test_a_type_of_that_name_in_another_namespace_is_not_a_reason(self) -> None:
+        xsd = (
+            '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:t="urn:t" '
+            'targetNamespace="urn:t"><xs:simpleType name="error"><xs:restriction base="xs:string"/>'
+            '</xs:simpleType><xs:element name="a" type="t:error"/>'
+            '<xs:complexType name="c"><xs:all><xs:element name="b" minOccurs="0"/></xs:all>'
+            "</xs:complexType></xs:schema>"
+        )
+        assert parse_single(xsd.encode(), "v.xsd").xsd_version == "1.0"
+
+
+class TestInnerAnnotations:
+    _XSD = b"""<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+        xmlns:jaxb="https://jakarta.ee/xml/ns/jaxb" xpathDefaultNamespace="urn:schema">
+  <xs:import namespace="urn:other">
+    <xs:annotation><xs:documentation>Why we import it</xs:documentation></xs:annotation>
+  </xs:import>
+  <xs:simpleType name="Code" id="code-type" jaxb:class="CodeValue">
+    <xs:annotation>
+      <xs:documentation source="https://example.com/codes" xml:lang="en">A code</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:annotation><xs:documentation>Why restricted</xs:documentation>
+        <xs:appinfo source="urn:tool">hint</xs:appinfo></xs:annotation>
+      <xs:maxLength value="3"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="Ext">
+    <xs:complexContent>
+      <xs:annotation><xs:documentation>About the content</xs:documentation></xs:annotation>
+      <xs:extension base="Base">
+        <xs:annotation><xs:documentation>About the extension</xs:documentation></xs:annotation>
+        <xs:sequence>
+          <xs:element name="inner"><xs:simpleType><xs:restriction base="xs:string">
+            <xs:annotation><xs:documentation>Belongs to inner</xs:documentation></xs:annotation>
+          </xs:restriction></xs:simpleType></xs:element>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="Base"/>
+  <xs:element name="Doc" type="Ext">
+    <xs:key name="k">
+      <xs:selector xpath="inner"><xs:annotation>
+        <xs:documentation>Which rows</xs:documentation></xs:annotation></xs:selector>
+      <xs:field xpath="@a"/>
+      <xs:field xpath="@b" xpathDefaultNamespace="urn:field"/>
+    </xs:key>
+  </xs:element>
+</xs:schema>"""
+
+    def test_annotations_of_inner_elements_are_kept_with_their_context(self) -> None:
+        model = parse_single(self._XSD, "inner.xsd")
+        code = _find_simple(model, "Code").annotation
+        assert [(d.text, d.context) for d in code.documentation] == [
+            ("A code", None),
+            ("Why restricted", "restriction"),
+        ]
+        assert [(a.source_uri, a.context) for a in code.appinfo] == [("urn:tool", "restriction")]
+        ext = _find_complex(model, "Ext").annotation
+        # Not what belongs to the element declared further inside.
+        assert [(d.text, d.context) for d in ext.documentation] == [
+            ("About the content", "complexContent"),
+            ("About the extension", "extension"),
+        ]
+        key = _find_element(model, "Doc").identity_constraints[0]
+        assert [(d.text, d.context) for d in key.annotation.documentation] == [
+            ("Which rows", "selector")
+        ]
+        assert [(d.text, d.context) for d in model.annotation.documentation] == [
+            ("Why we import it", "import urn:other")
+        ]
+
+    def test_documentation_source_id_and_foreign_attributes(self) -> None:
+        model = parse_single(self._XSD, "inner.xsd")
+        code = _find_simple(model, "Code").annotation
+        assert code.documentation[0].source_uri == "https://example.com/codes"
+        assert code.xml_id == "code-type"
+        (attribute,) = code.attributes
+        assert (attribute.qname, attribute.namespace, attribute.name, attribute.value) == (
+            "jaxb:class",
+            "https://jakarta.ee/xml/ns/jaxb",
+            "class",
+            "CodeValue",
+        )
+        # A component with nothing written about it still has no annotation.
+        assert _find_complex(model, "Base").annotation is None
+
+    def test_xpath_default_namespace_falls_back_to_the_files(self) -> None:
+        model = parse_single(self._XSD, "inner.xsd")
+        key = _find_element(model, "Doc").identity_constraints[0]
+        assert key.xpath_default_namespace == "urn:schema"
+        assert key.field_xpath_default_namespaces == ["urn:schema", "urn:field"]

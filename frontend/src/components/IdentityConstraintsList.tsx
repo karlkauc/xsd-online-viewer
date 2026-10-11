@@ -101,6 +101,14 @@ function ConstraintCard({
         {fields.map((tokens, i) => (
           <PathRow key={i} label="field">
             <ConstraintPath tokens={tokens} setSelected={setSelected} />
+            {fieldNamespace(constraint, i) && (
+              <span
+                className="font-mono text-[10px] text-teal-700 dark:text-teal-300"
+                title={`xpathDefaultNamespace: ${fieldNamespace(constraint, i)}`}
+              >
+                ns: {fieldNamespace(constraint, i)}
+              </span>
+            )}
           </PathRow>
         ))}
         {constraint.kind === "keyref" && (
@@ -131,6 +139,12 @@ function ConstraintCard({
       ))}
     </div>
   );
+}
+
+// A field's xpathDefaultNamespace, when it is not the selector's (shown once below).
+function fieldNamespace(constraint: IdentityConstraint, index: number): string | null {
+  const own = constraint.field_xpath_default_namespaces?.[index] ?? null;
+  return own && own !== constraint.xpath_default_namespace ? own : null;
 }
 
 function PathRow({ label, children }: { label: string; children: React.ReactNode }) {

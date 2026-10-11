@@ -90,8 +90,10 @@ cached and a soft reload can keep showing the old UI.
   `any_attribute` (`ComplexType` / `AttributeGroup`), `SchemaModel.redefines`,
   `block` / `final`, `ElementDecl.substitution_groups`, the `wildcard_not_*`
   particle fields, the schema-level `annotation`, `schema_version` and
-  `notations`, `ComplexType.default_attributes`, `OpenContent.origin` and
-  `OverrideReplacement.original_source_ref`.
+  `notations`, `ComplexType.default_attributes`, `OpenContent.origin`,
+  `OverrideReplacement.original_source_ref`, the `Annotation` extras (`xml_id`,
+  foreign `attributes`, `context` / `source_uri` on its entries) and
+  `IdentityConstraint.field_xpath_default_namespaces`.
 - **XSD semantics are applied, not just shown**: `xs:redefine`, `xs:override`,
   `vc:*` conditional inclusion (as an XSD 1.1 processor) and the per-file
   `defaultAttributes` / `xs:defaultOpenContent`. The model holds the effective

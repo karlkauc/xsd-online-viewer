@@ -188,6 +188,14 @@ complex type also gets what its own file's `xs:schema` gives it:
 `defaultAttributesApply="false"`) and, without an `xs:openContent` of its own,
 the file's `xs:defaultOpenContent` (`OpenContent.origin == "default"`).
 
+`_collect_annotation` gathers everything written about a component that is
+not part of its meaning: its `xs:annotation` and leading comments, the
+annotations of inner elements that have no node of their own (`restriction`,
+`extension`, `simpleContent`, `complexContent`, `list`, `union`, `selector`,
+`field`, and on the schema itself `import` / `include` / `redefine` /
+`override`; each entry carries that element as `context`), and the element's
+`id` and foreign-namespace attributes.
+
 Five post-passes run after the walk, all over the already-built `SchemaModel`
 rather than during parsing (so they can see declarations regardless of
 document order or which file they came from), in this order:
