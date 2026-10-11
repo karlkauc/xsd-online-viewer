@@ -123,6 +123,11 @@ export interface IdentityConstraint {
   field_xpath_default_namespaces?: (string | null)[];
   refer: QName | null;
   refer_id: string | null;
+  // XSD 1.1 `<xs:key ref="…"/>`: the QName as written and the id of the
+  // constraint it reuses (null when not found). Selector, fields and `refer`
+  // are then the definition's.
+  ref?: QName | null;
+  ref_id?: string | null;
   xpath_default_namespace: string | null;
   annotation: Annotation | null;
   source_ref: SourceRef | null;

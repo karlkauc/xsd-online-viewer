@@ -331,3 +331,46 @@ describe("IdentityConstraintsList", () => {
     expect(screen.getByRole("button", { name: "tns:Edition" })).toBeInTheDocument();
   });
 });
+
+describe("IdentityConstraintsList constraint references (XSD 1.1)", () => {
+  it("links a constraint used by reference to the element that declares it", async () => {
+    const setSelected = vi.fn();
+    const use = makeConstraint({
+      id: `${bookKeyConstraint.id}~ref1`,
+      kind: "key",
+      name: bookKeyConstraint.name,
+      selector: bookKeyConstraint.selector,
+      fields: bookKeyConstraint.fields,
+      ref: `tns:${bookKeyConstraint.name}`,
+      ref_id: bookKeyConstraint.id,
+    });
+    render(
+      <IdentityConstraintsList
+        constraints={[use]}
+        host={libraryElement}
+        index={index}
+        indexById={indexById}
+        constraintsById={constraintsById}
+        setSelected={setSelected}
+      />,
+    );
+    expect(screen.getByText("declared on")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: `⚿ ${bookKeyConstraint.name} →` }));
+    expect(setSelected).toHaveBeenCalledWith(constraintsById.get(bookKeyConstraint.id)!.hostId);
+  });
+
+  it("says so when the referenced constraint is not in the schema", () => {
+    const use = makeConstraint({ selector: "", fields: [], ref: "tns:gone", ref_id: null });
+    render(
+      <IdentityConstraintsList
+        constraints={[use]}
+        host={libraryElement}
+        index={index}
+        indexById={indexById}
+        constraintsById={constraintsById}
+        setSelected={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("tns:gone (not found)")).toBeInTheDocument();
+  });
+});

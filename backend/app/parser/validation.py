@@ -706,6 +706,13 @@ def _run_worker(files: _Materialised, pretty: bytes) -> list[dict]:
         ) from exc
     if reply["status"] == "unavailable":
         raise _Xsd11UnavailableError(reply["message"])
+    if reply["status"] == "validator-error":
+        logger.warning("xsd11 validator failed: %s", reply["message"])
+        detail = str(reply["message"]).replace(f"{files.root}/", "")
+        raise ValidationSetupError(
+            "the XSD 1.1 validator failed on this schema and could not check the document "
+            f"({detail}); that is a defect of the validator, not a finding about the document"
+        )
     if reply["status"] == "schema-error":
         where = files.names_by_path.get(str(reply.get("file") or "").removeprefix("file://"), "")
         if reply.get("line"):

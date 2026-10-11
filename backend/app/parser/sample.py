@@ -2342,7 +2342,8 @@ def _resolve_keyref(
         if not _in_tree(node, root) or not (node is scope or any(a is scope for a in node.iterancestors())):
             continue
         for key in declaration.identity_constraints:
-            if key.id != constraint.refer_id:
+            # The key itself, or the same key used through a reference (XSD 1.1).
+            if constraint.refer_id not in (key.id, key.ref_id):
                 continue
             for target in _select(ctx, key, node):
                 hits = _fields(ctx, key, target)

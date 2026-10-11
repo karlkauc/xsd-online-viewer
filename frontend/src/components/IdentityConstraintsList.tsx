@@ -95,6 +95,15 @@ function ConstraintCard({
         )}
       </div>
       <div className="text-[11.5px] space-y-1">
+        {constraint.ref && (
+          <PathRow label="declared on">
+            <DefinitionButton
+              constraint={constraint}
+              constraintsById={constraintsById}
+              setSelected={setSelected}
+            />
+          </PathRow>
+        )}
         <PathRow label="selector">
           <ConstraintPath tokens={selector} setSelected={setSelected} />
         </PathRow>
@@ -182,6 +191,43 @@ interface ReferButtonProps {
 // (ContentModelView/IdentityConstraintsTable.tsx) so both surfaces stay in
 // sync — including the focus-visible ring, which is easy to drop when
 // copy-pasted by hand.
+// For a constraint used by reference (XSD 1.1 `<xs:key ref="…"/>`): where the
+// constraint it reuses is declared.
+function DefinitionButton({
+  constraint,
+  constraintsById,
+  setSelected,
+}: {
+  constraint: IdentityConstraint;
+  constraintsById: Map<string, { constraint: IdentityConstraint; hostId: string }>;
+  setSelected: SetSelected;
+}) {
+  const definition = constraint.ref_id ? constraintsById.get(constraint.ref_id) : undefined;
+  if (!definition) {
+    return (
+      <code
+        className="font-mono text-slate-500 dark:text-slate-400"
+        title="the referenced constraint was not found in this schema"
+      >
+        {constraint.ref} (not found)
+      </code>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="font-mono text-teal-700 dark:text-teal-300 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+      title={`Used by reference (${constraint.ref}) — go to the element that declares it`}
+      onClick={(event) => {
+        event.stopPropagation();
+        setSelected(definition.hostId);
+      }}
+    >
+      ⚿ {definition.constraint.name} →
+    </button>
+  );
+}
+
 export function ReferButton({ constraint, referTarget, setSelected }: ReferButtonProps) {
   if (!referTarget) {
     return (

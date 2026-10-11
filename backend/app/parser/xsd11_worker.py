@@ -15,6 +15,7 @@ Protocol: a JSON request on stdin, a JSON reply on stdout.
     {"status": "ok", "errors": [{"line", "message", "path", "type_name", "declaration"}, ...]}
     {"status": "schema-error", "message": text, "file": path | null, "line": n | null}
     {"status": "unavailable", "message": text}
+    {"status": "validator-error", "message": text}   (xmlschema itself failed)
 """
 
 from __future__ import annotations
@@ -102,7 +103,13 @@ def run(request: dict) -> dict:
 
     parser = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False, huge_tree=False)
     tree = etree.parse(BytesIO(request["xml"].encode("utf-8")), parser)
-    return {"status": "ok", "errors": [_error(e) for e in schema.iter_errors(tree)]}
+    try:
+        return {"status": "ok", "errors": [_error(e) for e in schema.iter_errors(tree)]}
+    except (MemoryError, RecursionError):
+        raise  # a limit, which the caller reports as such
+    except Exception as exc:  # noqa: BLE001 - a defect in the validator, whatever it raises
+        # E.g. a KeyError for an xs:keyref used by reference (xmlschema 4.1).
+        return {"status": "validator-error", "message": f"{type(exc).__name__}: {exc}"[:300]}
 
 
 if __name__ == "__main__":

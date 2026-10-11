@@ -29,7 +29,7 @@ from app.parser.errors import (
     no_xsd_in_zip_message,
     not_a_schema_message,
 )
-from app.parser.identity import link_keyrefs
+from app.parser.identity import link_keyrefs, resolve_constraint_refs
 from app.parser.idroles import apply_id_roles
 from app.parser.model import (
     XSD_NS,
@@ -828,6 +828,7 @@ class XsdParser:
         self._process_redefines(model)
         self._process_overrides(model)
         self._inherit_open_content(model)
+        resolve_constraint_refs(model, self.state.diagnostics)
         link_keyrefs(model, self.state.diagnostics)
         apply_id_roles(model)
 
@@ -1223,7 +1224,12 @@ class XsdParser:
             fields = [f.get("xpath", "") for f in field_elems]
             refer = _token(child, "refer")
             qname = self._compose_qname(loaded, name)
-            identifier = self._make_id("identityConstraint", qname)
+            # A reference is a second use of the definition's name, so it
+            # needs an id of its own (``~`` cannot occur in an XSD name).
+            is_ref = bool(ref) and not child.get("name")
+            identifier = self._make_id(
+                "identityConstraint", f"{qname}~ref{self.state.next_anon()}" if is_ref else qname
+            )
             constraints.append(
                 IdentityConstraint(
                     id=identifier,
@@ -1240,6 +1246,10 @@ class XsdParser:
                         self._resolve_ref_id("identityConstraint", child, refer)
                         if refer
                         else None
+                    ),
+                    ref=ref if is_ref else None,
+                    ref_id=(
+                        self._resolve_ref_id("identityConstraint", child, ref) if is_ref else None
                     ),
                     xpath_default_namespace=_xpath_default_namespace(
                         selector_elem if selector_elem is not None else child, loaded
@@ -1910,6 +1920,8 @@ def _is_xsd_11(elem: etree._Element) -> bool:
             return True
         if len((attrib.get("substitutionGroup") or "").split()) > 1:
             return True
+    if local in ("key", "keyref", "unique") and "ref" in attrib:
+        return True  # a constraint declared elsewhere, used once more
     if local == "all":
         # 1.0: only elements that occur at most once.
         for child in elem:

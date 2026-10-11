@@ -536,3 +536,31 @@ def test_without_the_xsd_11_validator_the_old_explanation_stays(monkeypatch: pyt
 
     with pytest.raises(ValidationSetupError, match="libxml2, which implements XSD 1.0 only"):
         validate_xml(model, b"<Range><Min>1</Min><Max>2</Max></Range>")
+
+
+def test_a_failure_inside_the_xsd_11_validator_is_not_blamed_on_the_document() -> None:
+    """xmlschema 4.1 raises a KeyError on a keyref used by reference next to its key."""
+    xsd = (
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:t="urn:t" '
+        b'targetNamespace="urn:t" elementFormDefault="qualified">'
+        b'<xs:complexType name="List"><xs:sequence>'
+        b'<xs:element name="item" maxOccurs="unbounded"><xs:complexType>'
+        b'<xs:attribute name="id" type="xs:string"/><xs:attribute name="to" type="xs:string"/>'
+        b"</xs:complexType></xs:element></xs:sequence></xs:complexType>"
+        b'<xs:element name="A" type="t:List">'
+        b'<xs:key name="k"><xs:selector xpath="t:item"/><xs:field xpath="@id"/></xs:key>'
+        b'<xs:keyref name="r" refer="t:k"><xs:selector xpath="t:item"/><xs:field xpath="@to"/>'
+        b"</xs:keyref></xs:element>"
+        b'<xs:element name="B" type="t:List"><xs:key ref="t:k"/><xs:keyref ref="t:r"/></xs:element>'
+        b"</xs:schema>"
+    )
+    xml = b'<B xmlns="urn:t"><item id="a" to="a"/></B>'
+    model = parse_single(xsd, "refs.xsd")
+    try:
+        result = validate_xml(model, xml)
+    except ValidationSetupError as exc:
+        # Still broken upstream: say so, and not "too large to check here".
+        assert "defect of the validator" in str(exc)
+        assert "time or memory" not in str(exc)
+    else:
+        assert result.validator == "xmlschema"  # fixed upstream

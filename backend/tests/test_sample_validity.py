@@ -764,3 +764,29 @@ def test_assertions_that_reach_outside_or_cost_too_much_are_not_evaluated(test: 
     )
     _, counts = _generate(xsd)
     assert counts == {"assertion_not_evaluated": 1}
+
+
+def test_a_referenced_key_is_settled_where_it_is_used() -> None:
+    xsd = _schema(
+        '<xs:complexType name="List"><xs:sequence>'
+        '<xs:element name="item" maxOccurs="unbounded"><xs:complexType>'
+        '<xs:attribute name="id" type="xs:string" use="required"/>'
+        '<xs:attribute name="to" type="xs:string" use="required"/>'
+        "</xs:complexType></xs:element></xs:sequence></xs:complexType>"
+        '<xs:element name="A" type="t:List">'
+        '<xs:key name="itemKey"><xs:selector xpath="t:item"/><xs:field xpath="@id"/></xs:key>'
+        '<xs:keyref name="itemRef" refer="t:itemKey">'
+        '<xs:selector xpath="t:item"/><xs:field xpath="@to"/></xs:keyref>'
+        "</xs:element>"
+        '<xs:element name="B" type="t:List">'
+        '<xs:key ref="t:itemKey"/><xs:keyref ref="t:itemRef"/>'
+        "</xs:element>"
+    )
+    xml, counts = _generate(xsd, "B", include_optional=True, repeat=3)
+    root = etree.fromstring(xml.encode("utf-8"))
+    ids = [item.get("id") for item in root]
+    assert len(ids) == 3 and len(set(ids)) == 3
+    assert all(item.get("to") in ids for item in root)
+    assert counts == {}
+    # No second opinion here: xmlschema 4.1 raises a KeyError on a keyref used
+    # by reference whose key is a reference too (test_validation covers that).

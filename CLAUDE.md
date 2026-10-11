@@ -93,7 +93,8 @@ cached and a soft reload can keep showing the old UI.
   `notations`, `ComplexType.default_attributes`, `OpenContent.origin`,
   `OverrideReplacement.original_source_ref`, the `Annotation` extras (`xml_id`,
   foreign `attributes`, `context` / `source_uri` on its entries),
-  `IdentityConstraint.field_xpath_default_namespaces`, the effective
+  `IdentityConstraint.field_xpath_default_namespaces` and `ref` / `ref_id`
+  (a constraint used by reference), the effective
   `qualified` on local `ElementDecl` / `AttributeDecl` and the per-file
   `element_form_default` / `attribute_form_default` on `SourceFile`.
 - **Not every tree row is a declaration**: `xs:any` / `xs:anyAttribute` rows

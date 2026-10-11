@@ -143,6 +143,12 @@ class IdentityConstraint(BaseModel):
     ``refer`` is the raw ``refer`` QName as written, ``refer_id`` is the id
     of the ``key``/``unique`` constraint it resolves to, filled in by the
     ``identity.link_keyrefs`` post-pass once every element has been parsed.
+
+    XSD 1.1 lets an element reuse a constraint declared elsewhere
+    (``<xs:key ref="…"/>``). Such an entry has ``ref`` set and an id of its
+    own; ``identity.resolve_constraint_refs`` copies the definition's
+    selector, fields and ``refer`` into it and sets ``ref_id`` to the
+    definition's id, so it reads like any other constraint on its element.
     """
 
     id: str
@@ -156,6 +162,10 @@ class IdentityConstraint(BaseModel):
     field_xpath_default_namespaces: list[str | None] = Field(default_factory=list)
     refer: QName | None = None
     refer_id: str | None = None
+    # Only on a reference to a constraint declared elsewhere (XSD 1.1): the
+    # QName as written, and the id of the definition (None when not found).
+    ref: QName | None = None
+    ref_id: str | None = None
     # In effect for the selector: its own, else the declaring file's.
     xpath_default_namespace: str | None = None
     annotation: Annotation | None = None

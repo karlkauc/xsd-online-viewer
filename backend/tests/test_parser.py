@@ -934,8 +934,7 @@ class TestIdentityConstraints:
     def test_xsd11_key_ref_falls_back_to_local_name(self) -> None:
         # XSD 1.1 identity-constraint sharing: <xs:key ref="..."> reuses
         # another constraint's fields instead of declaring its own; it has
-        # no `name` of its own, so we fall back to the ref's local part for
-        # display.
+        # no `name` of its own, so it takes the ref's local part.
         xsd = b"""<?xml version="1.0" encoding="UTF-8"?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
            xmlns:tns="http://example.com/keyref"
@@ -965,8 +964,9 @@ class TestIdentityConstraints:
         assert sibling is not None
         (constraint,) = sibling.identity_constraints
         assert constraint.name == "outerKey"
-        assert constraint.selector == ""
-        assert constraint.fields == []
+        # ...and the definition's selector and fields (TestIdentityConstraintReferences).
+        assert constraint.selector == "."
+        assert constraint.fields == ["tns:Inner"]
 
     @pytest.mark.skipif(
         not FUNDSXML4_XSD.exists(),
@@ -1657,3 +1657,49 @@ class TestFormDefaultsPerFile:
         inner = other.type_inline_complex
         assert [p.element.qualified for p in inner.particle.children] == [False]
         assert [a.qualified for a in inner.attributes] == [True, False]
+
+
+class TestIdentityConstraintReferences:
+    """XSD 1.1: ``<xs:key ref="…"/>`` uses a constraint declared on another element."""
+
+    XSD = (
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:t="urn:t" '
+        b'targetNamespace="urn:t" elementFormDefault="qualified">'
+        b'<xs:complexType name="List"><xs:sequence>'
+        b'<xs:element name="item" maxOccurs="unbounded"><xs:complexType>'
+        b'<xs:attribute name="id" type="xs:string"/><xs:attribute name="to" type="xs:string"/>'
+        b"</xs:complexType></xs:element></xs:sequence></xs:complexType>"
+        b'<xs:element name="A" type="t:List">'
+        b'<xs:key name="itemKey"><xs:selector xpath="t:item"/><xs:field xpath="@id"/></xs:key>'
+        b'<xs:keyref name="itemRef" refer="t:itemKey">'
+        b'<xs:selector xpath="t:item"/><xs:field xpath="@to"/></xs:keyref>'
+        b"</xs:element>"
+        b'<xs:element name="B" type="t:List">'
+        b'<xs:key ref="t:itemKey"/><xs:keyref ref="t:itemRef"/><xs:unique ref="t:missing"/>'
+        b"</xs:element></xs:schema>"
+    )
+
+    def _constraints(self):
+        model = parse_single(self.XSD, "t.xsd")
+        by_name = {e.name: e.identity_constraints for e in model.elements}
+        return model, by_name["A"], by_name["B"]
+
+    def test_a_reference_takes_selector_and_fields_of_its_definition(self) -> None:
+        _, (key, keyref), (key_use, keyref_use, _) = self._constraints()
+        assert key.ref is None and key.ref_id is None
+        assert (key_use.kind, key_use.name, key_use.ref) == ("key", "itemKey", "t:itemKey")
+        assert key_use.ref_id == key.id and key_use.id != key.id
+        assert (key_use.selector, key_use.fields) == ("t:item", ["@id"])
+        assert key_use.qname == key.qname
+        assert keyref_use.ref_id == keyref.id
+        assert (keyref_use.selector, keyref_use.fields) == ("t:item", ["@to"])
+        # The keyref still points at the definition of the key, not at a use of it.
+        assert keyref_use.refer == "t:itemKey" and keyref_use.refer_id == key.id
+        assert keyref.refer_id == key.id
+
+    def test_an_unknown_reference_is_reported_once(self) -> None:
+        model, _, (_, _, missing) = self._constraints()
+        assert missing.ref == "t:missing" and missing.ref_id is None and missing.selector == ""
+        warnings = [d.message for d in model.diagnostics if "missing" in d.message]
+        assert warnings == ["unique reference 't:missing' names no xs:unique the loaded files declare"]
+        assert model.xsd_version == "1.1"

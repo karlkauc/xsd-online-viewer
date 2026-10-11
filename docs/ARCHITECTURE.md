@@ -196,7 +196,7 @@ annotations of inner elements that have no node of their own (`restriction`,
 `override`; each entry carries that element as `context`), and the element's
 `id` and foreign-namespace attributes.
 
-Five post-passes run after the walk, all over the already-built `SchemaModel`
+Six post-passes run after the walk, all over the already-built `SchemaModel`
 rather than during parsing (so they can see declarations regardless of
 document order or which file they came from), in this order:
 
@@ -220,6 +220,10 @@ document order or which file they came from), in this order:
   nothing is dropped with a warning: an override cannot add.
 - `_inherit_open_content` — a type that extends another and has no open
   content of its own gets its base's (`origin == "base"`).
+- `identity.resolve_constraint_refs` — an XSD 1.1 `<xs:key ref="…"/>` (also
+  `keyref`, `unique`) gets the selector, fields and `refer` of the constraint
+  it names; it keeps an id of its own (`…~refN`) and points at the definition
+  through `ref_id`.
 - `identity.link_keyrefs` — resolves each `xs:keyref`'s `@refer` QName to the
   `xs:key`/`xs:unique` constraint it names, filling in `refer_id` (falls back
   to a unique local-name match when the prefix doesn't resolve; appends a

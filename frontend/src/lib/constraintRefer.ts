@@ -26,7 +26,8 @@ export function resolveReferTarget(
       ? constraint.refer.split(":").pop()!
       : constraint.refer;
     for (const entry of constraintsById.values()) {
-      if (entry.constraint.name === local) {
+      // A reference (XSD 1.1) is a second use of a key, not the key itself.
+      if (entry.constraint.name === local && !entry.constraint.ref) {
         return { hostId: entry.hostId, name: entry.constraint.name };
       }
     }
