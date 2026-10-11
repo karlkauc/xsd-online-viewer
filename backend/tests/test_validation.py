@@ -564,3 +564,20 @@ def test_a_failure_inside_the_xsd_11_validator_is_not_blamed_on_the_document() -
         assert "time or memory" not in str(exc)
     else:
         assert result.validator == "xmlschema"  # fixed upstream
+
+
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-16-be", "utf-8-sig"])
+def test_a_schema_known_only_by_its_byte_order_mark_keeps_its_text(encoding: str) -> None:
+    """UTF-16 with a BOM and no encoding declaration: libxml2 calls that "UTF-8"."""
+    text = (
+        '<?xml version="1.0"?>\n'
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+        '<xs:element name="Gr\u00f6\u00dfe" type="xs:int"/></xs:schema>'
+    )
+    raw = text.encode(encoding)
+    if encoding == "utf-16-be":
+        raw = b"\xfe\xff" + raw
+    model = parse_single(raw, "bom.xsd")
+    assert model.files[0].content == text
+    result = validate_xml(model, "<Gr\u00f6\u00dfe>1</Gr\u00f6\u00dfe>".encode())
+    assert result.is_valid

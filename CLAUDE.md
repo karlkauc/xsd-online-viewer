@@ -46,6 +46,12 @@ cd frontend && npm ci && npm run dev
   (Chromium with iPhone/iPad emulation, only `tests/mobile.spec.ts`). If port
   8080 is taken on your machine, set `E2E_PORT=8090`.
 
+- Conformance: `tools/w3c_suite.py` runs the W3C XML Schema test suite
+  (`--fetch` clones it into `~/.cache/xsd-viewer/xsdtests`; it is not in this
+  repo) through the upload, validation and sample-generator code and lists
+  where the app disagrees with the expected results. A full run takes a while;
+  `--only <test set>` narrows it, `--compare before after` shows regressions.
+
 ## Deployment (read before redeploying)
 
 - **Local sandbox** — `docker compose up -d --build` builds

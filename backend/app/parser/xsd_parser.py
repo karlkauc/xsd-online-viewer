@@ -1961,12 +1961,27 @@ def _detect_xsd_version(files: list[_LoadedFile], main: _LoadedFile) -> XsdVersi
     return "1.0"
 
 
+# Longest first: the UTF-32 marks begin like the UTF-16 ones.
+_BYTE_ORDER_MARKS = (
+    (b"\xff\xfe\x00\x00", "utf-32-le"),
+    (b"\x00\x00\xfe\xff", "utf-32-be"),
+    (b"\xef\xbb\xbf", "utf-8"),
+    (b"\xff\xfe", "utf-16-le"),
+    (b"\xfe\xff", "utf-16-be"),
+)
+
+
 def _decode_source(raw: bytes, tree: etree._ElementTree) -> str:
     """Source text for the Text tab and for validation.
 
     Decoded with the encoding the parser found (XML declaration or BOM), not
     blindly as UTF-8: a windows-1251 schema otherwise loses every Cyrillic name.
     """
+    # A byte order mark settles it, and libxml2 reports "UTF-8" for a UTF-16
+    # file that has one but no encoding declaration.
+    for bom, encoding in _BYTE_ORDER_MARKS:
+        if raw.startswith(bom):
+            return raw[len(bom):].decode(encoding, errors="replace")
     try:
         return raw.decode(tree.docinfo.encoding or "utf-8", errors="replace")
     except LookupError:
