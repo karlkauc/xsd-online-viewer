@@ -217,6 +217,14 @@ export function ApiDocsPage() {
               </>,
             ],
             [
+              <Code>validator</Code>,
+              <>
+                <Code>libxml2</Code> for an XSD 1.0 schema, <Code>xmlschema</Code> for XSD 1.1. The 1.1
+                validator also evaluates <Code>xs:assert</Code> and <Code>xs:alternative</Code> and
+                checks that every IDREF names an ID in the document; its messages are worded differently.
+              </>,
+            ],
+            [
               <Code>errors[].kind</Code>,
               <>
                 <Code>not-well-formed</Code> — XML syntax error, the parser stopped (exactly one entry,
@@ -229,14 +237,14 @@ export function ApiDocsPage() {
               <Code>errors[].line / column</Code>,
               <>
                 Position inside <Code>reformatted_xml</Code>. <Code>column</Code> is usually{" "}
-                <Code>null</Code> (libxml2 reports no column for schema errors); for syntax errors the
+                <Code>null</Code> (neither validator reports a column for schema errors); for syntax errors the
                 column is part of the message text.
               </>,
             ],
             [
               <Code>errors[].message</Code>,
               <>
-                Validator message (libxml2), e.g. missing mandatory element, wrong data type, pattern
+                Validator message, e.g. missing mandatory element, wrong data type, pattern
                 mismatch.
               </>,
             ],

@@ -160,7 +160,7 @@ export function SampleXmlDialog() {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : String(err);
         // 422: the schema itself does not compile (a part the generator never
-        // reached is missing, XSD 1.1, or it is too large to compile here).
+        // reached is missing, or it is too large to compile here).
         const refused = err instanceof ApiError && err.status === 422;
         setValidation({
           status: "failed",

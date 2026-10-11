@@ -37,9 +37,11 @@ receives a pre-indexed, normalized model and renders it.
 | Tests    | pytest + ruff · Vitest + jsdom · Playwright (e2e)        |
 | Build    | Multi-stage Dockerfile, docker-compose, GHCR via GH Actions |
 
-We intentionally use **lxml**, not `xmlschema`: we walk the tree ourselves to
-preserve authoring metadata (annotations, appinfo, comments, source lines) that
-xmlschema drops.
+We intentionally parse with **lxml**, not `xmlschema`: we walk the tree
+ourselves to preserve authoring metadata (annotations, appinfo, comments, source
+lines) that xmlschema drops. `xmlschema` is used for one thing only, validating
+documents against XSD 1.1 schemas, and only in a process of its own (see
+Validation below).
 
 ## Repo layout
 
@@ -225,12 +227,29 @@ schema itself wrote:
   matching global declaration available for the validation root" or, when the
   schema refers to it, as a schema that does not compile at all.
 
+libxml2 implements XSD 1.0 only. A schema detected as 1.1
+(`SchemaModel.xsd_version`), and one libxml2 refuses although every file
+loaded (the detection is a heuristic: a schema whose only 1.1 feature is
+`xs:dateTimeStamp` looks like 1.0), is validated by the `xmlschema` package
+instead, from the same materialised files. `ValidationResponse.validator` says
+which one ran. `xmlschema` is pure Python, its patterns run on the backtracking
+`re` engine and an `xs:assert` is XPath the schema author wrote, so it never
+runs inside the server: `validation._run_worker` starts
+`app/parser/xsd11_worker.py` as a script (`python -I`, empty environment), with
+a wall-clock timeout (`XSD11_TIMEOUT_SECONDS`, 20), CPU and address-space
+limits (`XSD11_MEMORY_MB`, 1024) and at most two workers at a time. The worker
+loads schema files only from the temp directory (`allow="sandbox"`; absolute
+URLs are mapped onto the copies), and XPath 2.0 as elementpath implements it
+has no function that reads a file or URL. The app itself still never imports
+`xmlschema`.
+
 A compile failure raises `ValidationSetupError` (HTTP 422), and its message is
 the only thing the user gets, so `_compile_failure` classifies it instead of
 passing libxml2's wording through: files that never loaded (name them, say how
-to load the schema completely), XSD 1.1 (libxml2 does 1.0 only — the schema is
-fine), or a schema that really is malformed (name the file and line). The same
-message is recorded in `sample_issue.errors` for a generated sample.
+to load the schema completely), or a schema that really is malformed (name the
+file and line; "not valid XSD 1.1" when it was detected as 1.1). Running into
+the worker's limits is a 422 as well. The same message is recorded in
+`sample_issue.errors` for a generated sample.
 
 ### Data model
 

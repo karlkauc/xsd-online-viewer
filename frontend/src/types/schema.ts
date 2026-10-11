@@ -416,6 +416,8 @@ export interface ValidationResponse {
   is_valid: boolean;
   reformatted_xml: string | null;
   errors: ValidationErrorItem[];
+  // "libxml2" (XSD 1.0) or "xmlschema" (XSD 1.1: assertions, type alternatives, IDREF targets).
+  validator?: "libxml2" | "xmlschema";
 }
 
 // Union of things selectable in the viewer.

@@ -26,6 +26,8 @@ class Settings:
     maxmind_license_key: str
     geoip_db_path: str
     usage_drain_seconds: float
+    xsd11_timeout_seconds: float
+    xsd11_memory_mb: int
 
     @property
     def usage_enabled(self) -> bool:
@@ -79,6 +81,8 @@ def load_settings() -> Settings:
         maxmind_license_key=os.getenv("MAXMIND_LICENSE_KEY", ""),
         geoip_db_path=os.getenv("GEOIP_DB_PATH", "/tmp/geoip/GeoLite2-Country.mmdb"),
         usage_drain_seconds=float(os.getenv("USAGE_DRAIN_SECONDS", "2")),
+        xsd11_timeout_seconds=float(os.getenv("XSD11_TIMEOUT_SECONDS", "20")),
+        xsd11_memory_mb=int(os.getenv("XSD11_MEMORY_MB", "1024")),
     )
 
 

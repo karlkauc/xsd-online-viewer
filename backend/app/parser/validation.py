@@ -11,10 +11,16 @@ the frontend shows back to the user.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
-from collections.abc import Callable
+import subprocess
+import sys
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
@@ -23,6 +29,7 @@ from urllib.parse import quote
 from lxml import etree
 from pydantic import BaseModel, Field
 
+from app.config import settings
 from app.parser.model import (
     XSD_NS,
     AttributeDecl,
@@ -142,6 +149,9 @@ class ValidationResponse(BaseModel):
     # None only when the input is not well-formed (no reformatted text exists).
     reformatted_xml: str | None = None
     errors: list[ValidationErrorItem] = Field(default_factory=list)
+    # "libxml2" (XSD 1.0) or "xmlschema" (XSD 1.1, which also checks assertions,
+    # type alternatives and that every IDREF names an ID in the document).
+    validator: str = "libxml2"
 
 
 # ---------------------------------------------------------------------------
@@ -252,44 +262,47 @@ def _first_error(exc: etree.XMLSchemaParseError, names_by_path: dict[str, str]) 
     return f"{where}: {entry.message}" if where else entry.message
 
 
+def _incomplete(model: SchemaModel, detail: str) -> ValidationSetupError | None:
+    """The error for a schema whose imports or includes never loaded, if that is the case."""
+    missing = unloaded_files(model)
+    namespace = None if missing else _unloaded_namespace(detail, model)
+    if not missing and not namespace:
+        return None
+    if missing:
+        listed = ", ".join(missing[:_MAX_LISTED_FILES])
+        if len(missing) > _MAX_LISTED_FILES:
+            listed += ", …"
+        noun = "file" if len(missing) == 1 else "files"
+        what = f"{len(missing)} imported or included {noun} did not load ({listed})"
+    else:
+        what = f"nothing loaded declares the namespace {namespace!r} it imports"
+    # "failed to load 'x.xsd'" only repeats what was just said, in temp-dir terms.
+    stopped = "" if detail.startswith("failed to load") else f" The compiler stopped at: {detail}"
+    return ValidationSetupError(
+        f"the schema is incomplete: {what}, so it does not compile. Load the schema "
+        f"together with its imported and included files (ZIP upload or URL).{stopped}"
+    )
+
+
 def _compile_failure(
-    exc: etree.XMLSchemaParseError,
-    model: SchemaModel,
-    names_by_path: dict[str, str],
-    tmp_root: Path,
-    unavailable: list[str],
+    exc: etree.XMLSchemaParseError, model: SchemaModel, files: _Materialised
 ) -> ValidationSetupError:
     """Say why the schema does not compile in terms the user can act on.
 
     libxml2's own wording ("The content is not valid. Expected is (annotation?,
     ...") reads as if the viewer were at fault and never says what to do. The
-    three causes that actually occur need three different answers: files that
-    were never loaded (load them), XSD 1.1 (libxml2 does 1.0 only, and the
-    schema is fine), and a schema that really is malformed (fix it, here).
+    causes that actually occur need different answers: files that were never
+    loaded (load them), XSD 1.1 when the 1.1 validator is not installed, and a
+    schema that really is malformed (fix it, here).
     """
     # libxml2 names the temporary copies; show paths relative to the schema
     # instead, which also keeps the message stable across calls.
-    detail = (_first_error(exc, names_by_path) or str(exc)).replace(f"{tmp_root}/", "")
-    if unavailable:
-        detail += f" (unavailable referenced files: {', '.join(unavailable)})"
-
-    missing = unloaded_files(model)
-    namespace = None if missing else _unloaded_namespace(detail, model)
-    if missing or namespace:
-        if missing:
-            listed = ", ".join(missing[:_MAX_LISTED_FILES])
-            if len(missing) > _MAX_LISTED_FILES:
-                listed += ", …"
-            noun = "file" if len(missing) == 1 else "files"
-            what = f"{len(missing)} imported or included {noun} did not load ({listed})"
-        else:
-            what = f"nothing loaded declares the namespace {namespace!r} it imports"
-        # "failed to load 'x.xsd'" only repeats what was just said, in temp-dir terms.
-        stopped = "" if detail.startswith("failed to load") else f" The compiler stopped at: {detail}"
-        return ValidationSetupError(
-            f"the schema is incomplete: {what}, so it does not compile. Load the schema "
-            f"together with its imported and included files (ZIP upload or URL).{stopped}"
-        )
+    detail = (_first_error(exc, files.names_by_path) or str(exc)).replace(f"{files.root}/", "")
+    if files.unavailable:
+        detail += f" (unavailable referenced files: {', '.join(files.unavailable)})"
+    incomplete = _incomplete(model, detail)
+    if incomplete is not None:
+        return incomplete
     if model.xsd_version == "1.1":
         return ValidationSetupError(
             "the schema uses XSD 1.1 (xs:assert, xs:alternative, …), and the validator here "
@@ -366,25 +379,30 @@ def _repair_references(
     )
 
 
-def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
-    """Compile ``model``'s source files into an ``etree.XMLSchema``.
+@dataclass
+class _Materialised:
+    """A schema's source files written to a temporary directory, references repaired."""
 
-    Raises :class:`ValidationSetupError` if the schema has no usable main file,
-    is too large for libxml2 to compile within a request, or does not compile.
+    root: Path
+    main: Path
+    main_has_entities: bool
+    by_url: dict[str, Path] = field(default_factory=dict)
+    by_namespace: dict[str, Path] = field(default_factory=dict)
+    names_by_path: dict[str, str] = field(default_factory=dict)
+    unavailable: list[str] = field(default_factory=list)
+
+
+@contextmanager
+def _materialised(model: SchemaModel) -> Iterator[_Materialised]:
+    """Write ``model``'s files where a validator can read them, for the length of the block.
+
+    Raises :class:`ValidationSetupError` if the schema has no usable main file.
     """
     main = next((f for f in model.files if f.relationship == "main"), None)
     if main is None:
         raise ValidationSetupError("schema has no main file; cannot validate")
     if main.content is None:
         raise ValidationSetupError("schema source is unavailable; cannot validate")
-    largest = largest_substitution_group(model)
-    if largest is not None and largest[1] > MAX_SUBSTITUTION_GROUP:
-        head, members = largest
-        raise ValidationSetupError(
-            f"schema is too large to validate here: the substitution group of {head!r} has "
-            f"{members} members (limit {MAX_SUBSTITUTION_GROUP}), and compiling it would "
-            "exceed this server's time and memory limits"
-        )
 
     with TemporaryDirectory(prefix="xsdval-") as tmp:
         tmp_root = Path(tmp).resolve()
@@ -447,28 +465,70 @@ def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
             if repaired is not None:
                 path.write_bytes(repaired)
 
-        def read_main(parser: etree.XMLParser) -> etree._ElementTree:
-            parser.resolvers.add(_MaterialisedUrlResolver(by_url))
-            parser.resolvers.add(_BundledW3cResolver())
-            return etree.parse(str(main_on_disk), parser)
+        yield _Materialised(
+            root=tmp_root,
+            main=main_on_disk,
+            main_has_entities=main_has_entities,
+            by_url=by_url,
+            by_namespace=by_namespace,
+            names_by_path=names_by_path,
+            unavailable=unavailable,
+        )
 
+
+def _too_large(model: SchemaModel) -> ValidationSetupError | None:
+    largest = largest_substitution_group(model)
+    if largest is None or largest[1] <= MAX_SUBSTITUTION_GROUP:
+        return None
+    head, members = largest
+    return ValidationSetupError(
+        f"schema is too large to validate here: the substitution group of {head!r} has "
+        f"{members} members (limit {MAX_SUBSTITUTION_GROUP}), and compiling it would "
+        "exceed this server's time and memory limits"
+    )
+
+
+def _compile(files: _Materialised) -> etree.XMLSchema:
+    """Compile the materialised schema with libxml2 (XSD 1.0)."""
+
+    def read_main(parser: etree.XMLParser) -> etree._ElementTree:
+        parser.resolvers.add(_MaterialisedUrlResolver(files.by_url))
+        parser.resolvers.add(_BundledW3cResolver())
+        return etree.parse(str(files.main), parser)
+
+    parser = make_parser(internal_entities=files.main_has_entities)
+    try:
+        xsd_tree = read_main(parser)
+    except etree.XMLSyntaxError:
+        # The loader let a repeated ID through (security.parse_bytes);
+        # whether it also breaks the schema is the compiler's call.
+        if not only_duplicate_ids(parser):
+            raise
+        xsd_tree = read_main(make_parser(internal_entities=files.main_has_entities, recover=True))
+    return etree.XMLSchema(xsd_tree)
+
+
+def build_xmlschema(model: SchemaModel) -> etree.XMLSchema:
+    """Compile ``model``'s source files into an ``etree.XMLSchema`` (libxml2, XSD 1.0).
+
+    Raises :class:`ValidationSetupError` if the schema has no usable main file,
+    is too large for libxml2 to compile within a request, or does not compile.
+    """
+    too_large = _too_large(model)
+    if too_large is not None:
+        raise too_large
+    with _materialised(model) as files:
         try:
-            try:
-                xsd_tree = read_main(parser)
-            except etree.XMLSyntaxError:
-                # The loader let a repeated ID through (security.parse_bytes);
-                # whether it also breaks the schema is the compiler's call.
-                if not only_duplicate_ids(parser):
-                    raise
-                xsd_tree = read_main(make_parser(internal_entities=main_has_entities, recover=True))
-            return etree.XMLSchema(xsd_tree)
+            return _compile(files)
         except etree.XMLSchemaParseError as exc:
-            raise _compile_failure(exc, model, names_by_path, tmp_root, unavailable) from exc
+            raise _compile_failure(exc, model, files) from exc
         except etree.XMLSyntaxError as exc:
-            detail = str(exc).replace(f"{tmp_root}/", "")
-            raise ValidationSetupError(
-                f"cached schema could not be parsed: {detail}"
-            ) from exc
+            raise _unparsable(exc, files) from exc
+
+
+def _unparsable(exc: etree.XMLSyntaxError, files: _Materialised) -> ValidationSetupError:
+    detail = str(exc).replace(f"{files.root}/", "")
+    return ValidationSetupError(f"cached schema could not be parsed: {detail}")
 
 
 # ---------------------------------------------------------------------------
@@ -585,41 +645,203 @@ def extract_errors(
     return items
 
 
+# ---------------------------------------------------------------------------
+# XSD 1.1: the xmlschema package, in a worker process
+# ---------------------------------------------------------------------------
+
+_WORKER = Path(__file__).with_name("xsd11_worker.py")
+# Each worker is a Python process of its own; more than a couple at once would
+# take the memory the server itself needs.
+_WORKER_SLOTS = threading.BoundedSemaphore(2)
+
+
+class _Xsd11UnavailableError(Exception):
+    """The xmlschema package is not installed."""
+
+
+class _Xsd11SchemaError(Exception):
+    """The schema does not compile as XSD 1.1 either."""
+
+
+def _run_worker(files: _Materialised, pretty: bytes) -> list[dict]:
+    """Validate ``pretty`` against the materialised schema as XSD 1.1; the raw error records."""
+    timeout = settings.xsd11_timeout_seconds
+    request = {
+        "root": str(files.root),
+        "main": str(files.main),
+        "locations": [[ns, str(path)] for ns, path in files.by_namespace.items()],
+        "urls": {url: str(path) for url, path in files.by_url.items()},
+        "xml": pretty.decode("utf-8"),
+        "cpu_seconds": int(timeout) + 1,
+        "memory_mb": settings.xsd11_memory_mb,
+    }
+    with _WORKER_SLOTS:
+        try:
+            # -I: no user site, no PYTHON* variables, and not the directory the
+            # script is in on sys.path. The empty environment keeps the server's
+            # secrets out of a process that evaluates the schema author's XPath.
+            done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                [sys.executable, "-I", str(_WORKER)],
+                input=json.dumps(request).encode("utf-8"),
+                capture_output=True,
+                timeout=timeout,
+                env={},
+                cwd=str(files.root),
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ValidationSetupError(
+                f"validating against this XSD 1.1 schema took longer than {timeout:g} s and "
+                "was stopped; the schema or the document is too large to check here"
+            ) from exc
+    try:
+        reply = json.loads(done.stdout)
+    except ValueError as exc:
+        # Killed by a limit (CPU, memory) or crashed; stderr says which.
+        stderr = done.stderr[-2000:].decode(errors="replace")
+        logger.warning("xsd11 worker exited %s: %s", done.returncode, stderr)
+        raise ValidationSetupError(
+            "validating against this XSD 1.1 schema exceeded this server's time or memory "
+            "limits; the schema or the document is too large to check here"
+        ) from exc
+    if reply["status"] == "unavailable":
+        raise _Xsd11UnavailableError(reply["message"])
+    if reply["status"] == "schema-error":
+        where = files.names_by_path.get(str(reply.get("file") or "").removeprefix("file://"), "")
+        if reply.get("line"):
+            where = f"{where} line {reply['line']}".strip()
+        message = str(reply["message"]).replace(f"{files.root}/", "")
+        raise _Xsd11SchemaError(f"{where}: {message}" if where else message)
+    return reply["errors"]
+
+
+_CLARK_RE = re.compile(r"^(?:\{(?P<ns>[^}]*)\})?(?P<local>.+)$")
+
+
+def _xsd11_errors(records: list[dict], model: SchemaModel) -> list[ValidationErrorItem]:
+    items: list[ValidationErrorItem] = []
+    for record in records:
+        message, path = record["message"], record.get("path")
+        ref = None
+        declared = _CLARK_RE.match(record.get("declaration") or "")
+        if declared:
+            ref = find_declaration_by_local(model, declared.group("local"), declared.group("ns"))
+        items.append(
+            ValidationErrorItem(
+                line=record.get("line"),
+                message=message,
+                type_name=record.get("type_name"),
+                domain="xmlschema",
+                path=path,
+                xsd_ref=ref or _xsd_ref_for_error(model, message, path),
+            )
+        )
+    return items
+
+
+def _validate_xsd11(
+    model: SchemaModel, files: _Materialised, pretty: bytes
+) -> ValidationResponse:
+    errors = _xsd11_errors(_run_worker(files, pretty), model)
+    return ValidationResponse(
+        schema_id=model.schema_id,
+        is_valid=not errors,
+        reformatted_xml=pretty.decode("utf-8"),
+        errors=errors,
+        validator="xmlschema",
+    )
+
+
+def _not_well_formed(model: SchemaModel, exc: etree.XMLSyntaxError) -> ValidationResponse:
+    return ValidationResponse(
+        schema_id=model.schema_id,
+        is_valid=False,
+        reformatted_xml=None,
+        errors=[
+            ValidationErrorItem(
+                line=exc.lineno or None,
+                column=exc.offset or None,
+                message=str(exc.msg or exc),
+                severity="fatal",
+                kind="not-well-formed",
+            )
+        ],
+    )
+
+
+def _validate_libxml2(model: SchemaModel, schema: etree.XMLSchema, pretty: bytes) -> ValidationResponse:
+    pretty_tree = etree.parse(BytesIO(pretty), make_parser())
+    is_valid = bool(schema.validate(pretty_tree))
+    return ValidationResponse(
+        schema_id=model.schema_id,
+        is_valid=is_valid,
+        reformatted_xml=pretty.decode("utf-8"),
+        errors=[] if is_valid else extract_errors(schema.error_log, model),
+    )
+
+
 def validate_xml(
     model: SchemaModel, xml_bytes: bytes, *, schema: etree.XMLSchema | None = None
 ) -> ValidationResponse:
     """Reformat then validate ``xml_bytes`` against ``model``'s schema.
 
+    libxml2 does the work for XSD 1.0. A schema detected as 1.1, and one that
+    libxml2 refuses although all its files loaded, goes to the ``xmlschema``
+    package instead (:mod:`app.parser.xsd11_worker`): the version detection is
+    a heuristic, and a schema whose only 1.1 feature is ``xs:dateTimeStamp``
+    looks like 1.0 to it.
+
     ``schema`` lets a batch caller (tools/sample_audit.py) compile the schema
     once with :func:`build_xmlschema` instead of on every document.
     """
-    if schema is None:
-        schema = build_xmlschema(model)
+    if schema is not None:
+        try:
+            return _validate_libxml2(model, schema, pretty_print_and_parse(xml_bytes))
+        except etree.XMLSyntaxError as exc:
+            return _not_well_formed(model, exc)
 
-    try:
-        pretty = pretty_print_and_parse(xml_bytes)
-    except etree.XMLSyntaxError as exc:
-        return ValidationResponse(
-            schema_id=model.schema_id,
-            is_valid=False,
-            reformatted_xml=None,
-            errors=[
-                ValidationErrorItem(
-                    line=exc.lineno or None,
-                    column=exc.offset or None,
-                    message=str(exc.msg or exc),
-                    severity="fatal",
-                    kind="not-well-formed",
-                )
-            ],
-        )
+    with _materialised(model) as files:
+        failure: ValidationSetupError | None = None
+        if model.xsd_version != "1.1":
+            too_large = _too_large(model)
+            if too_large is not None:
+                raise too_large
+            try:
+                schema = _compile(files)
+            except etree.XMLSchemaParseError as exc:
+                failure = _compile_failure(exc, model, files)
+                if unloaded_files(model) or files.unavailable:
+                    raise failure from exc  # no validator can make up for a missing file
+            except etree.XMLSyntaxError as exc:
+                raise _unparsable(exc, files) from exc
 
-    pretty_tree = etree.parse(BytesIO(pretty), make_parser())
-    is_valid = bool(schema.validate(pretty_tree))
-    errors = [] if is_valid else extract_errors(schema.error_log, model)
-    return ValidationResponse(
-        schema_id=model.schema_id,
-        is_valid=is_valid,
-        reformatted_xml=pretty.decode("utf-8"),
-        errors=errors,
-    )
+        try:
+            pretty = pretty_print_and_parse(xml_bytes)
+        except etree.XMLSyntaxError as exc:
+            if failure is not None:
+                raise failure from exc
+            return _not_well_formed(model, exc)
+        if schema is not None:
+            return _validate_libxml2(model, schema, pretty)
+
+        try:
+            return _validate_xsd11(model, files, pretty)
+        except _Xsd11UnavailableError:
+            if failure is None:  # detected as 1.1: let libxml2 say where it stops
+                try:
+                    _compile(files)
+                except etree.XMLSchemaParseError as exc:
+                    raise _compile_failure(exc, model, files) from exc
+                except etree.XMLSyntaxError as exc:
+                    raise _unparsable(exc, files) from exc
+                raise ValidationSetupError("the XSD 1.1 validator is not installed") from None
+            raise failure from None
+        except _Xsd11SchemaError as exc:
+            if failure is not None:
+                # Not a 1.1 schema after all; libxml2's complaint is the familiar one.
+                raise failure from exc
+            detail = str(exc)
+            raise (
+                _incomplete(model, detail)
+                or ValidationSetupError(f"the schema itself is not valid XSD 1.1: {detail}")
+            ) from exc

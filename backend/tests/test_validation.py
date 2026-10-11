@@ -350,3 +350,185 @@ def test_a_type_the_schema_itself_never_defines_is_not_called_incomplete() -> No
         build_xmlschema(model)
 
     assert str(raised.value).startswith("the schema itself is not valid XSD: ")
+
+
+# ---------------------------------------------------------------------------
+# XSD 1.1 (xmlschema, in a worker process)
+# ---------------------------------------------------------------------------
+
+_XS = 'xmlns:xs="http://www.w3.org/2001/XMLSchema"'
+_RANGE_XSD = (
+    f"<xs:schema {_XS}>\n"
+    '<xs:element name="Range"><xs:complexType><xs:sequence>\n'
+    '<xs:element name="Min" type="xs:int"/>\n'
+    '<xs:element name="Max" type="xs:int"/>\n'
+    '<xs:element name="Ref" type="xs:IDREF" minOccurs="0"/>\n'
+    "</xs:sequence>\n"
+    '<xs:assert test="Min le Max"/>\n'
+    "</xs:complexType></xs:element>\n"
+    "</xs:schema>"
+).encode()
+
+
+def test_an_xsd_11_schema_is_validated_assertions_included() -> None:
+    model = parse_single(_RANGE_XSD, "range.xsd")
+    assert model.xsd_version == "1.1"
+
+    valid = validate_xml(model, b"<Range><Min>1</Min><Max>2</Max></Range>")
+    invalid = validate_xml(model, b"<Range><Min>5</Min><Max>2</Max></Range>")
+
+    assert valid.is_valid and valid.validator == "xmlschema"
+    assert valid.reformatted_xml is not None and "<Min>1</Min>" in valid.reformatted_xml
+    (error,) = invalid.errors
+    assert not invalid.is_valid
+    # Which assertion failed, and on which line of the reformatted text.
+    assert error.message == "assertion test is false: Min le Max"
+    assert (error.line, error.path, error.domain) == (2, "/Range", "xmlschema")
+    assert error.xsd_ref is not None and error.xsd_ref.id == "element:Range"
+
+
+def test_xsd_11_errors_point_at_the_offending_child_and_check_idrefs() -> None:
+    """libxml2 never checks that an IDREF names an ID; the 1.1 validator does."""
+    model = parse_single(_RANGE_XSD, "range.xsd")
+
+    result = validate_xml(model, b"<Range><Min>1</Min><Oops/><Max>2</Max><Ref>nowhere</Ref></Range>")
+
+    by_line = {error.line: error.message for error in result.errors}
+    assert "Oops" in by_line[4]  # the unexpected child, not its parent on line 2
+    assert any("IDREF 'nowhere' not found" in message for message in by_line.values())
+
+
+def test_a_document_that_is_not_well_formed_is_reported_as_such_under_xsd_11() -> None:
+    model = parse_single(_RANGE_XSD, "range.xsd")
+
+    result = validate_xml(model, b"<Range><Min>1</Range>")
+
+    (error,) = result.errors
+    assert error.kind == "not-well-formed" and result.reformatted_xml is None
+
+
+def test_a_schema_the_version_heuristic_takes_for_1_0_still_reaches_the_1_1_validator() -> None:
+    """xs:dateTimeStamp is a 1.1 type and nothing else here is: libxml2 refuses the
+    schema, and "the schema itself is not valid XSD" would be wrong."""
+    model = parse_single(
+        f'<xs:schema {_XS}><xs:element name="At" type="xs:dateTimeStamp"/></xs:schema>'.encode(),
+        "at.xsd",
+    )
+    assert model.xsd_version != "1.1"
+
+    valid = validate_xml(model, b"<At>2024-01-01T00:00:00Z</At>")
+    invalid = validate_xml(model, b"<At>2024-01-01T00:00:00</At>")
+
+    assert valid.is_valid and valid.validator == "xmlschema"
+    assert not invalid.is_valid and "time zone" in invalid.errors[0].message
+
+
+def test_a_broken_1_0_schema_keeps_libxml2s_complaint() -> None:
+    """The 1.1 validator refuses it as well, and its wording is the less familiar one."""
+    model = parse_single(
+        f'<xs:schema {_XS} xmlns:tns="urn:t" targetNamespace="urn:t">'
+        '<xs:element name="A" type="tns:Missing"/></xs:schema>'.encode(),
+        "a.xsd",
+    )
+
+    with pytest.raises(ValidationSetupError) as raised:
+        validate_xml(model, b'<A xmlns="urn:t"/>')
+
+    assert str(raised.value).startswith("the schema itself is not valid XSD: ")
+
+
+def test_a_broken_xsd_11_schema_says_where() -> None:
+    model = parse_single(
+        f"<xs:schema {_XS}>\n"
+        '<xs:element name="A"><xs:complexType>\n'
+        '<xs:assert test="count(("/>\n'
+        "</xs:complexType></xs:element></xs:schema>".encode(),
+        "broken.xsd",
+    )
+
+    with pytest.raises(ValidationSetupError) as raised:
+        validate_xml(model, b"<A/>")
+
+    message = str(raised.value)
+    assert message.startswith("the schema itself is not valid XSD 1.1: broken.xsd: ")
+    assert "XPST0003" in message  # the XPath syntax error
+    assert "/tmp" not in message and "xsdval-" not in message
+
+
+def test_an_xsd_11_schema_in_several_files_is_read_from_the_loaded_copies() -> None:
+    """The worker may read nothing but the materialised files: an include by relative
+    path resolves there, and so does an import the loader found under a Windows path."""
+    files = {
+        "main.xsd": (
+            f'<xs:schema {_XS} xmlns:p="urn:p" xmlns:t="urn:t" targetNamespace="urn:t" '
+            'elementFormDefault="qualified">'
+            '<xs:include schemaLocation="parts/types.xsd"/>'
+            '<xs:import namespace="urn:p" schemaLocation="Other\\Part.xsd"/>'
+            '<xs:element name="Doc"><xs:complexType><xs:sequence>'
+            '<xs:element name="Count" type="t:Positive"/><xs:element ref="p:Part"/>'
+            "</xs:sequence></xs:complexType></xs:element></xs:schema>"
+        ).encode(),
+        "parts/types.xsd": (
+            f'<xs:schema {_XS} targetNamespace="urn:t">'
+            '<xs:simpleType name="Positive"><xs:restriction base="xs:int">'
+            '<xs:assertion test="$value gt 0"/></xs:restriction></xs:simpleType></xs:schema>'
+        ).encode(),
+        "other/part.xsd": (
+            f'<xs:schema {_XS} targetNamespace="urn:p"><xs:element name="Part" type="xs:string"/>'
+            "</xs:schema>"
+        ).encode(),
+    }
+    model = parse_files_map(files, "main.xsd")
+    assert model.xsd_version == "1.1"
+    doc = '<Doc xmlns="urn:t"><Count>{}</Count><Part xmlns="urn:p">x</Part></Doc>'
+
+    assert validate_xml(model, doc.format(3).encode()).is_valid
+    (error,) = validate_xml(model, doc.format(0).encode()).errors
+    assert "$value gt 0" in error.message
+
+
+def test_an_assertion_cannot_read_files_or_the_servers_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The test of an xs:assert is the schema author's XPath, run on our server."""
+    monkeypatch.setenv("USAGE_DB_PASSWORD", "hunter2")
+    model = parse_single(
+        f'<xs:schema {_XS}><xs:element name="A"><xs:complexType>'
+        "<xs:assert test=\"not(doc-available('file:///etc/hostname'))\"/>"
+        "<xs:assert test=\"doc('file:///etc/passwd')\"/>"
+        "</xs:complexType></xs:element></xs:schema>".encode(),
+        "probe.xsd",
+    )
+
+    result = validate_xml(model, b"<A/>")
+
+    (error,) = result.errors  # the first assertion holds: no document is reachable
+    assert "FODC0002" in error.message
+    assert "hunter2" not in str(result) and "root:" not in str(result)
+
+
+def test_an_xsd_11_validation_that_runs_too_long_is_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(validation.settings, "xsd11_timeout_seconds", 0.01)
+    model = parse_single(_RANGE_XSD, "range.xsd")
+
+    with pytest.raises(ValidationSetupError, match="took longer than 0.01 s"):
+        validate_xml(model, b"<Range><Min>1</Min><Max>2</Max></Range>")
+
+
+def test_a_worker_that_runs_out_of_memory_is_a_setup_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(validation.settings, "xsd11_memory_mb", 16)
+    model = parse_single(_RANGE_XSD, "range.xsd")
+
+    with pytest.raises(ValidationSetupError, match="time or memory limits"):
+        validate_xml(model, b"<Range><Min>1</Min><Max>2</Max></Range>")
+
+
+def test_without_the_xsd_11_validator_the_old_explanation_stays(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _missing(*_args):  # noqa: ANN002, ANN202
+        raise validation._Xsd11UnavailableError("No module named 'xmlschema'")
+
+    monkeypatch.setattr(validation, "_run_worker", _missing)
+    model = parse_single(_RANGE_XSD, "range.xsd")
+
+    with pytest.raises(ValidationSetupError, match="libxml2, which implements XSD 1.0 only"):
+        validate_xml(model, b"<Range><Min>1</Min><Max>2</Max></Range>")

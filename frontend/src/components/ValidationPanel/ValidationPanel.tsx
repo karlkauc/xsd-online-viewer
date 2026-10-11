@@ -294,6 +294,12 @@ export function ValidationPanel() {
               </div>
             )}
 
+            {result.validator === "xmlschema" && (
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                Checked as XSD 1.1, assertions and type alternatives included.
+              </p>
+            )}
+
             {result.reformatted_xml === null && (
               <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">
                 The document is not well-formed XML, so it could not be

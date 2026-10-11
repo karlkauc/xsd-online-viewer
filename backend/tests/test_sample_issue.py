@@ -560,11 +560,11 @@ def test_valid_but_degraded_sample_is_recorded(
 
 
 def test_uncompilable_schema_is_kept_apart(client: TestClient, issues: IssueRecorder) -> None:
-    """XSD 1.1 is libxml2's limit, not a generator defect."""
+    """A schema no validator compiles is not a generator defect."""
     xsd = _schema(
         '<xs:element name="A"><xs:complexType>'
         '<xs:sequence><xs:element name="B" type="xs:int"/></xs:sequence>'
-        '<xs:assert test="B > 0"/>'
+        '<xs:assert test="count(("/>'
         "</xs:complexType></xs:element>"
     )
     schema_id = _load(client, xsd)
@@ -575,7 +575,20 @@ def test_uncompilable_schema_is_kept_apart(client: TestClient, issues: IssueReco
     # Why it does not compile is the whole point of the row.
     (error,) = json.loads(issue.errors)
     assert error["kind"] == "schema-setup"
-    assert error["message"].startswith("the schema uses XSD 1.1")
+    assert error["message"].startswith("the schema itself is not valid XSD 1.1")
+
+
+def test_a_sample_for_an_xsd_11_schema_is_checked(client: TestClient, issues: IssueRecorder) -> None:
+    """XSD 1.1 used to end in a setup error whatever the sample looked like."""
+    xsd = _schema(
+        '<xs:element name="A"><xs:complexType>'
+        '<xs:sequence><xs:element name="B" type="xs:int"/></xs:sequence>'
+        '<xs:assert test="count(*) = 1"/>'
+        "</xs:complexType></xs:element>"
+    )
+    schema_id = _load(client, xsd)
+    _sample_then_validate(client, schema_id, "element:{urn:t}A")
+    assert issues.issues == []
 
 
 def test_an_uncompilable_schema_is_one_defect_whatever_the_root(

@@ -32,11 +32,12 @@ cd frontend && npm ci && npm run dev
 
 ## Tests
 
-- Backend: `cd backend && pytest` (also `ruff check`). The `dev` extra brings
-  `xmlschema`, used **only by tests and `tools/sample_audit.py`** as a second
-  validator for generated samples (XSD 1.1, IDREF targets — neither of which
-  libxml2 checks). The app never imports it and the Docker image does not
-  install it; tests that need it skip when it is missing.
+- Backend: `cd backend && pytest` (also `ruff check`). `xmlschema` is a runtime
+  dependency, but the app never imports it: XSD 1.1 validation runs it in a
+  worker process (`app/parser/xsd11_worker.py`, started by `validation.py`).
+  Tests and `tools/sample_audit.py` also use it directly as a second validator
+  for generated samples (XSD 1.1, IDREF targets — neither of which libxml2
+  checks).
 - Frontend: `cd frontend && npm run test` (Vitest) and `npm run build` for
   the TS typecheck via `tsc --noEmit`.
 - E2E: `cd e2e && npm ci && npx playwright test` — boots the backend with
@@ -90,7 +91,8 @@ cached and a soft reload can keep showing the old UI.
   `block` / `final`, `ElementDecl.substitution_groups`, the `wildcard_not_*`
   particle fields and the schema-level `annotation`, `schema_version` and
   `notations`.
-- **Parser choice**: we use lxml, not `xmlschema`, because we need to preserve
-  annotations, appinfo, comments, and source line numbers.
+- **Parser choice**: we parse with lxml, not `xmlschema`, because we need to
+  preserve annotations, appinfo, comments, and source line numbers. Validation
+  is libxml2 for XSD 1.0 and `xmlschema` (worker process) for XSD 1.1.
 - **Default tab is `diagram`** (`selectionStore.ts`), enforced by the e2e
   golden-path test.
