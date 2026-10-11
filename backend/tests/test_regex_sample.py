@@ -109,7 +109,7 @@ def test_every_sample_matches(pattern: str) -> None:
 
 
 def test_unsupported_pattern_yields_no_samples() -> None:
-    assert list(samples_from_pattern("\\p{IsTibetan}+")) == []
+    assert list(samples_from_pattern("\\p{IsGothic}+")) == []
 
 
 def test_nested_repetition_cannot_run_away() -> None:

@@ -286,6 +286,11 @@ expression from the schema never runs on Python's `re`. Whatever falls
 outside is reported (`assertion_not_evaluated`, `assertion_unsettled`) and
 left to the validator.
 
+`tools/w3c_suite.py` runs the W3C XML Schema test suite through these paths
+(upload parser, `validate_xml`, sample generator) and lists every test the
+app disagrees with; `--compare` between two runs is the regression check for
+changes to the generator or the validation set-up.
+
 A compile failure raises `ValidationSetupError` (HTTP 422), and its message is
 the only thing the user gets, so `_compile_failure` classifies it instead of
 passing libxml2's wording through: files that never loaded (name them, say how

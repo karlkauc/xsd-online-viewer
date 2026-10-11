@@ -2,8 +2,8 @@
 
 Best effort only: literals, escapes, character classes, the common
 ``\\p{…}`` categories and blocks, groups, alternation and quantifiers are
-understood; anything else (a block this module has no range for, nested
-negated subtraction) makes the functions give up, so the caller can fall back
+understood; anything else (a block outside the Basic Multilingual Plane,
+nested negated subtraction) makes the functions give up, so the caller can fall back
 to a type placeholder.
 """
 
@@ -89,34 +89,98 @@ class _UnsupportedError(Exception):
     pass
 
 
-# Unicode blocks beyond Basic Latin that turn up in ``\\p{Is…}``; Python has no
-# block table of its own.
+# The Unicode blocks XSD names in ``\\p{Is…}`` (XML Schema Part 2, appendix F,
+# the Basic Multilingual Plane); Python has no block table of its own.
 _BLOCKS = {
-    "IsLatin-1Supplement": (0x00A0, 0x00FF),
-    "IsLatinExtended-A": (0x0100, 0x017F),
-    "IsLatinExtended-B": (0x0180, 0x024F),
-    "IsIPAExtensions": (0x0250, 0x02AF),
-    "IsGreek": (0x0370, 0x03FF),
-    "IsCyrillic": (0x0400, 0x04FF),
-    "IsArmenian": (0x0530, 0x058F),
-    "IsHebrew": (0x0590, 0x05FF),
-    "IsArabic": (0x0600, 0x06FF),
-    "IsDevanagari": (0x0900, 0x097F),
-    "IsThai": (0x0E00, 0x0E7F),
-    "IsGeorgian": (0x10A0, 0x10FF),
-    "IsLatinExtendedAdditional": (0x1E00, 0x1EFF),
-    "IsGreekExtended": (0x1F00, 0x1FFF),
-    "IsGeneralPunctuation": (0x2000, 0x206F),
-    "IsCurrencySymbols": (0x20A0, 0x20CF),
-    "IsLetterlikeSymbols": (0x2100, 0x214F),
-    "IsNumberForms": (0x2150, 0x218F),
-    "IsArrows": (0x2190, 0x21FF),
-    "IsMathematicalOperators": (0x2200, 0x22FF),
-    "IsCJKSymbolsandPunctuation": (0x3000, 0x303F),
-    "IsHiragana": (0x3040, 0x309F),
-    "IsKatakana": (0x30A0, 0x30FF),
-    "IsCJKUnifiedIdeographs": (0x4E00, 0x9FFF),
-    "IsHangulSyllables": (0xAC00, 0xD7A3),
+    name: (int(lo, 16), int(hi, 16))
+    for name, lo, hi in (
+        entry.split()
+        for entry in """
+        IsLatin-1Supplement 0080 00FF
+        IsLatinExtended-A 0100 017F
+        IsLatinExtended-B 0180 024F
+        IsIPAExtensions 0250 02AF
+        IsSpacingModifierLetters 02B0 02FF
+        IsCombiningDiacriticalMarks 0300 036F
+        IsGreek 0370 03FF
+        IsCyrillic 0400 04FF
+        IsArmenian 0530 058F
+        IsHebrew 0590 05FF
+        IsArabic 0600 06FF
+        IsSyriac 0700 074F
+        IsThaana 0780 07BF
+        IsDevanagari 0900 097F
+        IsBengali 0980 09FF
+        IsGurmukhi 0A00 0A7F
+        IsGujarati 0A80 0AFF
+        IsOriya 0B00 0B7F
+        IsTamil 0B80 0BFF
+        IsTelugu 0C00 0C7F
+        IsKannada 0C80 0CFF
+        IsMalayalam 0D00 0D7F
+        IsSinhala 0D80 0DFF
+        IsThai 0E00 0E7F
+        IsLao 0E80 0EFF
+        IsTibetan 0F00 0FFF
+        IsMyanmar 1000 109F
+        IsGeorgian 10A0 10FF
+        IsHangulJamo 1100 11FF
+        IsEthiopic 1200 137F
+        IsCherokee 13A0 13FF
+        IsUnifiedCanadianAboriginalSyllabics 1400 167F
+        IsOgham 1680 169F
+        IsRunic 16A0 16FF
+        IsKhmer 1780 17FF
+        IsMongolian 1800 18AF
+        IsLatinExtendedAdditional 1E00 1EFF
+        IsGreekExtended 1F00 1FFF
+        IsGeneralPunctuation 2000 206F
+        IsSuperscriptsandSubscripts 2070 209F
+        IsCurrencySymbols 20A0 20CF
+        IsCombiningMarksforSymbols 20D0 20FF
+        IsLetterlikeSymbols 2100 214F
+        IsNumberForms 2150 218F
+        IsArrows 2190 21FF
+        IsMathematicalOperators 2200 22FF
+        IsMiscellaneousTechnical 2300 23FF
+        IsControlPictures 2400 243F
+        IsOpticalCharacterRecognition 2440 245F
+        IsEnclosedAlphanumerics 2460 24FF
+        IsBoxDrawing 2500 257F
+        IsBlockElements 2580 259F
+        IsGeometricShapes 25A0 25FF
+        IsMiscellaneousSymbols 2600 26FF
+        IsDingbats 2700 27BF
+        IsBraillePatterns 2800 28FF
+        IsCJKRadicalsSupplement 2E80 2EFF
+        IsKangxiRadicals 2F00 2FDF
+        IsIdeographicDescriptionCharacters 2FF0 2FFF
+        IsCJKSymbolsandPunctuation 3000 303F
+        IsHiragana 3040 309F
+        IsKatakana 30A0 30FF
+        IsBopomofo 3100 312F
+        IsHangulCompatibilityJamo 3130 318F
+        IsKanbun 3190 319F
+        IsBopomofoExtended 31A0 31BF
+        IsEnclosedCJKLettersandMonths 3200 32FF
+        IsCJKCompatibility 3300 33FF
+        IsCJKUnifiedIdeographsExtensionA 3400 4DB5
+        IsCJKUnifiedIdeographs 4E00 9FFF
+        IsYiSyllables A000 A48F
+        IsYiRadicals A490 A4CF
+        IsHangulSyllables AC00 D7A3
+        IsPrivateUse E000 F8FF
+        IsCJKCompatibilityIdeographs F900 FAFF
+        IsAlphabeticPresentationForms FB00 FB4F
+        IsArabicPresentationForms-A FB50 FDFF
+        IsCombiningHalfMarks FE20 FE2F
+        IsCJKCompatibilityForms FE30 FE4F
+        IsSmallFormVariants FE50 FE6F
+        IsArabicPresentationForms-B FE70 FEFE
+        IsHalfwidthandFullwidthForms FF00 FFEF
+        IsSpecials FFF0 FFFD
+        """.strip().splitlines()
+    )
 }
 _CLASS_SIZE = 26
 
@@ -128,12 +192,19 @@ def _unicode_members(name: str, negated: bool) -> str | None:
         lo, hi = _BLOCKS[name]
         if negated:
             return "a"
-        found = [
-            chr(c)
-            for c in range(lo, hi + 1)
-            if unicodedata.category(chr(c))[0] in "LNPS"
-        ][:_CLASS_SIZE]
-        return "".join(found) or None
+        # Characters one can see first; a block of marks or private-use
+        # code points has none, and any assigned member will do then.
+        members = [chr(c) for c in range(lo, hi + 1)]
+        for wanted in ("LNPS", "MZC"):
+            found = [
+                m
+                for m in members
+                if unicodedata.category(m)[0] in wanted
+                and unicodedata.category(m) not in ("Cc", "Cs", "Cn", "Zl", "Zp")
+            ][:_CLASS_SIZE]
+            if found:
+                return "".join(found)
+        return None
     if not (1 <= len(name) <= 2 and name[0] in "LMNPZSC"):
         return None
     if negated:

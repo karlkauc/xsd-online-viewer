@@ -790,3 +790,90 @@ def test_a_referenced_key_is_settled_where_it_is_used() -> None:
     assert counts == {}
     # No second opinion here: xmlschema 4.1 raises a KeyError on a keyref used
     # by reference whose key is a reference too (test_validation covers that).
+
+
+# ---------------------------------------------------------------------------
+# Found by the W3C test suite (tools/w3c_suite.py)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "restriction",
+    [
+        '<xs:restriction base="xs:QName"><xs:pattern value="[a-z]{3}"/></xs:restriction>',
+        '<xs:restriction base="xs:QName"><xs:pattern value="([\\i-[:]][\\c-[:]]*:)?[\\i-[:]][\\c-[:]]{20}"/>'
+        "</xs:restriction>",
+        # A prefix the schema binds is declared in the sample as well.
+        '<xs:restriction base="xs:QName"><xs:enumeration value="t:one"/></xs:restriction>',
+        '<xs:restriction base="xs:language"><xs:length value="4"/></xs:restriction>',
+        '<xs:restriction base="xs:language"><xs:length value="9"/></xs:restriction>',
+        '<xs:restriction base="xs:duration"><xs:minExclusive value="P1Y1MT1H"/></xs:restriction>',
+        '<xs:restriction base="xs:gDay"><xs:minExclusive value="---01"/></xs:restriction>',
+        '<xs:restriction base="xs:gYear"><xs:maxExclusive value="2000Z"/></xs:restriction>',
+    ],
+)
+def test_facets_on_the_less_common_builtin_types(restriction: str) -> None:
+    root, counts = _valid_sample(
+        f'<xs:element name="R"><xs:simpleType>{restriction}</xs:simpleType></xs:element>'
+    )
+    assert root.text and counts == {}
+
+
+def test_a_pattern_on_a_list_yields_items_of_the_item_type() -> None:
+    """NIST list-byte-pattern: three digits match the pattern, but 901 is no byte."""
+    root, counts = _valid_sample(
+        '<xs:simpleType name="Bytes"><xs:list itemType="xs:byte"/></xs:simpleType>'
+        '<xs:element name="R"><xs:simpleType><xs:restriction base="t:Bytes">'
+        '<xs:pattern value="\\d{3} \\d{1,3}"/></xs:restriction></xs:simpleType></xs:element>',
+        "R",
+    )
+    assert all(-128 <= int(item) <= 127 for item in root.text.split())
+    assert counts == {}
+
+
+@needs_xmlschema
+@pytest.mark.parametrize(("zone", "zoned"), [("required", True), ("prohibited", False)])
+def test_explicit_timezone_is_honoured(zone: str, zoned: bool) -> None:
+    xsd = _schema(
+        '<xs:element name="R"><xs:simpleType><xs:restriction base="xs:dateTime">'
+        f'<xs:explicitTimezone value="{zone}"/></xs:restriction></xs:simpleType></xs:element>'
+    )
+    xml, counts = _generate(xsd)
+    text = etree.fromstring(xml.encode("utf-8")).text
+    assert text.endswith("Z") is zoned
+    assert _errors_11(xsd, xml) == [] and counts == {}
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "t:item",  # reaches an element with element content
+        "t:item/t:a | t:item/t:b",  # reaches two nodes
+    ],
+)
+def test_an_optional_node_whose_field_can_have_no_value_is_left_out(field: str) -> None:
+    root, counts = _valid_sample(
+        '<xs:element name="R"><xs:complexType><xs:sequence>'
+        '<xs:element name="row" minOccurs="0" maxOccurs="unbounded"><xs:complexType><xs:sequence>'
+        '<xs:element name="item"><xs:complexType><xs:sequence>'
+        '<xs:element name="a" type="xs:string"/><xs:element name="b" type="xs:string"/>'
+        "</xs:sequence></xs:complexType></xs:element>"
+        "</xs:sequence></xs:complexType></xs:element>"
+        "</xs:sequence></xs:complexType>"
+        f'<xs:unique name="u"><xs:selector xpath="t:row"/><xs:field xpath="{field}"/></xs:unique>'
+        "</xs:element>",
+        include_optional=True,
+    )
+    assert _children(root) == []
+    assert counts == {"optional_subtree_dropped": 1}
+
+
+def test_white_space_around_a_target_namespace_is_not_part_of_it() -> None:
+    xsd = (
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="  urn:spaced  " '
+        b'elementFormDefault="qualified"><xs:element name="R" type="xs:int"/></xs:schema>'
+    )
+    model = parse_single(xsd, "t.xsd")
+    assert model.target_namespace == "urn:spaced"
+    xml, _ = generate_sample_with_report(model, model.elements[0], SampleOptions())
+    assert etree.fromstring(xml.encode("utf-8")).tag == "{urn:spaced}R"

@@ -2140,17 +2140,39 @@ def _drop(
 def _drop_incomplete_key_targets(
     ctx: _Context, root: etree._Element, scope: etree._Element, constraint: IdentityConstraint, _scopes: list
 ) -> None:
-    """Every node a key selects needs every field (XTCE: MessageSet/* also reaches LongDescription)."""
-    if constraint.kind != "key":
-        return
+    """Every node a key selects needs every field (XTCE: MessageSet/* also reaches LongDescription).
+
+    And no constraint of any kind may have a field that reaches several nodes
+    or an element with element content: such a node can only be left out.
+    """
     for target in _select(ctx, constraint, scope):
-        if not _in_tree(target, root) or _fields(ctx, constraint, target) is not None:
+        if not _in_tree(target, root):
+            continue
+        if _field_unusable(ctx, constraint, target):
+            removable = _removable(ctx, target, root)
+            if removable is not None:
+                _drop(ctx, removable)
+            else:
+                ctx.note("identity_field_unusable", GENERATOR_LIMIT, constraint.name, constraint)
+            continue
+        if constraint.kind != "key" or _fields(ctx, constraint, target) is not None:
             continue
         removable = _removable(ctx, target, root)
         if removable is not None:
             _drop(ctx, removable)
         elif not _supply_key_fields(ctx, constraint, target):
             ctx.note("key_field_missing", GENERATOR_LIMIT, constraint.name, constraint)
+
+
+def _field_unusable(ctx: _Context, constraint: IdentityConstraint, target: etree._Element) -> bool:
+    """Whether a field of ``constraint`` reaches more than one node, or one that has no simple value."""
+    for expression in constraint.fields:
+        result = _run_xpath(ctx, constraint, expression, target)
+        if len(result) > 1:
+            return True
+        if result and isinstance(result[0], etree._Element) and len(result[0]) > 0:
+            return True
+    return False
 
 
 _ATTRIBUTE_FIELD = re.compile(r"^@(?:[\w.-]+:)?([\w.-]+)$")
@@ -2573,9 +2595,23 @@ def _list_value(
     else:
         item = _value_for_type_name(ctx, simple.item_type, [], simple, stack)
     value = " ".join([item] * _item_count(facets))
-    for pattern in [f.value for f in reversed(facets) if f.kind == "pattern"]:
-        return next(samples_from_pattern(pattern), value)
-    return value
+    patterns = [f.value for f in reversed(facets) if f.kind == "pattern"]
+    if not patterns:
+        return value
+    # A pattern on a list describes the whole value; what it yields still has
+    # to be made of items of the list's type (NIST: bytes, not just digits).
+    candidates = [s for pattern in patterns for s in samples_from_pattern(pattern)]
+    resolved = (
+        _resolve_type(ctx, simple.item_type, simple, quiet=True) if simple.item_type else None
+    )
+    if resolved is not None and resolved[0] == "builtin" and resolved[1] not in _UNCHECKED_TYPES:
+        checker = _value_checker(resolved[1], _checkable(facets), as_list=True)
+        if checker is not None:
+            for candidate in [*candidates, value]:
+                if _accepts(checker, candidate):
+                    return candidate
+            ctx.note("value_unsatisfiable", GENERATOR_LIMIT, simple.name, simple)
+    return candidates[0] if candidates else value
 
 
 def _item_count(facets: list[Facet]) -> int:
@@ -2670,6 +2706,11 @@ def _builtin_value(ctx: _Context, local: str, facets: list[Facet]) -> str:
     ctx.last_spec = (local, facets)
     if local == "ID":
         return _id_value(ctx, facets)
+    if local in ("QName", "NOTATION"):
+        return _qname_value(ctx, local, facets)
+    zone = next((f.value for f in reversed(facets) if f.kind == "explicitTimezone"), None)
+    if zone in ("required", "prohibited"):
+        return _zoned_value(ctx, local, facets, zone == "required")
     known = local in _BUILTIN_VALUES
     if not known:
         # Not a built-in we know: the value below is a guess.
@@ -2697,6 +2738,62 @@ def _builtin_value(ctx: _Context, local: str, facets: list[Facet]) -> str:
     if len(ctx.report) == notes_before:
         ctx.note("value_unsatisfiable", GENERATOR_LIMIT, local)
     return candidates[0]
+
+
+_PREFIXED = re.compile(r"^([A-Za-z_][\w.-]*):[A-Za-z_][\w.-]*$")
+_UNPREFIXED = re.compile(r"^[A-Za-z_][\w.-]*$")
+
+
+def _qname_value(ctx: _Context, local: str, facets: list[Facet]) -> str:
+    """A QName under ``facets``, with its prefix declared in the document.
+
+    A QName cannot be checked on its own -- its prefix needs a namespace -- so
+    the patterns and enumeration are checked on the lexical form instead, and
+    a prefix is only used when the schema binds it, in which case the sample
+    declares it the same way.
+    """
+    candidates = _candidates(ctx, local, facets)
+    lexical = tuple((f.kind, f.value) for f in facets if f.kind in ("pattern", "enumeration"))
+    checker = _value_checker("token", lexical) if lexical else None
+    for candidate in candidates:
+        if checker is not None and not _accepts(checker, candidate):
+            continue
+        prefixed = _PREFIXED.match(candidate)
+        if prefixed is None:
+            if _UNPREFIXED.match(candidate):
+                return candidate
+            continue
+        prefix = prefixed.group(1)
+        namespace = ctx.namespace_of_prefix(prefix, ctx.file_stack[-1] if ctx.file_stack else None)
+        if namespace and ctx.nsmap.get(prefix, namespace) == namespace:
+            ctx.nsmap[prefix] = namespace
+            ctx.value_prefixes.add(prefix)
+            return candidate
+    ctx.note("value_unsatisfiable", GENERATOR_LIMIT, local)
+    return candidates[0] if candidates else _BUILTIN_VALUES[local]
+
+
+_ZONE = re.compile(r"(Z|[+-]\d\d:\d\d)$")
+
+
+def _zoned_value(ctx: _Context, local: str, facets: list[Facet], required: bool) -> str:
+    """A date or time under XSD 1.1 ``explicitTimezone``, which libxml2 cannot check."""
+    rest = [f for f in facets if f.kind != "explicitTimezone"]
+    checker = _value_checker(local, _checkable(rest)) if local not in _UNCHECKED_TYPES else None
+    candidates = []
+    for candidate in _candidates(ctx, local, rest):
+        zoned = _ZONE.search(candidate) is not None
+        if zoned == required:
+            candidates.append(candidate)
+        elif required:
+            candidates.append(candidate + "Z")
+        else:
+            candidates.append(_ZONE.sub("", candidate))
+    for candidate in _unique(candidates):
+        if checker is None or _accepts(checker, candidate):
+            return candidate
+    ctx.note("value_unsatisfiable", GENERATOR_LIMIT, local)
+    return candidates[0] if candidates else _BUILTIN_VALUES.get(local, "string")
 
 
 # Unconstrained decimals in turn, so that a document full of amounts does not
@@ -2784,7 +2881,9 @@ def _candidates(ctx: _Context, local: str, facets: list[Facet]) -> list[str]:
     if enumeration is not None:
         # Nothing outside the enumeration can be valid.
         return _unique([enumeration, *(f.value for f in facets if f.kind == "enumeration")])
-    string_like = local in _STRING_TYPES or local not in _BUILTIN_VALUES
+    string_like = (
+        local in _STRING_TYPES or local not in _BUILTIN_VALUES or local in ("QName", "NOTATION")
+    )
     if local in _INTEGER_TYPES or local in _DECIMAL_TYPES:
         values = _numeric_candidates(local, facets)
     elif string_like:
@@ -2801,6 +2900,7 @@ def _candidates(ctx: _Context, local: str, facets: list[Facet]) -> list[str]:
             *bounds,
             *_beyond_exclusive_bounds(local, facets),
             *_binary_candidates(local, facets),
+            *(_language_candidates(facets) if local == "language" else ()),
         ]
     patterns = _pattern_candidates(ctx, facets)
     # A string placeholder rarely matches a pattern; a number or a date often does.
@@ -2817,6 +2917,49 @@ def _beyond_exclusive_bounds(local: str, facets: list[Facet]) -> list[str]:
         shifted = _shifted(local, facet.value, step)
         if shifted is not None:
             values.append(shifted)
+        else:
+            values.extend(_nudged(facet.value, step))
+    return values
+
+
+_LAST_NUMBER = re.compile(r"(\d+)(?=\D*$)")
+_FIRST_NUMBER = re.compile(r"\d+")
+
+
+def _nudged(value: str, step: int) -> list[str]:
+    """``value`` with one of its numbers moved by ``step``, at the same width.
+
+    For the bounds ``_shifted`` cannot read -- a duration of several parts
+    (P1Y1MT1H), a gDay, a value with a time zone. Whether the result really
+    lies beyond the bound is for the caller's check to say.
+    """
+    out = []
+    for pattern in (_LAST_NUMBER, _FIRST_NUMBER):
+        match = pattern.search(value)
+        if match is None:
+            continue
+        number = int(match.group(0)) + step
+        if number >= 0:
+            out.append(
+                f"{value[:match.start()]}{number:0{len(match.group(0))}d}{value[match.end():]}"
+            )
+    return out
+
+
+def _language_candidates(facets: list[Facet]) -> list[str]:
+    """Language tags at the lengths the facets ask for: subtags of up to eight letters."""
+    values = []
+    for kind in ("length", "minLength", "maxLength"):
+        size = _int_facet(facets, kind)
+        if size is None or not 0 < size <= 512:
+            continue
+        tag, left = [], size
+        while left > 0:
+            # A subtag needs a letter, so never leave room for the hyphen alone.
+            take = 7 if left == 9 else min(8, left)
+            tag.append("abcdefgh"[:take])
+            left -= take + 1
+        values.append("-".join(tag))
     return values
 
 
@@ -3084,7 +3227,9 @@ def _checkable(facets: list[Facet]) -> tuple[tuple[str, str], ...]:
 
 
 @lru_cache(maxsize=4096)
-def _value_checker(local: str, facets: tuple[tuple[str, str], ...]) -> etree.XMLSchema | None:
+def _value_checker(
+    local: str, facets: tuple[tuple[str, str], ...], as_list: bool = False
+) -> etree.XMLSchema | None:
     """A one-element schema accepting exactly the values of ``local`` under ``facets``.
 
     Each pattern facet stands for one derivation step (see _by_step) and all
@@ -3097,7 +3242,17 @@ def _value_checker(local: str, facets: tuple[tuple[str, str], ...]) -> etree.XML
         for kind, value in facets
         if kind != "pattern" or value is patterns[0]
     )
-    simple = f'<xs:simpleType><xs:restriction base="xs:{local}">{body}</xs:restriction></xs:simpleType>'
+    if as_list:
+        # The facets then sit on a list of ``local`` and concern the whole value.
+        simple = (
+            f'<xs:simpleType><xs:restriction><xs:simpleType><xs:list itemType="xs:{local}"/>'
+            f"</xs:simpleType>{body}</xs:restriction></xs:simpleType>"
+        )
+    else:
+        simple = (
+            f'<xs:simpleType><xs:restriction base="xs:{local}">{body}</xs:restriction>'
+            "</xs:simpleType>"
+        )
     for pattern in patterns[1:]:
         simple = (
             f"<xs:simpleType><xs:restriction>{simple}"

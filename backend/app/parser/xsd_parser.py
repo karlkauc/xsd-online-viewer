@@ -701,7 +701,8 @@ class XsdParser:
                     line=removed[0] or None,
                 )
             )
-        target_ns = root.get("targetNamespace") or target_ns_hint
+        # An anyURI: surrounding white space is not part of the namespace name.
+        target_ns = _token(root, "targetNamespace") or target_ns_hint
         loaded = _LoadedFile(
             file_id=file_id,
             filename=filename,
