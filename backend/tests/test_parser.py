@@ -192,10 +192,11 @@ class TestXsd11Infrastructure:
         assert event_type.version_constraints is not None
         assert event_type.version_constraints.max_version == "2.0"
 
-        legacy = _find_simple(model, "LegacyToken")
-        assert legacy is not None
-        assert legacy.version_constraints is not None
-        assert legacy.version_constraints.max_version == "1.1"
+        # vc:maxVersion="1.1" is exclusive: an XSD 1.1 processor does not see it.
+        assert _find_simple(model, "LegacyToken") is None
+        (warning,) = model.diagnostics
+        assert "1 declaration was left out by vc:* conditions" in warning.message
+        assert warning.line == 25
 
     def test_legacy_schema_reports_version_1_0(self, simple_xsd_bytes: bytes) -> None:
         # simple.xsd uses no XSD 1.1 constructs and no vc:* attributes.
@@ -345,10 +346,10 @@ class TestXsd11OpenContent:
     ) -> None:
         model = parse_single(open_content_xsd_bytes, "open-content.xsd")
         a = _find_complex(model, "A")
-        # An inheriting complexType has no per-type override; the default
-        # propagation is purely a display concern handled in the frontend.
-        assert a is not None
-        assert a.open_content is None
+        assert a is not None and a.open_content is not None
+        assert a.open_content.origin == "default"
+        assert a.open_content.wildcard.namespace == "##other"
+        assert _find_complex(model, "B").open_content.origin == "own"
 
     def test_complex_with_suffix_open_content(
         self, open_content_xsd_bytes: bytes
@@ -464,29 +465,17 @@ class TestXsd11Override:
             main_filename="override.xsd",
         )
 
-    def test_original_and_replacement_coexist_in_complex_types(
+    def test_the_replacement_takes_the_originals_place(
         self,
         override_xsd_bytes: bytes,
         override_base_xsd_bytes: bytes,
     ) -> None:
         model = self._parse_pair(override_xsd_bytes, override_base_xsd_bytes)
-        color_types = [c for c in model.complex_types if c.name == "ColorType"]
-        assert len(color_types) == 2
-        # Distinct ids — replacement carries the override:* prefix.
-        ids = {c.id for c in color_types}
-        assert any(i.startswith("override:") for i in ids)
-        assert any(not i.startswith("override:") for i in ids)
-        # Different content models confirm we picked up two definitions.
-        kids = {
-            tuple(
-                child.element.name
-                for child in c.particle.children
-                if child.element is not None
-            )
-            for c in color_types
-        }
-        assert ("R", "G", "B") in kids
-        assert ("C", "M", "Y", "K") in kids
+        (color,) = [c for c in model.complex_types if c.name == "ColorType"]
+        assert color.id == "complexType:{http://example.com/ovr}ColorType"
+        assert [c.element.name for c in color.particle.children] == ["C", "M", "Y", "K"]
+        # What the overridden file declares besides is untouched.
+        assert _find_element(model, "OriginalOnly") is not None
 
     def test_override_directive_records_replacements(
         self,
@@ -494,26 +483,57 @@ class TestXsd11Override:
         override_base_xsd_bytes: bytes,
     ) -> None:
         model = self._parse_pair(override_xsd_bytes, override_base_xsd_bytes)
-        assert len(model.overrides) == 1
-        directive = model.overrides[0]
-        assert directive.target_file_id  # set to the loaded base file id
-        kinds = sorted(r.kind for r in directive.replacements)
-        assert kinds == ["complexType", "element"]
-        names = {r.qname.split("}")[-1] for r in directive.replacements}
-        assert names == {"ColorType", "AddedByOverride"}
-        for r in directive.replacements:
-            assert r.replacement_id.startswith("override:")
-            assert r.source_ref is not None
+        (directive,) = model.overrides
+        base = next(f for f in model.files if f.filename == "override-base.xsd")
+        assert directive.target_file_id == base.id
+        (replacement,) = directive.replacements
+        assert replacement.kind == "complexType"
+        assert replacement.replacement_id == "complexType:{http://example.com/ovr}ColorType"
+        assert replacement.source_ref.line == 9
+        # Where the definition it replaced is written, for the Text view.
+        assert (replacement.original_source_ref.file_id, replacement.original_source_ref.line) == (
+            base.id,
+            7,
+        )
 
-    def test_added_by_override_is_findable_as_top_level_element(
+    def test_an_override_cannot_add_a_component(
         self,
         override_xsd_bytes: bytes,
         override_base_xsd_bytes: bytes,
     ) -> None:
+        """XSD 1.1, 4.2.5: what matches nothing in the overridden file is dropped."""
         model = self._parse_pair(override_xsd_bytes, override_base_xsd_bytes)
-        added = [e for e in model.elements if e.name == "AddedByOverride"]
-        assert len(added) == 1
-        assert added[0].id.startswith("override:")
+        assert _find_element(model, "AddedByOverride") is None
+        (warning,) = model.diagnostics
+        assert "xs:override of element 'AddedByOverride'" in warning.message
+        assert "ignored" in warning.message
+
+    def test_an_overridden_element_and_references_to_it(self) -> None:
+        xs = 'xmlns:xs="http://www.w3.org/2001/XMLSchema"'
+        model = parse_files_map(
+            {
+                "main.xsd": (
+                    f'<xs:schema {xs}><xs:override schemaLocation="base.xsd">'
+                    '<xs:element name="Id" type="xs:int"/>'
+                    '<xs:simpleType name="Code"><xs:restriction base="xs:token"/></xs:simpleType>'
+                    "</xs:override></xs:schema>"
+                ).encode(),
+                "base.xsd": (
+                    f'<xs:schema {xs}><xs:element name="Id" type="xs:string"/>'
+                    '<xs:simpleType name="Code"><xs:restriction base="xs:string"/></xs:simpleType>'
+                    '<xs:element name="Doc"><xs:complexType><xs:sequence>'
+                    '<xs:element ref="Id"/><xs:element name="C" type="Code"/>'
+                    "</xs:sequence></xs:complexType></xs:element></xs:schema>"
+                ).encode(),
+            },
+            main_filename="main.xsd",
+        )
+        assert model.diagnostics == []
+        # One declaration each, in the original's position, and the reference reaches it.
+        assert [(e.name, e.type_name) for e in model.elements] == [("Id", "xs:int"), ("Doc", None)]
+        assert [(t.name, t.base) for t in model.simple_types] == [("Code", "xs:token")]
+        doc = _find_element(model, "Doc")
+        assert doc.type_inline_complex.particle.children[0].element.ref_id == "element:Id"
 
     def test_override_target_file_loaded_with_relationship_override(
         self,
@@ -529,6 +549,40 @@ class TestXsd11Override:
     ) -> None:
         model = parse_single(simple_xsd_bytes, "simple.xsd")
         assert model.overrides == []
+
+
+    def test_a_replacement_is_read_under_the_overridden_files_defaults(self) -> None:
+        """An override transforms the overridden document, so its defaultAttributes,
+        blockDefault and target namespace apply, not those of the file the block is in."""
+        xs = 'xmlns:xs="http://www.w3.org/2001/XMLSchema"'
+        model = parse_files_map(
+            {
+                "main.xsd": (
+                    f'<xs:schema {xs}><xs:override schemaLocation="base.xsd">'
+                    '<xs:complexType name="T"><xs:sequence><xs:element name="b"/></xs:sequence>'
+                    "</xs:complexType></xs:override></xs:schema>"
+                ).encode(),
+                "base.xsd": (
+                    f'<xs:schema {xs} targetNamespace="urn:base" xmlns="urn:base" '
+                    'defaultAttributes="Common" blockDefault="extension">'
+                    '<xs:defaultOpenContent><xs:any processContents="skip"/></xs:defaultOpenContent>'
+                    '<xs:attributeGroup name="Common"><xs:attribute name="lang"/></xs:attributeGroup>'
+                    '<xs:complexType name="T"><xs:sequence><xs:element name="a"/></xs:sequence>'
+                    "</xs:complexType></xs:schema>"
+                ).encode(),
+            },
+            main_filename="main.xsd",
+        )
+        (t,) = model.complex_types
+        assert t.id == "complexType:{urn:base}T"
+        assert [c.element.name for c in t.particle.children] == ["b"]
+        assert (t.default_attributes, t.block, t.open_content.origin) == (
+            "Common",
+            ["extension"],
+            "default",
+        )
+        main = next(f for f in model.files if f.relationship == "main")
+        assert t.source_ref.file_id == main.id  # still where it is written
 
 
 class TestIncludeResolution:
@@ -1250,3 +1304,180 @@ def test_member_of_a_second_substitution_head_stands_in_for_it() -> None:
     model = parse_single(xsd, "heads.xsd")
     root = etree.fromstring(generate_sample(model, _find_element(model, "root")).encode())
     assert [c.tag for c in root] == ["m"]
+
+
+class TestConditionalInclusion:
+    """vc:* is evaluated as an XSD 1.1 processor does (XSD 1.1, 4.2.2)."""
+
+    _HEAD = (
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+        'xmlns:vc="http://www.w3.org/2007/XMLSchema-versioning" xmlns:x="urn:x">'
+    )
+
+    def _names(self, body: str) -> list[str]:
+        model = parse_single((self._HEAD + body + "</xs:schema>").encode(), "vc.xsd")
+        return [e.name for e in model.elements]
+
+    def test_the_1_1_branch_of_a_two_version_schema_is_the_one_kept(self) -> None:
+        model = parse_single(
+            (
+                self._HEAD
+                + '<xs:element name="A" type="xs:dateTimeStamp" vc:minVersion="1.1"/>'
+                + '<xs:element name="A" type="xs:dateTime" vc:maxVersion="1.1"/>'
+                + "</xs:schema>"
+            ).encode(),
+            "vc.xsd",
+        )
+        (a,) = model.elements  # used to be two declarations under one id
+        assert a.type_name == "xs:dateTimeStamp"
+        # The only vc:* attribute left is no reason to miss that this is XSD 1.1.
+        assert model.xsd_version == "1.1"
+
+    @pytest.mark.parametrize(
+        ("condition", "kept"),
+        [
+            ('vc:minVersion="1.0"', True),
+            ('vc:minVersion="1.1"', True),
+            ('vc:minVersion="1.2"', False),
+            ('vc:maxVersion="1.2"', True),
+            ('vc:maxVersion="1.1"', False),
+            ('vc:minVersion="1.0" vc:maxVersion="1.1"', False),
+            ('vc:typeAvailable="xs:dateTimeStamp xs:int"', True),
+            ('vc:typeAvailable="xs:dateTimeStamp x:custom"', False),
+            ('vc:typeUnavailable="xs:dateTimeStamp"', False),
+            ('vc:typeUnavailable="xs:int x:custom"', True),
+            ('vc:facetAvailable="xs:assertion"', True),
+            ('vc:facetAvailable="x:minLen"', False),
+            ('vc:facetUnavailable="xs:explicitTimezone"', False),
+            ('vc:facetUnavailable="x:minLen"', True),
+            ('vc:minVersion="soon"', True),
+        ],
+    )
+    def test_conditions(self, condition: str, kept: bool) -> None:
+        assert self._names(f'<xs:element name="A" type="xs:int" {condition}/>') == (
+            ["A"] if kept else []
+        )
+
+    def test_it_applies_at_any_depth_and_takes_the_content_along(self) -> None:
+        model = parse_single(
+            (
+                self._HEAD
+                + '<xs:element name="Doc"><xs:complexType><xs:sequence>'
+                + '<xs:element name="Old" vc:maxVersion="1.1"><xs:complexType>'
+                + '<xs:attribute name="deep" vc:minVersion="1.1"/></xs:complexType></xs:element>'
+                + '<xs:element name="New" type="xs:int"/>'
+                + '</xs:sequence><xs:attribute name="legacy" vc:maxVersion="1.1"/>'
+                + "</xs:complexType></xs:element></xs:schema>"
+            ).encode(),
+            "vc.xsd",
+        )
+        doc = model.elements[0].type_inline_complex
+        assert [c.element.name for c in doc.particle.children] == ["New"]
+        assert doc.attributes == []
+        (warning,) = model.diagnostics
+        assert "2 declarations were left out" in warning.message
+
+    def test_an_excluded_include_is_not_followed(self) -> None:
+        model = parse_files_map(
+            {
+                "main.xsd": (
+                    self._HEAD
+                    + '<xs:include schemaLocation="old.xsd" vc:maxVersion="1.1"/>'
+                    + '<xs:include schemaLocation="missing.xsd" vc:maxVersion="1.1"/>'
+                    + '<xs:element name="A"/></xs:schema>'
+                ).encode(),
+                "old.xsd": (
+                    b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+                    b'<xs:element name="Old"/></xs:schema>'
+                ),
+            },
+            main_filename="main.xsd",
+        )
+        assert [f.filename for f in model.files] == ["main.xsd"]
+        assert [e.name for e in model.elements] == ["A"]
+        assert not any("unresolved" in d.message for d in model.diagnostics)
+
+
+class TestSchemaDefaultsPerFile:
+    """defaultAttributes and xs:defaultOpenContent reach the types of their own file only."""
+
+    def _model(self):
+        xs = 'xmlns:xs="http://www.w3.org/2001/XMLSchema"'
+        return parse_files_map(
+            {
+                "main.xsd": (
+                    f'<xs:schema {xs}><xs:include schemaLocation="part.xsd"/>'
+                    '<xs:complexType name="Main"><xs:sequence><xs:element name="a"/></xs:sequence>'
+                    "</xs:complexType>"
+                    '<xs:complexType name="Ext"><xs:complexContent><xs:extension base="Open">'
+                    '<xs:sequence><xs:element name="more"/></xs:sequence>'
+                    "</xs:extension></xs:complexContent></xs:complexType>"
+                    '<xs:complexType name="Restr"><xs:complexContent><xs:restriction base="Open">'
+                    '<xs:sequence><xs:element name="b"/></xs:sequence>'
+                    "</xs:restriction></xs:complexContent></xs:complexType>"
+                    "</xs:schema>"
+                ).encode(),
+                "part.xsd": (
+                    f'<xs:schema {xs} defaultAttributes="Common">'
+                    '<xs:defaultOpenContent mode="suffix"><xs:any processContents="lax"/>'
+                    "</xs:defaultOpenContent>"
+                    '<xs:attributeGroup name="Common"><xs:attribute name="lang"/></xs:attributeGroup>'
+                    '<xs:complexType name="Open"><xs:sequence><xs:element name="b"/></xs:sequence>'
+                    "</xs:complexType>"
+                    '<xs:complexType name="Empty"/>'
+                    '<xs:complexType name="Plain" defaultAttributesApply="false">'
+                    '<xs:openContent mode="none"/><xs:sequence><xs:element name="c"/></xs:sequence>'
+                    "</xs:complexType>"
+                    '<xs:complexType name="Text"><xs:simpleContent><xs:extension base="xs:string"/>'
+                    "</xs:simpleContent></xs:complexType>"
+                    "</xs:schema>"
+                ).encode(),
+            },
+            main_filename="main.xsd",
+        )
+
+    def test_default_attributes_are_those_of_the_types_own_file(self) -> None:
+        model = self._model()
+        assert model.default_attributes is None  # the main file names none
+        assert _find_complex(model, "Open").default_attributes == "Common"
+        assert _find_complex(model, "Text").default_attributes == "Common"
+        assert _find_complex(model, "Plain").default_attributes is None
+        assert _find_complex(model, "Main").default_attributes is None
+
+    def test_default_open_content_is_that_of_the_types_own_file(self) -> None:
+        model = self._model()
+        assert model.default_open_content is None
+        opened = _find_complex(model, "Open").open_content
+        assert (opened.origin, opened.mode) == ("default", "suffix")
+        assert _find_complex(model, "Main").open_content is None
+        # Not an empty content model unless appliesToEmpty says so, and never simple content.
+        assert _find_complex(model, "Empty").open_content is None
+        assert _find_complex(model, "Text").open_content is None
+        assert _find_complex(model, "Plain").open_content.mode == "none"
+
+    def test_an_extension_keeps_its_bases_open_content_a_restriction_does_not(self) -> None:
+        model = self._model()
+        inherited = _find_complex(model, "Ext").open_content
+        assert (inherited.origin, inherited.mode) == ("base", "suffix")
+        assert _find_complex(model, "Restr").open_content is None
+
+    def test_a_sample_carries_the_default_attributes_of_an_included_file(self) -> None:
+        from app.parser.sample import generate_sample
+
+        xs = 'xmlns:xs="http://www.w3.org/2001/XMLSchema"'
+        model = parse_files_map(
+            {
+                "main.xsd": (
+                    f'<xs:schema {xs}><xs:include schemaLocation="part.xsd"/>'
+                    '<xs:element name="Doc" type="T"/></xs:schema>'
+                ).encode(),
+                "part.xsd": (
+                    f'<xs:schema {xs} defaultAttributes="Common">'
+                    '<xs:attributeGroup name="Common">'
+                    '<xs:attribute name="lang" use="required"/></xs:attributeGroup>'
+                    '<xs:complexType name="T"/></xs:schema>'
+                ).encode(),
+            },
+            main_filename="main.xsd",
+        )
+        assert "lang=" in generate_sample(model, _find_element(model, "Doc"))

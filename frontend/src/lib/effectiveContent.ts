@@ -95,6 +95,14 @@ export function effectiveParticle(
   return { particle: baseResult.particle ?? ownParticle, inheritedFrom };
 }
 
+// A type's attribute groups, the one from its file's ``defaultAttributes`` included.
+function ownAttributeGroupRefs(complex: ComplexType): QName[] {
+  const implicit = complex.default_attributes;
+  return implicit && !complex.attribute_group_refs.includes(implicit)
+    ? [...complex.attribute_group_refs, implicit]
+    : complex.attribute_group_refs;
+}
+
 export function effectiveAttributes(
   complex: ComplexType,
   resolve: ComplexResolver,
@@ -103,7 +111,7 @@ export function effectiveAttributes(
   if (complex.derivation !== "extension" || !complex.base || seen.has(complex.id)) {
     return {
       attributes: complex.attributes,
-      attributeGroupRefs: complex.attribute_group_refs,
+      attributeGroupRefs: ownAttributeGroupRefs(complex),
       anyAttribute: complex.any_attribute ?? null,
       inheritedFrom: [],
     };
@@ -112,7 +120,7 @@ export function effectiveAttributes(
   if (!base) {
     return {
       attributes: complex.attributes,
-      attributeGroupRefs: complex.attribute_group_refs,
+      attributeGroupRefs: ownAttributeGroupRefs(complex),
       anyAttribute: complex.any_attribute ?? null,
       inheritedFrom: [],
     };
@@ -132,7 +140,7 @@ export function effectiveAttributes(
     attributes.push(attr);
   }
   const attributeGroupRefs = Array.from(
-    new Set([...baseResult.attributeGroupRefs, ...complex.attribute_group_refs]),
+    new Set([...baseResult.attributeGroupRefs, ...ownAttributeGroupRefs(complex)]),
   );
   return {
     attributes,

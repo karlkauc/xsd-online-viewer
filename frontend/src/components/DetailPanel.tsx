@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import { useSelection } from "../stores/selectionStore";
 import {
   findRedefineLink,
-  overrideKey,
   resolveReference,
   type RedefineLink,
 } from "../lib/indexSchema";
@@ -80,9 +79,6 @@ export function DetailPanel() {
   const overrideByReplacementId = useSelection(
     (s) => s.overrideByReplacementId,
   );
-  const overridesByOriginalKey = useSelection(
-    (s) => s.overridesByOriginalKey,
-  );
 
   const ctx: PanelCtx = {
     index,
@@ -99,25 +95,11 @@ export function DetailPanel() {
 
   const entry = selectedId ? indexById.get(selectedId) : undefined;
 
-  const overrideContext = useMemo(() => {
-    if (!entry) return null;
-    const asReplacement = overrideByReplacementId.get(entry.id);
-    const originalsKey = entry.qname
-      ? overrideKey(entry.kind, entry.qname)
-      : null;
-    const rawReplacements = originalsKey
-      ? overridesByOriginalKey.get(originalsKey) ?? []
-      : [];
-    // A replacement shares kind+qname with the original, so the lookup
-    // above also returns the selected node itself when it IS a replacement.
-    // Strip self-references so we don't render "overridden by" pointing at
-    // the very thing the user is already looking at.
-    const replacementsOnThis = rawReplacements.filter(
-      (r) => r.replacement_id !== entry.id,
-    );
-    if (!asReplacement && replacementsOnThis.length === 0) return null;
-    return { asReplacement, replacementsOnThis };
-  }, [entry, overrideByReplacementId, overridesByOriginalKey]);
+  // The parser applies xs:override: the selected node is the replacement,
+  // and what it replaced exists only as source text.
+  const overrideReplacement = entry
+    ? overrideByReplacementId.get(entry.id)?.replacement ?? null
+    : null;
 
   const redefineLink = useMemo(
     () => (entry ? findRedefineLink(model, entry.id) : null),
@@ -197,7 +179,8 @@ export function DetailPanel() {
       <Header
         entry={entry}
         setActiveTab={setActiveTab}
-        overrideContext={overrideContext}
+        overrideReplacement={overrideReplacement}
+        jumpToSource={jumpToSource}
         redefineLink={redefineLink}
         setSelected={setSelected}
       />
@@ -226,23 +209,20 @@ export function DetailPanel() {
 // Header
 // ---------------------------------------------------------------------------
 
-interface OverrideContext {
-  asReplacement?: { replacement: OverrideReplacement } | undefined;
-  replacementsOnThis: OverrideReplacement[];
-}
-
 function Header({
   entry,
   setActiveTab,
-  overrideContext,
+  overrideReplacement,
   redefineLink,
   setSelected,
+  jumpToSource,
 }: {
   entry: NodeIndexEntry;
   setActiveTab: (tab: "tree" | "diagram" | "text") => void;
-  overrideContext: OverrideContext | null;
+  overrideReplacement: OverrideReplacement | null;
   redefineLink: RedefineLink | null;
   setSelected: (id: string) => void;
+  jumpToSource: (ref: SourceRef) => void;
 }) {
   return (
     <div className="relative border-b border-slate-200 dark:border-slate-800 bg-gradient-to-b from-slate-50/60 to-white dark:from-slate-900/40 dark:to-slate-950">
@@ -261,19 +241,9 @@ function Header({
               <VersionBadge vc={entry.node.version_constraints} />
             )}
           {redefineLink && <RedefineButton link={redefineLink} setSelected={setSelected} />}
-          {overrideContext?.asReplacement && (
-            <OverrideOriginButton
-              replacement={overrideContext.asReplacement.replacement}
-              setSelected={setSelected}
-            />
+          {overrideReplacement && (
+            <OverrideOriginButton replacement={overrideReplacement} jumpToSource={jumpToSource} />
           )}
-          {overrideContext &&
-            overrideContext.replacementsOnThis.length > 0 && (
-              <OverriddenByButtons
-                replacements={overrideContext.replacementsOnThis}
-                setSelected={setSelected}
-              />
-            )}
         </div>
         {entry.qname && (
           <div className="flex items-start gap-1">
@@ -758,10 +728,14 @@ function resolveDefaultAttributesGroup(
   model: SchemaModel | null,
   index: NodeIndexEntry[],
 ): { group: AttributeGroup | null; name: string } | null {
-  if (!model?.default_attributes) return null;
-  // ``defaultAttributesApply`` defaults to true when omitted.
-  if (complex.default_attributes_apply === false) return null;
-  const groupName = model.default_attributes;
+  // Set by the parser from the type's own file, opt-out already considered.
+  // A model from an older backend only has the main file's value.
+  const groupName =
+    complex.default_attributes ??
+    (complex.default_attributes === undefined && complex.default_attributes_apply !== false
+      ? model?.default_attributes
+      : null);
+  if (!groupName) return null;
   const hit = resolveReference(groupName, index, ["attributeGroup"]);
   const group = hit && "attributes" in hit.node ? (hit.node as AttributeGroup) : null;
   return { group, name: groupName };
@@ -1048,59 +1022,31 @@ function resolveTypeRef(typeName: string, index: NodeIndexEntry[]) {
 
 function OverrideOriginButton({
   replacement,
-  setSelected,
+  jumpToSource,
 }: {
   replacement: OverrideReplacement;
-  setSelected: (id: string) => void;
+  jumpToSource: (ref: SourceRef) => void;
 }) {
-  // Best-effort jump back to the *original* by id. We don't carry a direct
-  // pointer in the replacement, so reconstruct the canonical id (kind:qname).
-  const originalId = `${replacement.kind}:${replacement.qname}`;
-  const label = `This is a replacement for ${replacement.kind} ${replacement.qname} (xs:override)`;
+  // The definition this one replaced is not part of the schema any more, so
+  // there is no node to select: show where it is written instead.
+  const original = replacement.original_source_ref ?? null;
+  const label = original
+    ? "Declared in an xs:override block — show the definition it replaces in the source"
+    : "Declared in an xs:override block; replaces the definition of the same name";
   return (
     <button
       type="button"
-      onClick={() => setSelected(originalId)}
+      disabled={!original}
+      onClick={() => original && jumpToSource(original)}
       title={label}
       aria-label={label}
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-mono font-medium border bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-200 dark:border-rose-800/60 hover:bg-rose-100 dark:hover:bg-rose-900/50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-mono font-medium border bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-200 dark:border-rose-800/60 enabled:hover:bg-rose-100 dark:enabled:hover:bg-rose-900/50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
     >
       <span className="text-[9px] uppercase tracking-wide font-semibold opacity-70">
         overrides
       </span>
-      <span className="truncate max-w-[160px]">{replacement.qname}</span>
+      <span>original{original?.line ? ` · line ${original.line}` : ""}</span>
     </button>
-  );
-}
-
-function OverriddenByButtons({
-  replacements,
-  setSelected,
-}: {
-  replacements: OverrideReplacement[];
-  setSelected: (id: string) => void;
-}) {
-  return (
-    <>
-      {replacements.map((r) => {
-        const label = `Overridden by ${r.kind} declared in an xs:override block`;
-        return (
-          <button
-            key={r.replacement_id}
-            type="button"
-            onClick={() => setSelected(r.replacement_id)}
-            title={label}
-            aria-label={label}
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-mono font-medium border bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
-          >
-            <span className="text-[9px] uppercase tracking-wide font-semibold opacity-70">
-              overridden by
-            </span>
-            <span className="truncate max-w-[160px]">replacement</span>
-          </button>
-        );
-      })}
-    </>
   );
 }
 
@@ -1231,6 +1177,18 @@ function OpenContentSummary({ oc }: { oc: OpenContent }) {
       >
         mode: {oc.mode}
       </span>
+      {oc.origin && oc.origin !== "own" && (
+        <span
+          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-medium border bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700"
+          title={
+            oc.origin === "default"
+              ? "From the xs:defaultOpenContent of the file that declares this type"
+              : "Inherited from the type this one extends"
+          }
+        >
+          {oc.origin === "default" ? "schema default" : "from base type"}
+        </span>
+      )}
       {oc.applies_to_empty && (
         <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-medium border bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
           appliesToEmpty

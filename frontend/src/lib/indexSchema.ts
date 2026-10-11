@@ -33,7 +33,6 @@ export interface IndexBundle {
     string,
     { directive: OverrideDirective; replacement: OverrideReplacement }
   >;
-  overridesByOriginalKey: Map<string, OverrideReplacement[]>;
   // Every identity constraint (xs:key/xs:keyref/xs:unique) in the model,
   // keyed by its own id, alongside the id of the element that declares it
   // ("host") — a keyref's `refer_id` (when resolved) is itself a key into
@@ -202,17 +201,12 @@ export function buildIndex(model: SchemaModel): IndexBundle {
     string,
     { directive: OverrideDirective; replacement: OverrideReplacement }
   >();
-  const overridesByOriginalKey = new Map<string, OverrideReplacement[]>();
   for (const directive of model.overrides ?? []) {
     for (const replacement of directive.replacements) {
       overrideByReplacementId.set(replacement.replacement_id, {
         directive,
         replacement,
       });
-      const key = overrideKey(replacement.kind, replacement.qname);
-      const list = overridesByOriginalKey.get(key) ?? [];
-      list.push(replacement);
-      overridesByOriginalKey.set(key, list);
     }
   }
 
@@ -222,18 +216,10 @@ export function buildIndex(model: SchemaModel): IndexBundle {
     usagesByTarget,
     parentById,
     overrideByReplacementId,
-    overridesByOriginalKey,
     constraintsById,
     idDeclarations,
     idrefDeclarations,
   };
-}
-
-// Stable key for cross-referencing an original declaration with its override
-// replacements. Replacements carry the qname produced by the parser
-// (Clark-form for namespaced names, bare local otherwise).
-export function overrideKey(kind: string, qname: string): string {
-  return `${kind}:${qname}`;
 }
 
 // Which side of an ``xs:redefine`` a declaration is on, and the id of the

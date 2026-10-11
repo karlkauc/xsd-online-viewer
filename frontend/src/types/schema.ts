@@ -255,6 +255,8 @@ export interface ComplexType {
   assertions?: Assertion[];
   open_content?: OpenContent | null;
   default_attributes_apply?: boolean;
+  // The attribute group from the declaring file's ``defaultAttributes``, when it applies.
+  default_attributes?: QName | null;
 }
 
 export interface Group {
@@ -280,9 +282,12 @@ export interface Alternative {
   version_constraints?: VersionConstraints | null;
 }
 
-// XSD 1.1 ``xs:openContent`` / ``xs:defaultOpenContent``. Display-only.
+// XSD 1.1 ``xs:openContent`` / ``xs:defaultOpenContent``. On a complex type
+// it is the one in effect; ``origin`` says where it comes from (the type
+// itself, its file's xs:defaultOpenContent, or the type it extends).
 export interface OpenContent {
   mode: "interleave" | "suffix" | "none";
+  origin?: "own" | "default" | "base";
   applies_to_empty: boolean;
   wildcard: Wildcard | null;
   annotation: Annotation | null;
@@ -307,14 +312,15 @@ export type OverrideKind =
   | "attributeGroup"
   | "notation";
 
-// XSD 1.1 ``xs:override`` — display-only. Originals stay where they were
-// declared; replacements coexist with them in the same SchemaModel lists,
-// distinguished by id and cross-referenced via ``OverrideDirective``.
+// XSD 1.1 ``xs:override``, applied by the parser: the replacement stands in
+// the SchemaModel lists under the component's ordinary id, the definition it
+// replaced is left out and only reachable as source (``original_source_ref``).
 export interface OverrideReplacement {
   kind: OverrideKind;
   qname: QName;
   replacement_id: string;
   source_ref: SourceRef | null;
+  original_source_ref?: SourceRef | null;
 }
 
 export interface OverrideDirective {

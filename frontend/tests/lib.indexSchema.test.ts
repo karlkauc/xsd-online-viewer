@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildIndex,
   findRedefineLink,
-  overrideKey,
   resolveReference,
 } from "../src/lib/indexSchema";
 import type { SchemaModel } from "../src/types/schema";
@@ -39,7 +38,7 @@ describe("buildIndex", () => {
     expect(resolved?.label).toBe("PersonType");
   });
 
-  it("builds override reverse maps for replacement and original lookups", () => {
+  it("maps an override replacement's id to its directive", () => {
     const overrideModel: SchemaModel = {
       ...smallModel,
       overrides: [
@@ -50,28 +49,18 @@ describe("buildIndex", () => {
             {
               kind: "complexType",
               qname: "tns:ColorType",
-              replacement_id: "override:f-ovr#complexType:tns:ColorType",
+              replacement_id: "complexType:tns:ColorType",
               source_ref: { file_id: "f-ovr", line: 7 },
+              original_source_ref: { file_id: "f-base", line: 4 },
             },
           ],
         },
       ],
     };
-    const { overrideByReplacementId, overridesByOriginalKey } =
-      buildIndex(overrideModel);
-    const replacement = overrideByReplacementId.get(
-      "override:f-ovr#complexType:tns:ColorType",
-    );
-    expect(replacement).toBeDefined();
-    expect(replacement?.replacement.qname).toBe("tns:ColorType");
-
-    const originalReplacements = overridesByOriginalKey.get(
-      overrideKey("complexType", "tns:ColorType"),
-    );
-    expect(originalReplacements).toHaveLength(1);
-    expect(originalReplacements?.[0].replacement_id).toBe(
-      "override:f-ovr#complexType:tns:ColorType",
-    );
+    const { overrideByReplacementId } = buildIndex(overrideModel);
+    const hit = overrideByReplacementId.get("complexType:tns:ColorType");
+    expect(hit?.directive.target_file_id).toBe("f-base");
+    expect(hit?.replacement.original_source_ref).toEqual({ file_id: "f-base", line: 4 });
   });
 
   describe("identity constraints", () => {

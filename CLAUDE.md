@@ -89,8 +89,13 @@ cached and a soft reload can keep showing the old UI.
   `AttributeDecl.id_role`), `ComplexType.simple_content_inline`,
   `any_attribute` (`ComplexType` / `AttributeGroup`), `SchemaModel.redefines`,
   `block` / `final`, `ElementDecl.substitution_groups`, the `wildcard_not_*`
-  particle fields and the schema-level `annotation`, `schema_version` and
-  `notations`.
+  particle fields, the schema-level `annotation`, `schema_version` and
+  `notations`, `ComplexType.default_attributes`, `OpenContent.origin` and
+  `OverrideReplacement.original_source_ref`.
+- **XSD semantics are applied, not just shown**: `xs:redefine`, `xs:override`,
+  `vc:*` conditional inclusion (as an XSD 1.1 processor) and the per-file
+  `defaultAttributes` / `xs:defaultOpenContent`. The model holds the effective
+  schema; what was replaced or excluded is only in the source text.
 - **Parser choice**: we parse with lxml, not `xmlschema`, because we need to
   preserve annotations, appinfo, comments, and source line numbers. Validation
   is libxml2 for XSD 1.0 and `xmlschema` (worker process) for XSD 1.1.

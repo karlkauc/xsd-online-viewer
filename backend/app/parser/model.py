@@ -70,8 +70,10 @@ XsdVersion = Literal["1.0", "1.1", "unknown"]
 
 class VersionConstraints(BaseModel):
     """Conditional inclusion attributes from the XSD versioning vocabulary
-    (``http://www.w3.org/2007/XMLSchema-versioning``). Display-only — the
-    parser does not act on these to filter components."""
+    (``http://www.w3.org/2007/XMLSchema-versioning``).
+
+    The parser evaluates them as an XSD 1.1 processor does and leaves out what
+    they exclude, so the ones in the model are conditions that hold."""
 
     min_version: str | None = None
     max_version: str | None = None
@@ -353,6 +355,10 @@ class ComplexType(BaseModel):
     # ``True`` per the spec; complexTypes opt out by writing
     # ``defaultAttributesApply="false"``.
     default_attributes_apply: bool = True
+    # The attribute group this type gets through its own file's
+    # ``defaultAttributes`` (as written there), or None when the file names
+    # none or the type opted out. Not repeated in ``attribute_group_refs``.
+    default_attributes: QName | None = None
     annotation: Annotation | None = None
     source_ref: SourceRef | None = None
     version_constraints: VersionConstraints | None = None
@@ -406,16 +412,20 @@ OverrideKind = Literal[
 class OverrideReplacement(BaseModel):
     """A single component declared inside an XSD 1.1 ``xs:override`` block.
 
-    Replacements coexist in the model alongside the originals from the
-    overridden file (display-only — the viewer does not silently rewrite
-    components). ``replacement_id`` is the id of the parsed declaration
-    in the corresponding ``SchemaModel`` list.
+    Applied as XSD 1.1 defines it: the replacement stands in for the
+    component of the same kind and name in the overridden file, which is left
+    out of the model. ``replacement_id`` is the id of the parsed declaration
+    in the corresponding ``SchemaModel`` list — the ordinary id of that name —
+    and ``original_source_ref`` is where the definition it replaced is written.
+    A component in the block that replaces nothing is ignored, as the
+    specification says, and reported as a diagnostic.
     """
 
     kind: OverrideKind
     qname: QName
     replacement_id: str
     source_ref: SourceRef | None = None
+    original_source_ref: SourceRef | None = None
 
 
 class OverrideDirective(BaseModel):
@@ -503,22 +513,23 @@ class SchemaModel(BaseModel):
     xpath_default_namespace: str | None = None
     default_attributes: QName | None = None
     default_open_content: OpenContent | None = None
-    # XSD 1.1 ``xs:override`` directives. Originals stay where they were —
-    # replacements are added to the same lists with distinct ids and cross-
-    # referenced through this list. Display-only — the viewer does not merge.
+    # XSD 1.1 ``xs:override`` directives, applied to the lists above — see
+    # ``OverrideReplacement``.
     overrides: list[OverrideDirective] = Field(default_factory=list)
     # ``xs:redefine`` blocks, applied to the lists above — see ``Redefinition``.
     redefines: list[RedefineDirective] = Field(default_factory=list)
 
 
 class OpenContent(BaseModel):
-    """``xs:openContent`` / ``xs:defaultOpenContent`` (XSD 1.1). Display-only.
+    """``xs:openContent`` / ``xs:defaultOpenContent`` (XSD 1.1).
 
-    The shape is finalised in Phase 4; defining it here so ``SchemaModel``
-    can reference it without a follow-up rebuild dance once Phase 4 lands.
+    ``ComplexType.open_content`` is the one in effect: ``origin`` says whether
+    the type wrote it itself, got it from its file's ``xs:defaultOpenContent``,
+    or inherits it from the type it extends.
     """
 
     mode: Literal["interleave", "suffix", "none"] = "interleave"
+    origin: Literal["own", "default", "base"] = "own"
     applies_to_empty: bool = False
     wildcard: Wildcard | None = None
     annotation: Annotation | None = None

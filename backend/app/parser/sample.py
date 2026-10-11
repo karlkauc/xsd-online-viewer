@@ -997,8 +997,8 @@ def _fill_complex(
     # Attributes: bases first so the derived type's declarations win on clash.
     for member in reversed(_attribute_chain(ctx, ct)):
         _fill_attributes(ctx, node, member.attributes, member.attribute_group_refs, set(), member)
-    if ctx.model.default_attributes and ct.default_attributes_apply:
-        group = ctx.lookup(ctx.attr_group_by_key, ctx.model.default_attributes)
+    if ct.default_attributes:
+        group = ctx.lookup(ctx.attr_group_by_key, ct.default_attributes)
         if group is not None:
             _fill_attributes(ctx, node, group.attributes, group.attribute_group_refs, set(), group)
 

@@ -177,7 +177,18 @@ with cross-references stored as stable IDs (see ID scheme below). Anonymous
 inline types get synthetic IDs based on their parent path; every node retains
 a `source_ref = { file_id, line }` pointing back to the original XSD location.
 
-Four post-passes run after the walk, all over the already-built `SchemaModel`
+Before the walk, `_load` removes from each file's tree what its `vc:*`
+attributes exclude (`_prune_conditional`), evaluated as an XSD 1.1 processor
+does: `vc:minVersion` ≤ 1.1 < `vc:maxVersion`, and `typeAvailable` /
+`facetAvailable` against the 1.1 built-ins. That is the specification's
+pre-processing step, so an excluded `xs:include` is not followed either; each
+file reports how many declarations went as a warning. During the walk every
+complex type also gets what its own file's `xs:schema` gives it:
+`default_attributes` (the `defaultAttributes` group, unless
+`defaultAttributesApply="false"`) and, without an `xs:openContent` of its own,
+the file's `xs:defaultOpenContent` (`OpenContent.origin == "default"`).
+
+Five post-passes run after the walk, all over the already-built `SchemaModel`
 rather than during parsing (so they can see declarations regardless of
 document order or which file they came from), in this order:
 
@@ -190,10 +201,15 @@ document order or which file they came from), in this order:
   base chain or resolves a group ref (tree, diagram, sample generator) gets
   the combined content without knowing about redefine. `model.redefines`
   links the two for the detail panel's badge.
-- `_process_overrides` — materializes every `xs:override` block's replacement
-  declarations into the model's flat lists, cross-referenced through
-  `model.overrides`. Runs before the two passes below so they see the overridden
-  declarations too, not the originals they replace.
+- `_process_overrides` — applies every `xs:override` block: the replacement
+  takes the original's id and its place in the list, and the original leaves
+  the model (`OverrideReplacement.original_source_ref` still points at its
+  source). The replacement is parsed as if written in the overridden file —
+  that file's target namespace and schema defaults — because an override is
+  defined as a transformation of that document. A component that replaces
+  nothing is dropped with a warning: an override cannot add.
+- `_inherit_open_content` — a type that extends another and has no open
+  content of its own gets its base's (`origin == "base"`).
 - `identity.link_keyrefs` — resolves each `xs:keyref`'s `@refer` QName to the
   `xs:key`/`xs:unique` constraint it names, filling in `refer_id` (falls back
   to a unique local-name match when the prefix doesn't resolve; appends a

@@ -14,7 +14,8 @@ import posixpath
 import re
 import zipfile
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from decimal import Decimal, InvalidOperation
 from functools import partial
 from io import BytesIO
 from typing import Literal
@@ -106,6 +107,82 @@ def _vc_attrs(elem: etree._Element) -> VersionConstraints | None:
     if not values:
         return None
     return VersionConstraints(**values)
+
+
+# Conditional inclusion is evaluated for the newest version there is: the 1.1
+# branch of a schema written for both is the one worth showing, and the one
+# the XSD 1.1 validator (app/parser/xsd11_worker.py) takes.
+_VC_PROCESSOR_VERSION = Decimal("1.1")
+_VC_KNOWN_TYPES: frozenset[str] = frozenset(
+    """anyType anySimpleType anyAtomicType string boolean decimal float double duration
+    dateTime time date gYearMonth gYear gMonthDay gDay gMonth hexBinary base64Binary anyURI
+    QName NOTATION normalizedString token language NMTOKEN NMTOKENS Name NCName ID IDREF
+    IDREFS ENTITY ENTITIES integer nonPositiveInteger negativeInteger long int short byte
+    nonNegativeInteger unsignedLong unsignedInt unsignedShort unsignedByte positiveInteger
+    yearMonthDuration dayTimeDuration dateTimeStamp error""".split()  # noqa: SIM905
+)
+_VC_KNOWN_FACETS: frozenset[str] = frozenset(
+    """length minLength maxLength pattern enumeration whiteSpace maxInclusive maxExclusive
+    minInclusive minExclusive totalDigits fractionDigits assertion explicitTimezone""".split()  # noqa: SIM905
+)
+
+
+def _vc_all_known(elem: etree._Element, raw: str, known: frozenset[str]) -> bool:
+    """Whether every QName in ``raw`` names a built-in the processor implements."""
+    nsmap = elem.nsmap or {}
+    for qname in raw.split():
+        prefix, sep, local = qname.rpartition(":")
+        if (nsmap.get(prefix) if sep else nsmap.get(None)) != XSD_NS or local not in known:
+            return False
+    return True
+
+
+def _vc_excluded(elem: etree._Element) -> bool:
+    """Whether the vc:* attributes on ``elem`` take it out of the schema (XSD 1.1, 4.2.2)."""
+
+    def version(local: str) -> Decimal | None:
+        raw = elem.get(f"{{{VC_NS}}}{local}")
+        try:
+            return Decimal(raw.strip()) if raw else None
+        except InvalidOperation:
+            return None  # not a decimal: no condition we can evaluate
+
+    minimum, maximum = version("minVersion"), version("maxVersion")
+    if minimum is not None and minimum > _VC_PROCESSOR_VERSION:
+        return True
+    if maximum is not None and maximum <= _VC_PROCESSOR_VERSION:
+        return True
+    for local, known, wanted in (
+        ("typeAvailable", _VC_KNOWN_TYPES, True),
+        ("typeUnavailable", _VC_KNOWN_TYPES, False),
+        ("facetAvailable", _VC_KNOWN_FACETS, True),
+        ("facetUnavailable", _VC_KNOWN_FACETS, False),
+    ):
+        raw = elem.get(f"{{{VC_NS}}}{local}")
+        if raw is not None and _vc_all_known(elem, raw, known) is not wanted:
+            return True
+    return False
+
+
+def _prune_conditional(root: etree._Element) -> list[int]:
+    """Remove what vc:* excludes from the tree below ``root``; the lines removed.
+
+    The specification makes this a pre-processing step on the schema document:
+    the element and everything in it are gone before anything else looks.
+    """
+    if not any(VC_NS in name for elem in root.iter() for name in elem.attrib):
+        return []
+    excluded = [
+        elem for elem in root.iterdescendants() if isinstance(elem.tag, str) and _vc_excluded(elem)
+    ]
+    lines: list[int] = []
+    for elem in excluded:
+        parent = elem.getparent()
+        if parent is None or any(a in excluded for a in elem.iterancestors()):
+            continue  # went with an excluded ancestor
+        lines.append(elem.sourceline or 0)
+        parent.remove(elem)
+    return lines
 
 
 # 1.1-only XSD elements used by the version-detection heuristic. Includes
@@ -447,10 +524,13 @@ class _BuildState:
     diagnostics: list[Diagnostic] = field(default_factory=list)
     by_key: dict[tuple[str | None, str], _LoadedFile] = field(default_factory=dict)
     _id_counter: int = 0
-    # Prepended to identifiers minted by ``_make_id``; the override pass sets
-    # this to disambiguate replacement decls from their originals (which sit
-    # in the same SchemaModel lists).
-    id_prefix: str = ""
+    # Set once vc:* took something out: the attributes that prove the schema
+    # is XSD 1.1 may have gone with it.
+    conditional: bool = False
+    default_open_content: dict[int, OpenContent | None] = field(default_factory=dict)
+    # Complex types that extend another, with the element their ``base`` is
+    # written on (for its namespace declarations).
+    extensions: list[tuple[ComplexType, etree._Element]] = field(default_factory=list)
     # (referring file id, schemaLocation as written) -> id of the file it loaded.
     reference_targets: dict[tuple[str, str], str] = field(default_factory=dict)
 
@@ -540,6 +620,22 @@ class XsdParser:
                 Diagnostic(severity="error", message=not_a_schema_message(filename, root.tag))
             )
             return None
+        removed = _prune_conditional(root)
+        if removed:
+            self.state.conditional = True
+            noun = "declaration was" if len(removed) == 1 else "declarations were"
+            lines = ", ".join(str(line) for line in removed[:10]) + (", …" if len(removed) > 10 else "")
+            self.state.diagnostics.append(
+                Diagnostic(
+                    severity="warning",
+                    message=(
+                        f"{filename}: {len(removed)} {noun} left out by vc:* conditions, "
+                        f"evaluated for an XSD 1.1 processor (line {lines})"
+                    ),
+                    file_id=file_id,
+                    line=removed[0] or None,
+                )
+            )
         target_ns = root.get("targetNamespace") or target_ns_hint
         loaded = _LoadedFile(
             file_id=file_id,
@@ -631,23 +727,18 @@ class XsdParser:
             message = first_error.message if first_error else "failed to parse main schema"
             raise ValueError(message)
 
-        default_open_content_elem = main.root.find(_xsd("defaultOpenContent"))
-        default_open_content = (
-            self._parse_open_content(default_open_content_elem, main)
-            if default_open_content_elem is not None
-            else None
-        )
-
         model = SchemaModel(
             schema_id="pending",
             target_namespace=main.target_ns,
             namespaces=_collect_namespaces(self.state.files),
             element_form_default=_choice(main.root, "elementFormDefault", _FORMS, "unqualified"),  # type: ignore[arg-type]
             attribute_form_default=_choice(main.root, "attributeFormDefault", _FORMS, "unqualified"),  # type: ignore[arg-type]
-            xsd_version=_detect_xsd_version(self.state.files, main),
+            xsd_version=(
+                "1.1" if self.state.conditional else _detect_xsd_version(self.state.files, main)
+            ),
             xpath_default_namespace=main.root.get("xpathDefaultNamespace"),
             default_attributes=_token(main.root, "defaultAttributes"),
-            default_open_content=default_open_content,
+            default_open_content=self._default_open_content(main),
             annotation=self._collect_annotation(main.root),
             schema_version=_token(main.root, "version"),
         )
@@ -669,6 +760,7 @@ class XsdParser:
 
         self._process_redefines(model)
         self._process_overrides(model)
+        self._inherit_open_content(model)
         link_keyrefs(model, self.state.diagnostics)
         apply_id_roles(model)
 
@@ -685,6 +777,7 @@ class XsdParser:
         "complexType": "complex_types",
         "group": "groups",
         "attributeGroup": "attribute_groups",
+        "notation": "notations",
     }
 
     _REDEFINABLE: frozenset[str] = frozenset(
@@ -820,36 +913,32 @@ class XsdParser:
                 pending.extend(particle.children)
 
     def _process_overrides(self, model: SchemaModel) -> None:
-        """Process every ``xs:override`` block found in any loaded file.
+        """Apply every ``xs:override`` block found in any loaded file.
 
-        Each override-block child is parsed with a temporary ``id_prefix``
-        so its identifier doesn't collide with the original it replaces;
-        both end up in the model's flat lists side by side, cross-referenced
-        through ``model.overrides``.
+        A component in the block replaces the one of the same kind and name
+        that another file defines: the original leaves the model (its source
+        stays in the Text view, and ``OverrideReplacement.original_source_ref``
+        points there). A component that replaces nothing is not part of the
+        schema — unlike ``xs:redefine``, an override cannot add — so it is
+        left out and reported. Files are taken in reverse load order, so that
+        of two overrides of one component the outer one wins.
+
+        An override is a transformation of the overridden document: the
+        replacement is read as if written there, under that file's target
+        namespace and schema defaults (``defaultAttributes``, ``blockDefault``,
+        ``xs:defaultOpenContent``). Its source lines are the block's own.
         """
-        for loaded in self.state.files:
+        by_file_id = {f.file_id: f for f in self.state.files}
+        for loaded in reversed(self.state.files):
             for override_elem in loaded.root.findall(_xsd("override")):
                 location = (override_elem.get("schemaLocation") or "").strip()
-                if not location:
-                    continue
-                # Re-resolve the schemaLocation to find the loaded target file.
-                try:
-                    resolved = self.inp.resolver.resolve(loaded.filename, location)
-                except SecurityError:
-                    continue
-                if resolved is None:
-                    continue
-                target_filename, _ = resolved
-                target_file_id: str | None = next(
-                    (
-                        f.file_id
-                        for f in self.state.files
-                        if f.filename == target_filename
-                    ),
-                    None,
+                target_file_id = self.state.reference_targets.get((loaded.file_id, location))
+                target = by_file_id.get(target_file_id or "")
+                if target is None:
+                    continue  # did not load; _follow_references said so
+                context = replace(
+                    loaded, tree=target.tree, target_ns=target.target_ns or loaded.target_ns
                 )
-                if target_file_id is None:
-                    continue
 
                 directive = OverrideDirective(
                     target_file_id=target_file_id,
@@ -857,39 +946,78 @@ class XsdParser:
                         file_id=loaded.file_id, line=override_elem.sourceline
                     ),
                 )
-
-                prev_prefix = self.state.id_prefix
-                self.state.id_prefix = f"override:{loaded.file_id}#"
-                try:
-                    for child in override_elem:
-                        if not isinstance(child.tag, str):
-                            continue
-                        _, local = _namespace_and_local(child.tag)
-                        list_attr = self._TOP_LEVEL_LIST_ATTR.get(local)
-                        if list_attr is None:
-                            continue  # notation / annotation: skip
-                        target_list = getattr(model, list_attr)
-                        before = len(target_list)
-                        self._process_top_level(child, loaded, model)
-                        if len(target_list) <= before:
-                            continue  # nothing was added (defensive)
-                        added = target_list[-1]
-                        directive.replacements.append(
-                            OverrideReplacement(
-                                kind=local,  # type: ignore[arg-type]
-                                qname=getattr(added, "qname", None)
-                                or getattr(added, "name", None)
-                                or "",
-                                replacement_id=added.id,
-                                source_ref=SourceRef(
-                                    file_id=loaded.file_id, line=child.sourceline
+                for child in override_elem:
+                    if not isinstance(child.tag, str):
+                        continue
+                    ns, local = _namespace_and_local(child.tag)
+                    list_attr = self._TOP_LEVEL_LIST_ATTR.get(local)
+                    name = _token(child, "name")
+                    if ns != XSD_NS or list_attr is None or not name:
+                        continue  # annotation
+                    target_list = getattr(model, list_attr)
+                    qname = self._compose_qname(context, name)
+                    canonical_id = self._make_id(local, qname)
+                    original = next(
+                        (
+                            d
+                            for d in target_list
+                            if d.id == canonical_id
+                            and (d.source_ref is None or d.source_ref.file_id != loaded.file_id)
+                        ),
+                        None,
+                    )
+                    if original is None:
+                        self.state.diagnostics.append(
+                            Diagnostic(
+                                severity="warning",
+                                message=(
+                                    f"{loaded.filename}: xs:override of {local} '{name}', which "
+                                    f"'{location}' does not define; an override cannot add a "
+                                    "component, so it is ignored"
                                 ),
+                                file_id=loaded.file_id,
+                                line=child.sourceline,
                             )
                         )
-                finally:
-                    self.state.id_prefix = prev_prefix
-
+                        continue
+                    position = next(i for i, d in enumerate(target_list) if d is original)
+                    self._process_top_level(child, context, model)
+                    # In the original's place, so the order of the tree stays the file's.
+                    target_list[position] = target_list.pop()
+                    directive.replacements.append(
+                        OverrideReplacement(
+                            kind=local,  # type: ignore[arg-type]
+                            qname=qname,
+                            replacement_id=canonical_id,
+                            source_ref=SourceRef(file_id=loaded.file_id, line=child.sourceline),
+                            original_source_ref=original.source_ref,
+                        )
+                    )
                 model.overrides.append(directive)
+
+    def _inherit_open_content(self, model: SchemaModel) -> None:
+        """Give a type that extends another its base's open content, unless it has its own.
+
+        An extension keeps the base's content type, open content included; a
+        restriction states its content anew, so nothing carries over there.
+        """
+        by_id = {ct.id: ct for ct in model.complex_types}
+        bases = {
+            id(ct): self._resolve_ref_id("complexType", scope, ct.base)
+            for ct, scope in self.state.extensions
+        }
+
+        def effective(ct: ComplexType, seen: frozenset[int]) -> OpenContent | None:
+            if ct.open_content is not None or id(ct) in seen:
+                return ct.open_content
+            base = by_id.get(bases.get(id(ct)) or "")
+            inherited = effective(base, seen | {id(ct)}) if base is not None else None
+            if inherited is not None and inherited.mode != "none":
+                ct.open_content = inherited.model_copy(update={"origin": "base"})
+            return ct.open_content
+
+        for ct, _scope in self.state.extensions:
+            effective(ct, frozenset())
 
     def _process_top_level(
         self, elem: etree._Element, loaded: _LoadedFile, model: SchemaModel
@@ -1294,8 +1422,17 @@ class XsdParser:
         open_content_elem = assert_parent.find(_xsd("openContent"))
         if open_content_elem is not None:
             open_content = self._parse_open_content(open_content_elem, loaded)
+        elif content_kind != "simple":
+            # The file's own default, which reaches an empty content model
+            # only when it says so.
+            default = self._default_open_content(loaded)
+            if default is not None and default.mode != "none" and (
+                content_kind != "empty" or default.applies_to_empty
+            ):
+                open_content = default.model_copy(update={"origin": "default"})
 
-        return ComplexType(
+        apply_defaults = _bool_attr(elem, "defaultAttributesApply", default=True)
+        complex_type = ComplexType(
             id=identifier,
             name=name,
             anonymous=anonymous,
@@ -1315,13 +1452,17 @@ class XsdParser:
             block=[] if anonymous else _derivation_set(elem, "block", loaded, _COMPLEX_DERIVATIONS),
             final=[] if anonymous else _derivation_set(elem, "final", loaded, _COMPLEX_DERIVATIONS),
             open_content=open_content,
-            default_attributes_apply=_bool_attr(
-                elem, "defaultAttributesApply", default=True
+            default_attributes_apply=apply_defaults,
+            default_attributes=(
+                _token(loaded.root, "defaultAttributes") if apply_defaults else None
             ),
             annotation=annotation,
             source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
             version_constraints=_vc_attrs(elem),
         )
+        if open_content is None and derivation == "extension" and complex_content is not None:
+            self.state.extensions.append((complex_type, inner))
+        return complex_type
 
     def _parse_group(
         self, elem: etree._Element, loaded: _LoadedFile
@@ -1493,6 +1634,16 @@ class XsdParser:
             annotation=self._collect_annotation(elem),
         )
 
+    def _default_open_content(self, loaded: _LoadedFile) -> OpenContent | None:
+        """The ``xs:defaultOpenContent`` of ``loaded``; it reaches that file's types only."""
+        key = id(loaded.tree)  # an override block reads the overridden file's
+        if key not in self.state.default_open_content:
+            elem = loaded.root.find(_xsd("defaultOpenContent"))
+            self.state.default_open_content[key] = (
+                None if elem is None else self._parse_open_content(elem, loaded)
+            )
+        return self.state.default_open_content[key]
+
     def _parse_open_content(
         self, elem: etree._Element, loaded: _LoadedFile
     ) -> OpenContent:
@@ -1592,7 +1743,7 @@ class XsdParser:
         return local
 
     def _make_id(self, kind: str, qname: str) -> str:
-        return f"{self.state.id_prefix}{kind}:{qname}"
+        return f"{kind}:{qname}"
 
     def _resolve_ref_id(
         self, kind: str, elem: etree._Element, ref: str | None
@@ -1604,7 +1755,6 @@ class XsdParser:
         ``elem`` (an unprefixed ref uses the default namespace), producing the
         same ``{kind}:{{ns}}Local`` identifier the global declaration got from
         ``_compose_qname``/``_make_id``. Global declarations always live in the
-        unprefixed id space, so ``id_prefix`` is deliberately not applied.
         Returns ``None`` for a prefix no ``xmlns`` declaration covers.
         """
         if not ref:

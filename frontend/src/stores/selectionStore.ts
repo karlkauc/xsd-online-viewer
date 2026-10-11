@@ -30,7 +30,6 @@ interface SelectionState {
     string,
     { directive: OverrideDirective; replacement: OverrideReplacement }
   >;
-  overridesByOriginalKey: Map<string, OverrideReplacement[]>;
   constraintsById: Map<string, { constraint: IdentityConstraint; hostId: string }>;
   idDeclarations: NodeIndexEntry[];
   idrefDeclarations: NodeIndexEntry[];
@@ -97,7 +96,6 @@ export const useSelection = create<SelectionState>((set, get) => ({
   usagesByTarget: new Map(),
   parentById: new Map(),
   overrideByReplacementId: new Map(),
-  overridesByOriginalKey: new Map(),
   constraintsById: new Map(),
   idDeclarations: [],
   idrefDeclarations: [],
@@ -119,7 +117,6 @@ export const useSelection = create<SelectionState>((set, get) => ({
       usagesByTarget,
       parentById,
       overrideByReplacementId,
-      overridesByOriginalKey,
       constraintsById,
       idDeclarations,
       idrefDeclarations,
@@ -133,7 +130,6 @@ export const useSelection = create<SelectionState>((set, get) => ({
       usagesByTarget,
       parentById,
       overrideByReplacementId,
-      overridesByOriginalKey,
       constraintsById,
       idDeclarations,
       idrefDeclarations,
@@ -159,8 +155,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
       usagesByTarget: new Map(),
       parentById: new Map(),
       overrideByReplacementId: new Map(),
-      overridesByOriginalKey: new Map(),
-      constraintsById: new Map(),
+          constraintsById: new Map(),
       idDeclarations: [],
       idrefDeclarations: [],
       selectedId: null,

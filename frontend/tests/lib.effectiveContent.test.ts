@@ -317,4 +317,27 @@ describe("makeIndexComplexResolver", () => {
     const closed = complexType({ id: "complexType:Closed", name: "Closed" });
     expect(effectiveAttributes(closed, makeResolver([closed])).anyAttribute).toBeNull();
   });
+
+  it("counts the attribute group from defaultAttributes, the base type's too", () => {
+    const base = complexType({
+      id: "complexType:Base",
+      name: "Base",
+      attribute_group_refs: ["Own"],
+      default_attributes: "Common",
+    });
+    const derived = complexType({
+      id: "complexType:Derived",
+      name: "Derived",
+      derivation: "extension",
+      base: "Base",
+      default_attributes: "Common",
+    });
+    expect(effectiveAttributes(base, makeResolver([base])).attributeGroupRefs).toEqual([
+      "Own",
+      "Common",
+    ]);
+    expect(
+      effectiveAttributes(derived, makeResolver([base, derived])).attributeGroupRefs,
+    ).toEqual(["Own", "Common"]);
+  });
 });
