@@ -87,3 +87,13 @@ def identity_constraints_xsd_bytes() -> bytes:
 @pytest.fixture
 def id_idref_xsd_bytes() -> bytes:
     return (FIXTURES_DIR / "id_idref.xsd").read_bytes()
+
+
+@pytest.fixture
+def redefine_xsd_bytes() -> bytes:
+    return (FIXTURES_DIR / "redefine.xsd").read_bytes()
+
+
+@pytest.fixture
+def redefine_base_xsd_bytes() -> bytes:
+    return (FIXTURES_DIR / "redefine-base.xsd").read_bytes()

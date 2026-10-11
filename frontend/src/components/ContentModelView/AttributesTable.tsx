@@ -1,8 +1,14 @@
 import { useMemo } from "react";
-import type { AttributeDecl } from "../../types/schema";
+import type { AttributeDecl, Wildcard } from "../../types/schema";
 import { useSelection } from "../../stores/selectionStore";
 import { resolveReference } from "../../lib/indexSchema";
-import { collectFromGroup, type ResolvedAttribute } from "../../lib/attributeGroups";
+import {
+  collectFromGroup,
+  collectGroupWildcards,
+  wildcardNamespaceLabel,
+  type ResolvedAttribute,
+  type ResolvedWildcard,
+} from "../../lib/attributeGroups";
 import { TapToReveal } from "../TapToReveal";
 
 interface AttributesTableProps {
@@ -10,6 +16,8 @@ interface AttributesTableProps {
   attributes: AttributeDecl[];
   /** Attribute-group QNames to resolve and inline. */
   attributeGroupRefs: string[];
+  /** The node's own xs:anyAttribute; those of the groups are looked up. */
+  anyAttribute?: Wildcard | null;
 }
 
 function firstDocLine(attr: AttributeDecl): string {
@@ -24,7 +32,11 @@ function defOrFix(attr: AttributeDecl): string {
   return "—";
 }
 
-export function AttributesTable({ attributes, attributeGroupRefs }: AttributesTableProps) {
+export function AttributesTable({
+  attributes,
+  attributeGroupRefs,
+  anyAttribute = null,
+}: AttributesTableProps) {
   const index = useSelection((s) => s.index);
   const setSelected = useSelection((s) => s.setSelected);
 
@@ -37,7 +49,15 @@ export function AttributesTable({ attributes, attributeGroupRefs }: AttributesTa
     return out;
   }, [attributes, attributeGroupRefs, index]);
 
-  if (!rows.length) return null;
+  const wildcards = useMemo<ResolvedWildcard[]>(
+    () => [
+      ...(anyAttribute ? [{ wildcard: anyAttribute, origin: null }] : []),
+      ...collectGroupWildcards(attributeGroupRefs, index),
+    ],
+    [anyAttribute, attributeGroupRefs, index],
+  );
+
+  if (!rows.length && !wildcards.length) return null;
 
   const onTypeClick = (typeName: string | null) => {
     if (!typeName) return;
@@ -98,6 +118,31 @@ export function AttributesTable({ attributes, attributeGroupRefs }: AttributesTa
                 <td className="py-1.5 pr-3 font-mono hidden md:table-cell">{defOrFix(attr)}</td>
                 <td className="py-1.5 pr-3 text-slate-600 dark:text-slate-400 text-xs max-w-[260px] hidden md:table-cell">
                   <TapToReveal summary={doc || ""} details={attr.annotation?.documentation?.[0]?.text} />
+                </td>
+              </tr>
+            );
+          })}
+          {wildcards.map(({ wildcard, origin }, i) => {
+            const doc = wildcard.annotation?.documentation?.[0]?.text?.trim() ?? "";
+            return (
+              <tr
+                key={`any-${i}`}
+                className="border-b border-slate-100 dark:border-slate-900"
+                title="xs:anyAttribute"
+              >
+                <td className="py-1.5 pr-3 font-mono">
+                  @* <span className="text-slate-500">any attribute</span>
+                  {origin && (
+                    <span className="ml-1 text-[10px] text-slate-400">from {origin}</span>
+                  )}
+                </td>
+                <td className="py-1.5 pr-3 font-mono text-slate-500 break-all">
+                  {wildcardNamespaceLabel(wildcard)}
+                </td>
+                <td className="py-1.5 pr-3">{wildcard.process_contents ?? "strict"}</td>
+                <td className="py-1.5 pr-3 font-mono hidden md:table-cell">—</td>
+                <td className="py-1.5 pr-3 text-slate-600 dark:text-slate-400 text-xs max-w-[260px] hidden md:table-cell">
+                  <TapToReveal summary={doc.split(/\r?\n/)[0]} details={doc || undefined} />
                 </td>
               </tr>
             );

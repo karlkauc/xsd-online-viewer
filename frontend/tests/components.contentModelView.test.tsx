@@ -318,4 +318,63 @@ describe("ContentModelView content inherited through xs:extension", () => {
     render(<ContentModelView />);
     expect(screen.queryByText(/Content inherited from/)).not.toBeInTheDocument();
   });
+
+  it("lists xs:anyAttribute wildcards, the type's own and those of its attribute groups", () => {
+    const wildcard = (namespace: string | null, not_namespace: string | null = null) => ({
+      namespace,
+      not_namespace,
+      not_qname: null,
+      process_contents: "lax" as const,
+      annotation: null,
+    });
+    const model: SchemaModel = {
+      ...smallModel,
+      elements: [],
+      attributes: [],
+      simple_types: [],
+      groups: [],
+      complex_types: [
+        {
+          id: "complexType:Open",
+          name: "Open",
+          anonymous: false,
+          abstract: false,
+          mixed: false,
+          content_kind: "empty",
+          derivation: "none",
+          base: null,
+          particle: null,
+          attributes: [],
+          attribute_group_refs: ["Ext"],
+          any_attribute: wildcard("##other"),
+          simple_content_base: null,
+          simple_content_facets: [],
+          annotation: null,
+          source_ref: null,
+        },
+      ],
+      attribute_groups: [
+        {
+          id: "attributeGroup:Ext",
+          name: "Ext",
+          ref: null,
+          attributes: [],
+          attribute_group_refs: [],
+          any_attribute: wildcard(null, "urn:x"),
+          annotation: null,
+          source_ref: null,
+        },
+      ],
+    };
+    act(() => {
+      useSelection.getState().setSchema("any", model);
+      useSelection.getState().setSelected("complexType:Open");
+    });
+    render(<ContentModelView />);
+    expect(screen.getByText("Attributes")).toBeInTheDocument();
+    expect(screen.getAllByText("any attribute")).toHaveLength(2);
+    expect(screen.getByText("##other")).toBeInTheDocument();
+    expect(screen.getByText("not urn:x")).toBeInTheDocument();
+    expect(screen.getByText("from Ext")).toBeInTheDocument();
+  });
 });

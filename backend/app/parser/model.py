@@ -228,6 +228,7 @@ class AttributeGroup(BaseModel):
     ref: QName | None = None
     attributes: list[AttributeDecl] = Field(default_factory=list)
     attribute_group_refs: list[QName] = Field(default_factory=list)
+    any_attribute: Wildcard | None = None  # xs:anyAttribute
     annotation: Annotation | None = None
     source_ref: SourceRef | None = None
     version_constraints: VersionConstraints | None = None
@@ -319,6 +320,7 @@ class ComplexType(BaseModel):
     particle: Particle | None = None
     attributes: list[AttributeDecl] = Field(default_factory=list)
     attribute_group_refs: list[QName] = Field(default_factory=list)
+    any_attribute: Wildcard | None = None  # xs:anyAttribute
     simple_content_base: QName | None = None  # when content_kind == "simple"
     simple_content_facets: list[Facet] = Field(default_factory=list)
     # <xs:simpleContent><xs:restriction base="…"><xs:simpleType>…: the anonymous
@@ -405,6 +407,38 @@ class OverrideDirective(BaseModel):
     source_ref: SourceRef | None = None
 
 
+RedefineKind = Literal["simpleType", "complexType", "group", "attributeGroup"]
+
+
+class Redefinition(BaseModel):
+    """A single component declared inside an ``xs:redefine`` block.
+
+    Unlike ``xs:override`` this is applied, not just displayed: the
+    redefinition takes over the component's name and id, so every reference
+    to the name reaches it. The definition it replaces stays in the same
+    ``SchemaModel`` list under a ``Name~original`` name (``~`` cannot occur
+    in a real XSD name), and the redefinition's reference to itself — its
+    ``base``, or the group's ``ref`` to itself — is rewritten to that name.
+    ``original_id`` is ``None`` when the redefined file defines no such
+    component (it did not load, or the schema is wrong).
+    """
+
+    kind: RedefineKind
+    qname: QName
+    redefinition_id: str
+    original_id: str | None = None
+    source_ref: SourceRef | None = None
+
+
+class RedefineDirective(BaseModel):
+    """One ``xs:redefine`` block and the components it redefines.
+    ``target_file_id`` is ``None`` when the redefined file did not load."""
+
+    target_file_id: str | None = None
+    redefinitions: list[Redefinition] = Field(default_factory=list)
+    source_ref: SourceRef | None = None
+
+
 class SourceFile(BaseModel):
     id: str
     filename: str
@@ -437,6 +471,8 @@ class SchemaModel(BaseModel):
     # replacements are added to the same lists with distinct ids and cross-
     # referenced through this list. Display-only — the viewer does not merge.
     overrides: list[OverrideDirective] = Field(default_factory=list)
+    # ``xs:redefine`` blocks, applied to the lists above — see ``Redefinition``.
+    redefines: list[RedefineDirective] = Field(default_factory=list)
 
 
 class OpenContent(BaseModel):

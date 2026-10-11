@@ -8,7 +8,9 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from lxml import etree
 
+from app.parser.sample import generate_sample
 from app.parser.validation import unloaded_files, validate_xml
 from app.parser.walk import iter_elements
 from app.parser.xsd_parser import parse_files_map, parse_single, parse_zip
@@ -980,3 +982,133 @@ class TestAttributeWhitespace:
         assert model.element_form_default == "unqualified"
         wildcard = _find_complex(model, "T").particle.children[1]
         assert wildcard.wildcard_process_contents is None
+
+
+class TestRedefine:
+    @pytest.fixture
+    def model(self, redefine_xsd_bytes: bytes, redefine_base_xsd_bytes: bytes):
+        return parse_files_map(
+            {"redefine.xsd": redefine_xsd_bytes, "redefine-base.xsd": redefine_base_xsd_bytes},
+            main_filename="redefine.xsd",
+        )
+
+    def test_redefinition_takes_the_name_and_derives_from_the_original(self, model) -> None:
+        person = _find_complex(model, "PersonType")
+        assert person.id == "complexType:{urn:redefine}PersonType"
+        assert person.derivation == "extension"
+        assert person.base == "t:PersonType~original"
+        original = _find_complex(model, "PersonType~original")
+        assert original.id == "complexType:{urn:redefine}PersonType~original"
+        assert [p.element.name for p in original.particle.children] == ["name"]
+        assert len([c for c in model.complex_types if c.name == "PersonType"]) == 1
+
+    def test_reference_inside_the_redefinition_means_the_redefinition(self, model) -> None:
+        partner = _find_complex(model, "PersonType").particle.children[1].element
+        assert partner.type_name == "t:PersonType"
+
+    def test_simple_type(self, model) -> None:
+        name = _find_simple(model, "NameType")
+        assert name.base == "t:NameType~original"
+        assert [(f.kind, f.value) for f in name.facets] == [("maxLength", "40")]
+        assert _find_simple(model, "NameType~original").base == "xs:string"
+
+    def test_group_refers_to_the_original_among_its_particles(self, model) -> None:
+        contact = next(g for g in model.groups if g.name == "Contact")
+        own, phone = contact.particle.children
+        assert own.group_ref == "t:Contact~original"
+        assert phone.element.name == "phone"
+        assert any(g.name == "Contact~original" for g in model.groups)
+
+    def test_attribute_group(self, model) -> None:
+        common = next(g for g in model.attribute_groups if g.name == "Common")
+        assert common.attribute_group_refs == ["t:Common~original"]
+        assert [a.name for a in common.attributes] == ["lang"]
+
+    def test_directive_links_redefinition_and_original(self, model) -> None:
+        (directive,) = model.redefines
+        base = next(f for f in model.files if f.filename == "redefine-base.xsd")
+        assert directive.target_file_id == base.id
+        assert {(r.kind, r.redefinition_id, r.original_id) for r in directive.redefinitions} >= {
+            (
+                "complexType",
+                "complexType:{urn:redefine}PersonType",
+                "complexType:{urn:redefine}PersonType~original",
+            )
+        }
+        assert len(directive.redefinitions) == 4
+        assert model.diagnostics == []
+
+    def test_sample_carries_base_and_redefined_content(self, model) -> None:
+        xml = generate_sample(model, _find_element(model, "person"))
+        root = etree.fromstring(xml.encode())
+        assert [etree.QName(c).localname for c in root] == ["name", "email", "phone"]
+        assert set(root.attrib) == {"lang"}
+        assert validate_xml(model, xml.encode()).is_valid
+
+    def test_missing_original_is_reported(self, redefine_xsd_bytes: bytes) -> None:
+        base = b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:redefine"/>'
+        model = parse_files_map(
+            {"redefine.xsd": redefine_xsd_bytes, "redefine-base.xsd": base},
+            main_filename="redefine.xsd",
+        )
+        assert _find_complex(model, "PersonType").base == "t:PersonType"
+        assert model.redefines[0].redefinitions[0].original_id is None
+        assert sum("xs:redefine of" in d.message for d in model.diagnostics) == 4
+
+    def test_chameleon_redefine(self) -> None:
+        base = (
+            b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+            b'<xs:simpleType name="Code"><xs:restriction base="xs:string"/></xs:simpleType>'
+            b"</xs:schema>"
+        )
+        main = (
+            b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:c">'
+            b'<xs:redefine schemaLocation="base.xsd"><xs:simpleType name="Code">'
+            b'<xs:restriction base="Code"><xs:length value="3"/></xs:restriction>'
+            b"</xs:simpleType></xs:redefine></xs:schema>"
+        )
+        model = parse_files_map({"main.xsd": main, "base.xsd": base}, main_filename="main.xsd")
+        assert _find_simple(model, "Code").base == "Code~original"
+        assert _find_simple(model, "Code~original") is not None
+
+
+class TestAnyAttribute:
+    XSD = b"""<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+      <xs:complexType name="Open">
+        <xs:attribute name="a" type="xs:string"/>
+        <xs:anyAttribute namespace="##other" processContents="lax">
+          <xs:annotation><xs:documentation>extension point</xs:documentation></xs:annotation>
+        </xs:anyAttribute>
+      </xs:complexType>
+      <xs:complexType name="Derived">
+        <xs:complexContent>
+          <xs:extension base="Open">
+            <xs:anyAttribute notNamespace="urn:x" notQName="##defined"/>
+          </xs:extension>
+        </xs:complexContent>
+      </xs:complexType>
+      <xs:complexType name="Text">
+        <xs:simpleContent>
+          <xs:extension base="xs:string"><xs:anyAttribute processContents="skip"/></xs:extension>
+        </xs:simpleContent>
+      </xs:complexType>
+      <xs:complexType name="Closed"><xs:attribute name="a" type="xs:string"/></xs:complexType>
+      <xs:attributeGroup name="Ext"><xs:anyAttribute namespace="urn:a urn:b"/></xs:attributeGroup>
+    </xs:schema>"""
+
+    def test_on_complex_type(self) -> None:
+        model = parse_single(self.XSD, "any.xsd")
+        wildcard = _find_complex(model, "Open").any_attribute
+        assert (wildcard.namespace, wildcard.process_contents) == ("##other", "lax")
+        assert wildcard.annotation.documentation[0].text == "extension point"
+        assert _find_complex(model, "Closed").any_attribute is None
+
+    def test_inside_derivation(self) -> None:
+        model = parse_single(self.XSD, "any.xsd")
+        derived = _find_complex(model, "Derived").any_attribute
+        assert (derived.not_namespace, derived.not_qname) == ("urn:x", "##defined")
+        assert _find_complex(model, "Text").any_attribute.process_contents == "skip"
+
+    def test_on_attribute_group(self) -> None:
+        model = parse_single(self.XSD, "any.xsd")
+        assert model.attribute_groups[0].any_attribute.namespace == "urn:a urn:b"

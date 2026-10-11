@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:t="urn:redefine" targetNamespace="urn:redefine"
+           elementFormDefault="qualified">
+  <xs:complexType name="PersonType">
+    <xs:sequence>
+      <xs:element name="name" type="t:NameType"/>
+    </xs:sequence>
+    <xs:attributeGroup ref="t:Common"/>
+  </xs:complexType>
+  <xs:simpleType name="NameType">
+    <xs:restriction base="xs:string"/>
+  </xs:simpleType>
+  <xs:group name="Contact">
+    <xs:sequence>
+      <xs:element name="email" type="xs:string"/>
+    </xs:sequence>
+  </xs:group>
+  <xs:attributeGroup name="Common">
+    <xs:attribute name="id" type="xs:ID"/>
+  </xs:attributeGroup>
+  <xs:element name="person" type="t:PersonType"/>
+</xs:schema>

@@ -1,6 +1,12 @@
 import { useMemo } from "react";
 import { useSelection } from "../stores/selectionStore";
-import { overrideKey, resolveReference } from "../lib/indexSchema";
+import {
+  findRedefineLink,
+  overrideKey,
+  resolveReference,
+  type RedefineLink,
+} from "../lib/indexSchema";
+import { wildcardNamespaceLabel } from "../lib/attributeGroups";
 import type {
   AttributeDecl,
   AttributeGroup,
@@ -15,6 +21,7 @@ import type {
   SchemaNodeKind,
   SimpleType,
   SourceRef,
+  Wildcard,
 } from "../types/schema";
 import { KindBadge } from "./TreeView/KindBadge";
 import { FacetGroups } from "./FacetGroups";
@@ -110,6 +117,11 @@ export function DetailPanel() {
     return { asReplacement, replacementsOnThis };
   }, [entry, overrideByReplacementId, overridesByOriginalKey]);
 
+  const redefineLink = useMemo(
+    () => (entry ? findRedefineLink(model, entry.id) : null),
+    [entry, model],
+  );
+
   const usages = useMemo(() => {
     if (!entry) return [] as NodeIndexEntry[];
     const keys: string[] = [];
@@ -181,6 +193,7 @@ export function DetailPanel() {
         entry={entry}
         setActiveTab={setActiveTab}
         overrideContext={overrideContext}
+        redefineLink={redefineLink}
         setSelected={setSelected}
       />
 
@@ -217,11 +230,13 @@ function Header({
   entry,
   setActiveTab,
   overrideContext,
+  redefineLink,
   setSelected,
 }: {
   entry: NodeIndexEntry;
   setActiveTab: (tab: "tree" | "diagram" | "text") => void;
   overrideContext: OverrideContext | null;
+  redefineLink: RedefineLink | null;
   setSelected: (id: string) => void;
 }) {
   return (
@@ -240,6 +255,7 @@ function Header({
             entry.node.version_constraints && (
               <VersionBadge vc={entry.node.version_constraints} />
             )}
+          {redefineLink && <RedefineButton link={redefineLink} setSelected={setSelected} />}
           {overrideContext?.asReplacement && (
             <OverrideOriginButton
               replacement={overrideContext.asReplacement.replacement}
@@ -326,6 +342,16 @@ function renderSpecifics(node: SchemaNode, ctx: PanelCtx) {
   if ("use" in node) return renderAttribute(node, ctx);
   if ("content_kind" in node) return renderComplexType(node, ctx);
   if ("facets" in node) return renderSimpleType(node, ctx);
+  if ("attribute_group_refs" in node && node.any_attribute) {
+    return (
+      <section>
+        <SectionHead title="Attribute group" />
+        <DataRow label="Any attribute">
+          <AnyAttributeSummary wildcard={node.any_attribute} />
+        </DataRow>
+      </section>
+    );
+  }
   return null;
 }
 
@@ -621,6 +647,11 @@ function renderComplexType(complex: ComplexType, ctx: PanelCtx) {
         {complex.open_content && (
           <DataRow label="Open content">
             <OpenContentSummary oc={complex.open_content} />
+          </DataRow>
+        )}
+        {complex.any_attribute && (
+          <DataRow label="Any attribute">
+            <AnyAttributeSummary wildcard={complex.any_attribute} />
           </DataRow>
         )}
       </div>
@@ -1030,6 +1061,49 @@ function OverriddenByButtons({
         );
       })}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// xs:redefine badge
+// ---------------------------------------------------------------------------
+
+function RedefineButton({
+  link,
+  setSelected,
+}: {
+  link: RedefineLink;
+  setSelected: (id: string) => void;
+}) {
+  const isRedefinition = link.role === "redefinition";
+  const label = isRedefinition
+    ? link.otherId
+      ? "Declared in an xs:redefine block — go to the definition it redefines"
+      : "Declared in an xs:redefine block; the definition it redefines was not loaded"
+    : "Replaced through xs:redefine — go to the redefinition that is in effect";
+  return (
+    <button
+      type="button"
+      disabled={!link.otherId}
+      onClick={() => link.otherId && setSelected(link.otherId)}
+      title={label}
+      aria-label={label}
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px] font-mono font-medium border bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800/60 enabled:hover:bg-amber-100 dark:enabled:hover:bg-amber-900/50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+    >
+      <span className="text-[9px] uppercase tracking-wide font-semibold opacity-70">
+        {isRedefinition ? "redefines" : "redefined by"}
+      </span>
+      <span>{isRedefinition ? "original" : "redefinition"}</span>
+    </button>
+  );
+}
+
+function AnyAttributeSummary({ wildcard }: { wildcard: Wildcard }) {
+  return (
+    <span className="font-mono text-[11.5px] text-slate-600 dark:text-slate-300">
+      ns: <code>{wildcardNamespaceLabel(wildcard)}</code>
+      <span className="text-slate-400 ml-1">· {wildcard.process_contents ?? "strict"}</span>
+    </span>
   );
 }
 

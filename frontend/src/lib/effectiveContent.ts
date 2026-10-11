@@ -23,7 +23,14 @@
 // used by TreeView/ContentModelView; buildGraph builds its own small
 // resolver over its Map-based type index).
 
-import type { AttributeDecl, ComplexType, NodeIndexEntry, Particle, QName } from "../types/schema";
+import type {
+  AttributeDecl,
+  ComplexType,
+  NodeIndexEntry,
+  Particle,
+  QName,
+  Wildcard,
+} from "../types/schema";
 import { resolveReference } from "./indexSchema";
 
 export type ComplexResolver = (qname: string | null | undefined) => ComplexType | undefined;
@@ -39,6 +46,8 @@ export interface EffectiveParticleResult {
 export interface EffectiveAttributesResult {
   attributes: AttributeDecl[];
   attributeGroupRefs: QName[];
+  /** The type's own xs:anyAttribute, else the nearest one up the base chain. */
+  anyAttribute: Wildcard | null;
   /** Base type names contributing attributes, outermost first. */
   inheritedFrom: string[];
 }
@@ -95,6 +104,7 @@ export function effectiveAttributes(
     return {
       attributes: complex.attributes,
       attributeGroupRefs: complex.attribute_group_refs,
+      anyAttribute: complex.any_attribute ?? null,
       inheritedFrom: [],
     };
   }
@@ -103,6 +113,7 @@ export function effectiveAttributes(
     return {
       attributes: complex.attributes,
       attributeGroupRefs: complex.attribute_group_refs,
+      anyAttribute: complex.any_attribute ?? null,
       inheritedFrom: [],
     };
   }
@@ -123,7 +134,12 @@ export function effectiveAttributes(
   const attributeGroupRefs = Array.from(
     new Set([...baseResult.attributeGroupRefs, ...complex.attribute_group_refs]),
   );
-  return { attributes, attributeGroupRefs, inheritedFrom };
+  return {
+    attributes,
+    attributeGroupRefs,
+    anyAttribute: complex.any_attribute ?? baseResult.anyAttribute,
+    inheritedFrom,
+  };
 }
 
 // Resolver backed by the flat NodeIndexEntry list (TreeView, ContentModelView).

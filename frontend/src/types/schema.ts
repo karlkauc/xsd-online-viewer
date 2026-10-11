@@ -162,6 +162,7 @@ export interface AttributeGroup {
   ref: QName | null;
   attributes: AttributeDecl[];
   attribute_group_refs: QName[];
+  any_attribute?: Wildcard | null;
   annotation: Annotation | null;
   source_ref: SourceRef | null;
   version_constraints?: VersionConstraints | null;
@@ -234,6 +235,7 @@ export interface ComplexType {
   particle: Particle | null;
   attributes: AttributeDecl[];
   attribute_group_refs: QName[];
+  any_attribute?: Wildcard | null;
   simple_content_base: QName | null;
   simple_content_facets: Facet[];
   simple_content_inline?: SimpleType | null;
@@ -311,6 +313,25 @@ export interface OverrideDirective {
   source_ref: SourceRef | null;
 }
 
+export type RedefineKind = "simpleType" | "complexType" | "group" | "attributeGroup";
+
+// ``xs:redefine`` — applied by the parser: the redefinition carries the
+// component's name and id, the definition it replaces lives on as
+// ``Name~original`` and is what the redefinition derives from.
+export interface Redefinition {
+  kind: RedefineKind;
+  qname: QName;
+  redefinition_id: string;
+  original_id: string | null;
+  source_ref: SourceRef | null;
+}
+
+export interface RedefineDirective {
+  target_file_id: string | null;
+  redefinitions: Redefinition[];
+  source_ref: SourceRef | null;
+}
+
 export interface SchemaModel {
   schema_id: string;
   target_namespace: string | null;
@@ -332,6 +353,7 @@ export interface SchemaModel {
   default_attributes?: QName | null;
   default_open_content?: OpenContent | null;
   overrides?: OverrideDirective[];
+  redefines?: RedefineDirective[];
 }
 
 export interface SchemaResponse {

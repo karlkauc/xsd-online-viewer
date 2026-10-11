@@ -121,6 +121,7 @@ export function ContentModelView() {
             <AttributesTable
               attributes={attrsResult.attributes}
               attributeGroupRefs={attrsResult.attributeGroupRefs}
+              anyAttribute={attrsResult.anyAttribute}
             />
             {complex.content_kind === "simple" && (
               <SimpleTypeCard
@@ -154,6 +155,7 @@ export function ContentModelView() {
           <AttributesTable
             attributes={attrsResult.attributes}
             attributeGroupRefs={attrsResult.attributeGroupRefs}
+            anyAttribute={attrsResult.anyAttribute}
           />
           {c.content_kind === "simple" && (
             <SimpleTypeCard
@@ -181,6 +183,7 @@ export function ContentModelView() {
         <AttributesTable
           attributes={ag.attributes}
           attributeGroupRefs={ag.attribute_group_refs}
+          anyAttribute={ag.any_attribute}
         />
       );
     }

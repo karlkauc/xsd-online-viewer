@@ -296,4 +296,25 @@ describe("makeIndexComplexResolver", () => {
     resolver("Foo");
     expect(calls).toBe(1);
   });
+
+  it("takes the nearest xs:anyAttribute up the extension chain", () => {
+    const wildcard = {
+      namespace: "##other",
+      not_namespace: null,
+      not_qname: null,
+      process_contents: "lax" as const,
+      annotation: null,
+    };
+    const base = complexType({ id: "complexType:Base", name: "Base", any_attribute: wildcard });
+    const derived = complexType({
+      id: "complexType:Derived",
+      name: "Derived",
+      derivation: "extension",
+      base: "Base",
+    });
+    expect(effectiveAttributes(derived, makeResolver([base, derived])).anyAttribute).toBe(wildcard);
+    expect(effectiveAttributes(base, makeResolver([base])).anyAttribute).toBe(wildcard);
+    const closed = complexType({ id: "complexType:Closed", name: "Closed" });
+    expect(effectiveAttributes(closed, makeResolver([closed])).anyAttribute).toBeNull();
+  });
 });

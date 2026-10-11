@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildIndex, overrideKey, resolveReference } from "../src/lib/indexSchema";
+import {
+  buildIndex,
+  findRedefineLink,
+  overrideKey,
+  resolveReference,
+} from "../src/lib/indexSchema";
 import type { SchemaModel } from "../src/types/schema";
 import { smallModel } from "./fixtures/smallModel";
 import {
@@ -144,5 +149,54 @@ describe("buildIndex", () => {
       expect(idDeclarations).toEqual([]);
       expect(idrefDeclarations).toEqual([]);
     });
+  });
+});
+
+describe("findRedefineLink", () => {
+  const model: SchemaModel = {
+    ...smallModel,
+    redefines: [
+      {
+        target_file_id: "f1",
+        source_ref: null,
+        redefinitions: [
+          {
+            kind: "complexType",
+            qname: "{urn:t}Base",
+            redefinition_id: "complexType:{urn:t}Base",
+            original_id: "complexType:{urn:t}Base~original",
+            source_ref: null,
+          },
+          {
+            kind: "group",
+            qname: "{urn:t}G",
+            redefinition_id: "group:{urn:t}G",
+            original_id: null,
+            source_ref: null,
+          },
+        ],
+      },
+    ],
+  };
+
+  it("links a redefinition and its original in both directions", () => {
+    expect(findRedefineLink(model, "complexType:{urn:t}Base")).toEqual({
+      role: "redefinition",
+      otherId: "complexType:{urn:t}Base~original",
+    });
+    expect(findRedefineLink(model, "complexType:{urn:t}Base~original")).toEqual({
+      role: "original",
+      otherId: "complexType:{urn:t}Base",
+    });
+  });
+
+  it("knows a redefinition whose original is missing, and nothing else", () => {
+    expect(findRedefineLink(model, "group:{urn:t}G")).toEqual({
+      role: "redefinition",
+      otherId: null,
+    });
+    expect(findRedefineLink(model, "complexType:{urn:t}Other")).toBeNull();
+    expect(findRedefineLink(smallModel, "complexType:{urn:t}Base")).toBeNull();
+    expect(findRedefineLink(null, "x")).toBeNull();
   });
 });

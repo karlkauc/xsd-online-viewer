@@ -175,13 +175,22 @@ with cross-references stored as stable IDs (see ID scheme below). Anonymous
 inline types get synthetic IDs based on their parent path; every node retains
 a `source_ref = { file_id, line }` pointing back to the original XSD location.
 
-Three post-passes run after the walk, all over the already-built `SchemaModel`
+Four post-passes run after the walk, all over the already-built `SchemaModel`
 rather than during parsing (so they can see declarations regardless of
 document order or which file they came from), in this order:
 
+- `_process_redefines` — applies every `xs:redefine` block. Unlike an
+  override this changes what a name means: the redefinition takes the
+  component's id and name, and the definition it replaces is renamed to
+  `Name~original` (`~` cannot occur in an XSD name) and stays in the same
+  list. The redefinition's reference to itself — a type's `base`, a group's
+  `ref` to itself — is rewritten to that name, so every consumer that walks a
+  base chain or resolves a group ref (tree, diagram, sample generator) gets
+  the combined content without knowing about redefine. `model.redefines`
+  links the two for the detail panel's badge.
 - `_process_overrides` — materializes every `xs:override` block's replacement
   declarations into the model's flat lists, cross-referenced through
-  `model.overrides`. Runs first so the two passes below see the overridden
+  `model.overrides`. Runs before the two passes below so they see the overridden
   declarations too, not the originals they replace.
 - `identity.link_keyrefs` — resolves each `xs:keyref`'s `@refer` QName to the
   `xs:key`/`xs:unique` constraint it names, filling in `refer_id` (falls back

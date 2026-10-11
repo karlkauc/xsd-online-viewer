@@ -13,8 +13,9 @@ import logging
 import posixpath
 import re
 import zipfile
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from functools import partial
 from io import BytesIO
 from typing import Literal
 from urllib.parse import unquote, urljoin, urlparse
@@ -52,6 +53,8 @@ from app.parser.model import (
     OverrideDirective,
     OverrideReplacement,
     Particle,
+    RedefineDirective,
+    Redefinition,
     SchemaModel,
     SimpleType,
     SourceFile,
@@ -429,6 +432,8 @@ class _BuildState:
     # this to disambiguate replacement decls from their originals (which sit
     # in the same SchemaModel lists).
     id_prefix: str = ""
+    # (referring file id, schemaLocation as written) -> id of the file it loaded.
+    reference_targets: dict[tuple[str, str], str] = field(default_factory=dict)
 
     def next_anon(self) -> int:
         self._id_counter += 1
@@ -578,7 +583,9 @@ class XsdParser:
                     )
                     continue
                 ref_filename, ref_bytes = resolved
-                self._load(ref_filename, ref_bytes, relationship, target_ns)
+                target = self._load(ref_filename, ref_bytes, relationship, target_ns)
+                if target is not None:
+                    self.state.reference_targets[(loaded.file_id, location)] = target.file_id
 
     # ---- parsing phase -------------------------------------------------
 
@@ -639,6 +646,7 @@ class XsdParser:
                     continue
                 self._process_top_level(child, loaded, model)
 
+        self._process_redefines(model)
         self._process_overrides(model)
         link_keyrefs(model, self.state.diagnostics)
         apply_id_roles(model)
@@ -657,6 +665,138 @@ class XsdParser:
         "group": "groups",
         "attributeGroup": "attribute_groups",
     }
+
+    _REDEFINABLE: frozenset[str] = frozenset(
+        {"simpleType", "complexType", "group", "attributeGroup"}
+    )
+
+    def _process_redefines(self, model: SchemaModel) -> None:
+        """Apply every ``xs:redefine`` block found in any loaded file.
+
+        The redefinition takes the component's id and name; the definition it
+        replaces is renamed (see :class:`Redefinition`), and stays reachable as
+        the redefinition's base. Files are taken in reverse load order so a
+        redefinition that is itself redefined further up is in place first.
+        """
+        for loaded in reversed(self.state.files):
+            for redefine_elem in loaded.root.findall(_xsd("redefine")):
+                location = (redefine_elem.get("schemaLocation") or "").strip()
+                directive = RedefineDirective(
+                    target_file_id=self.state.reference_targets.get(
+                        (loaded.file_id, location)
+                    ),
+                    source_ref=SourceRef(
+                        file_id=loaded.file_id, line=redefine_elem.sourceline
+                    ),
+                )
+                for child in redefine_elem:
+                    if not isinstance(child.tag, str):
+                        continue
+                    ns, local = _namespace_and_local(child.tag)
+                    name = _token(child, "name")
+                    if ns != XSD_NS or local not in self._REDEFINABLE or not name:
+                        continue  # annotation
+                    target_list = getattr(model, self._TOP_LEVEL_LIST_ATTR[local])
+                    qname = self._compose_qname(loaded, name)
+                    canonical_id = self._make_id(local, qname)
+                    original = next((d for d in target_list if d.id == canonical_id), None)
+                    if original is not None:
+                        taken = {d.id for d in target_list}
+                        suffix = 1
+                        while True:
+                            original_name = f"{name}~original{suffix if suffix > 1 else ''}"
+                            original_id = self._make_id(
+                                local, self._compose_qname(loaded, original_name)
+                            )
+                            if original_id not in taken:
+                                break
+                            suffix += 1
+                        original.name = original_name
+                        original.id = original_id
+                    else:
+                        self.state.diagnostics.append(
+                            Diagnostic(
+                                severity="warning",
+                                message=(
+                                    f"{loaded.filename}: xs:redefine of {local} '{name}', "
+                                    f"which '{location}' does not define"
+                                ),
+                                file_id=loaded.file_id,
+                                line=child.sourceline,
+                            )
+                        )
+                    self._process_top_level(child, loaded, model)
+                    redefinition = target_list[-1]
+                    if original is not None:
+                        self._point_at_original(
+                            redefinition,
+                            partial(
+                                self._retarget,
+                                kind=local,
+                                name=name,
+                                original_name=original_name,
+                                canonical_id=canonical_id,
+                                scope=child,
+                            ),
+                        )
+                    directive.redefinitions.append(
+                        Redefinition(
+                            kind=local,  # type: ignore[arg-type]
+                            qname=qname,
+                            redefinition_id=redefinition.id,
+                            original_id=original.id if original is not None else None,
+                            source_ref=SourceRef(
+                                file_id=loaded.file_id, line=child.sourceline
+                            ),
+                        )
+                    )
+                model.redefines.append(directive)
+
+    def _retarget(
+        self,
+        ref: str | None,
+        *,
+        kind: str,
+        name: str,
+        original_name: str,
+        canonical_id: str,
+        scope: etree._Element,
+    ) -> str | None:
+        """``ref`` with the original's name, if it names the redefined component itself."""
+        if not ref:
+            return ref
+        prefix, sep, ref_local = ref.rpartition(":")
+        if ref_local != name:
+            return ref
+        # A chameleon redefine resolves to no namespace at all.
+        if self._resolve_ref_id(kind, scope, ref) not in (canonical_id, f"{kind}:{name}"):
+            return ref
+        return f"{prefix}{sep}{original_name}"
+
+    @staticmethod
+    def _point_at_original(
+        redefinition: SimpleType | ComplexType | Group | AttributeGroup,
+        retarget: Callable[[str | None], str | None],
+    ) -> None:
+        """Rewrite a redefinition's reference to itself: a type's ``base``, a
+        group's ``ref`` to itself among its own particles, an attribute group's
+        ``ref`` to itself. References further inside (a child element of the
+        redefined type) mean the redefinition and are left alone."""
+        if isinstance(redefinition, ComplexType):
+            redefinition.base = retarget(redefinition.base)
+            redefinition.simple_content_base = retarget(redefinition.simple_content_base)
+        elif isinstance(redefinition, SimpleType):
+            redefinition.base = retarget(redefinition.base)
+        elif isinstance(redefinition, AttributeGroup):
+            redefinition.attribute_group_refs = [
+                retarget(ref) or ref for ref in redefinition.attribute_group_refs
+            ]
+        else:
+            pending = [redefinition.particle] if redefinition.particle else []
+            while pending:
+                particle = pending.pop()
+                particle.group_ref = retarget(particle.group_ref)
+                pending.extend(particle.children)
 
     def _process_overrides(self, model: SchemaModel) -> None:
         """Process every ``xs:override`` block found in any loaded file.
@@ -749,7 +889,8 @@ class XsdParser:
         elif local == "attributeGroup":
             model.attribute_groups.append(self._parse_attribute_group(elem, loaded))
         # include/import/redefine/override/annotation/notation — skip here:
-        # references were followed in _follow_references; top-level annotation
+        # references were followed in _follow_references, redefine and override
+        # blocks get their own pass (_process_redefines/_overrides); top-level annotation
         # is attached to the schema node but we omit it from the model for now.
 
     # ---- per-construct parsers ----------------------------------------
@@ -1040,6 +1181,7 @@ class XsdParser:
         simple_content_inline: SimpleType | None = None
         assertions: list[Assertion] = []
         open_content: OpenContent | None = None
+        any_attribute: Wildcard | None = None
 
         simple_content = elem.find(_xsd("simpleContent"))
         complex_content = elem.find(_xsd("complexContent"))
@@ -1068,6 +1210,7 @@ class XsdParser:
                 attrs, groups = self._parse_attribute_children(inner, loaded)
                 attributes.extend(attrs)
                 attribute_group_refs.extend(groups)
+                any_attribute = self._parse_any_attribute(inner)
                 assert_parent = inner
             else:
                 assert_parent = simple_content
@@ -1083,6 +1226,7 @@ class XsdParser:
                 attrs, groups = self._parse_attribute_children(inner, loaded)
                 attributes.extend(attrs)
                 attribute_group_refs.extend(groups)
+                any_attribute = self._parse_any_attribute(inner)
                 assert_parent = inner
             else:
                 assert_parent = complex_content
@@ -1093,6 +1237,7 @@ class XsdParser:
             attrs, groups = self._parse_attribute_children(elem, loaded)
             attributes.extend(attrs)
             attribute_group_refs.extend(groups)
+            any_attribute = self._parse_any_attribute(elem)
             assert_parent = elem
 
         for assertion_elem in assert_parent.findall(_xsd("assert")):
@@ -1117,6 +1262,7 @@ class XsdParser:
             particle=particle,
             attributes=attributes,
             attribute_group_refs=attribute_group_refs,
+            any_attribute=any_attribute,
             simple_content_base=simple_content_base,
             simple_content_facets=simple_content_facets,
             simple_content_inline=simple_content_inline,
@@ -1172,6 +1318,7 @@ class XsdParser:
             ref=ref,
             attributes=attributes,
             attribute_group_refs=group_refs,
+            any_attribute=self._parse_any_attribute(elem),
             annotation=annotation,
             source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
             version_constraints=_vc_attrs(elem),
@@ -1255,6 +1402,10 @@ class XsdParser:
             annotation=self._collect_annotation(elem),
             version_constraints=_vc_attrs(elem),
         )
+
+    def _parse_any_attribute(self, parent: etree._Element) -> Wildcard | None:
+        elem = parent.find(_xsd("anyAttribute"))
+        return self._parse_wildcard(elem) if elem is not None else None
 
     def _parse_attribute_children(
         self, parent: etree._Element, loaded: _LoadedFile

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:t="urn:redefine" targetNamespace="urn:redefine"
+           elementFormDefault="qualified">
+  <xs:redefine schemaLocation="redefine-base.xsd">
+    <xs:complexType name="PersonType">
+      <xs:complexContent>
+        <xs:extension base="t:PersonType">
+          <xs:sequence>
+            <xs:group ref="t:Contact"/>
+            <xs:element name="partner" type="t:PersonType" minOccurs="0"/>
+          </xs:sequence>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+    <xs:simpleType name="NameType">
+      <xs:restriction base="t:NameType">
+        <xs:maxLength value="40"/>
+      </xs:restriction>
+    </xs:simpleType>
+    <xs:group name="Contact">
+      <xs:sequence>
+        <xs:group ref="t:Contact"/>
+        <xs:element name="phone" type="xs:string"/>
+      </xs:sequence>
+    </xs:group>
+    <xs:attributeGroup name="Common">
+      <xs:attributeGroup ref="t:Common"/>
+      <xs:attribute name="lang" type="xs:language" use="required"/>
+      <xs:anyAttribute namespace="##other" processContents="lax"/>
+    </xs:attributeGroup>
+  </xs:redefine>
+</xs:schema>

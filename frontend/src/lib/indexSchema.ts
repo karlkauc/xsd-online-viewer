@@ -236,6 +236,23 @@ export function overrideKey(kind: string, qname: string): string {
   return `${kind}:${qname}`;
 }
 
+// Which side of an ``xs:redefine`` a declaration is on, and the id of the
+// other side (null for a redefinition whose original was never loaded).
+export interface RedefineLink {
+  role: "redefinition" | "original";
+  otherId: string | null;
+}
+
+export function findRedefineLink(model: SchemaModel | null, id: string): RedefineLink | null {
+  for (const directive of model?.redefines ?? []) {
+    for (const r of directive.redefinitions) {
+      if (r.redefinition_id === id) return { role: "redefinition", otherId: r.original_id };
+      if (r.original_id === id) return { role: "original", otherId: r.redefinition_id };
+    }
+  }
+  return null;
+}
+
 // Follow an ``<xs:element ref="...">`` particle to the global declaration it
 // references. Returns null for a declaration that isn't a ref, or whose target
 // is missing (undeclared prefix, unresolved import). The caller substitutes the
