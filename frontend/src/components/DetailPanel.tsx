@@ -7,7 +7,9 @@ import {
   type RedefineLink,
 } from "../lib/indexSchema";
 import { wildcardNamespaceLabel } from "../lib/attributeGroups";
+import { substitutionHeads } from "../lib/rootElements";
 import type {
+  Annotation,
   AttributeDecl,
   AttributeGroup,
   ComplexType,
@@ -182,6 +184,9 @@ export function DetailPanel() {
           <p>Select a node on the left to see its details.</p>
         </div>
         {model && <SchemaOverview model={model} />}
+        {model?.annotation && (
+          <div className="px-4 pb-6 text-sm">{renderAnnotation({ annotation: model.annotation })}</div>
+        )}
       </div>
     );
   }
@@ -476,13 +481,19 @@ function renderElement(element: ElementDecl, ctx: PanelCtx) {
             </div>
           </DataRow>
         )}
-        {declaration.substitution_group && (
+        {substitutionHeads(declaration).length > 0 && (
           <DataRow label="Substitution group">
-            <TypeRef
-              typeName={declaration.substitution_group}
-              index={index}
-              setSelected={setSelected}
-            />
+            <div className="flex flex-wrap gap-1">
+              {substitutionHeads(declaration).map((head) => (
+                <TypeRef key={head} typeName={head} index={index} setSelected={setSelected} />
+              ))}
+            </div>
+          </DataRow>
+        )}
+        <DerivationRows block={declaration.block} final={declaration.final} />
+        {!declaration.is_global && declaration.target_namespace && (
+          <DataRow label="Namespace">
+            <code className="font-mono text-[12px]">{declaration.target_namespace}</code>
           </DataRow>
         )}
       </div>
@@ -644,6 +655,7 @@ function renderComplexType(complex: ComplexType, ctx: PanelCtx) {
             </div>
           </DataRow>
         )}
+        <DerivationRows block={complex.block} final={complex.final} />
         {complex.open_content && (
           <DataRow label="Open content">
             <OpenContentSummary oc={complex.open_content} />
@@ -769,6 +781,7 @@ function renderSimpleType(simple: SimpleType, ctx: PanelCtx) {
             <TypeRef typeName={simple.base} index={index} setSelected={setSelected} />
           </DataRow>
         )}
+        <DerivationRows final={simple.final} />
         {simple.item_type && (
           <DataRow label="Item type">
             <TypeRef typeName={simple.item_type} index={index} setSelected={setSelected} />
@@ -794,7 +807,7 @@ function renderSimpleType(simple: SimpleType, ctx: PanelCtx) {
 // Annotation: documentation / comments / appinfo
 // ---------------------------------------------------------------------------
 
-function renderAnnotation(node: SchemaNode) {
+function renderAnnotation(node: SchemaNode | { annotation: Annotation | null }) {
   const annotation = "annotation" in node ? node.annotation : null;
   if (!annotation) return null;
   const { documentation, appinfo, comments } = annotation;
@@ -885,6 +898,33 @@ function DataRow({ label, children }: { label: string; children: React.ReactNode
       </dt>
       <dd className="min-w-0 break-all">{children}</dd>
     </div>
+  );
+}
+
+// What ``block`` / ``final`` rule out, one chip per derivation.
+function DerivationRows({ block, final }: { block?: string[]; final?: string[] }) {
+  const rows: [string, string[] | undefined][] = [
+    ["Block", block],
+    ["Final", final],
+  ];
+  return (
+    <>
+      {rows.map(
+        ([label, values]) =>
+          values &&
+          values.length > 0 && (
+            <DataRow key={label} label={label}>
+              <div className="flex flex-wrap gap-1">
+                {values.map((v) => (
+                  <FlagChip key={v} tone="violet">
+                    {v}
+                  </FlagChip>
+                ))}
+              </div>
+            </DataRow>
+          ),
+      )}
+    </>
   );
 }
 
@@ -1137,6 +1177,28 @@ function SchemaOverview({ model }: { model: SchemaModel }) {
               <code className="font-mono text-[12px] break-all text-slate-700 dark:text-slate-200">
                 {xpathDefault}
               </code>
+            </DataRow>
+          )}
+          {model.schema_version && (
+            <DataRow label="Schema version">
+              <code className="font-mono text-[12px] break-all text-slate-700 dark:text-slate-200">
+                {model.schema_version}
+              </code>
+            </DataRow>
+          )}
+          {(model.notations?.length ?? 0) > 0 && (
+            <DataRow label="Notations">
+              <ul className="font-mono text-[12px] text-slate-700 dark:text-slate-200">
+                {model.notations!.map((n) => (
+                  <li key={n.id}>
+                    {n.name}
+                    <span className="text-slate-400">
+                      {" "}
+                      · {[n.public, n.system].filter(Boolean).join(" · ") || "—"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </DataRow>
           )}
           {defaultAttrs && (

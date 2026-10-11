@@ -1112,3 +1112,141 @@ class TestAnyAttribute:
     def test_on_attribute_group(self) -> None:
         model = parse_single(self.XSD, "any.xsd")
         assert model.attribute_groups[0].any_attribute.namespace == "urn:a urn:b"
+
+
+class TestSchemaDetails:
+    XSD = b"""<!-- licence -->
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:t="urn:d" targetNamespace="urn:d"
+        version="3.2" blockDefault="substitution" finalDefault="#all">
+      <xs:annotation><xs:documentation xml:lang="en">About this schema</xs:documentation></xs:annotation>
+      <xs:notation name="gif" public="image/gif" system="viewer.exe"/>
+      <xs:element name="head" abstract="true"/>
+      <xs:element name="other" block="#all" final=""/>
+      <xs:element name="member" substitutionGroup="t:head  t:other"/>
+      <xs:complexType name="Mixed" block="extension">
+        <xs:complexContent mixed="true">
+          <xs:extension base="t:Plain">
+            <xs:sequence>
+              <xs:element name="far" type="xs:string" targetNamespace="urn:far"/>
+              <xs:any notNamespace="urn:d ##local" notQName="##defined t:head" processContents="lax"/>
+            </xs:sequence>
+            <xs:attribute name="code" type="xs:string" targetNamespace="urn:far" use="required"/>
+          </xs:extension>
+        </xs:complexContent>
+      </xs:complexType>
+      <xs:complexType name="Plain" mixed="true" final="restriction">
+        <xs:complexContent mixed="false">
+          <xs:restriction base="xs:anyType"/>
+        </xs:complexContent>
+      </xs:complexType>
+      <xs:complexType name="Text">
+        <xs:simpleContent><xs:extension base="xs:string"/></xs:simpleContent>
+      </xs:complexType>
+      <xs:complexType name="Checked">
+        <xs:simpleContent>
+          <xs:restriction base="t:Text">
+            <xs:maxLength value="5"/>
+            <xs:assertion test="$value != 'x'"/>
+          </xs:restriction>
+        </xs:simpleContent>
+      </xs:complexType>
+      <xs:simpleType name="Code" final="list union"><xs:restriction base="xs:string"/></xs:simpleType>
+      <xs:simpleType name="Open"><xs:restriction base="xs:string"/></xs:simpleType>
+      <xs:element name="doc" type="t:Mixed"/>
+    </xs:schema>"""
+
+    @pytest.fixture
+    def model(self):
+        return parse_single(self.XSD, "details.xsd")
+
+    def test_schema_annotation_and_version(self, model) -> None:
+        assert model.annotation.documentation[0].text == "About this schema"
+        assert model.annotation.documentation[0].lang == "en"
+        assert model.annotation.comments == [" licence "]
+        assert model.schema_version == "3.2"
+        assert parse_single(b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"/>').annotation is None
+
+    def test_notation(self, model) -> None:
+        (gif,) = model.notations
+        assert (gif.id, gif.name, gif.public, gif.system) == (
+            "notation:{urn:d}gif",
+            "gif",
+            "image/gif",
+            "viewer.exe",
+        )
+
+    def test_several_substitution_group_heads(self, model) -> None:
+        member = _find_element(model, "member")
+        assert member.substitution_groups == ["t:head", "t:other"]
+        assert member.substitution_group == "t:head"
+        assert _find_element(model, "head").substitution_groups == []
+
+    def test_block_and_final_with_schema_defaults(self, model) -> None:
+        head = _find_element(model, "head")
+        assert (head.block, head.final) == (["substitution"], ["extension", "restriction"])
+        other = _find_element(model, "other")
+        assert (other.block, other.final) == (["extension", "restriction", "substitution"], [])
+        mixed = _find_complex(model, "Mixed")
+        # blockDefault's "substitution" does not apply to a type.
+        assert (mixed.block, mixed.final) == (["extension"], ["extension", "restriction"])
+        plain = _find_complex(model, "Plain")
+        assert (plain.block, plain.final) == ([], ["restriction"])
+        assert _find_simple(model, "Code").final == ["list", "union"]
+        assert _find_simple(model, "Open").final == ["restriction", "list", "union", "extension"]
+        local = mixed.particle.children[0].element
+        assert (local.block, local.final) == (["substitution"], [])
+
+    def test_mixed_on_complex_content_wins(self, model) -> None:
+        mixed = _find_complex(model, "Mixed")
+        assert (mixed.mixed, mixed.content_kind) == (True, "mixed")
+        plain = _find_complex(model, "Plain")
+        assert (plain.mixed, plain.content_kind) == (False, "complex")
+
+    def test_wildcard_exclusions_on_a_particle(self, model) -> None:
+        wildcard = _find_complex(model, "Mixed").particle.children[1]
+        assert wildcard.wildcard_not_namespace == "urn:d ##local"
+        assert wildcard.wildcard_not_qname == "##defined t:head"
+
+    def test_local_target_namespace(self, model) -> None:
+        mixed = _find_complex(model, "Mixed")
+        assert mixed.particle.children[0].element.target_namespace == "urn:far"
+        assert mixed.attributes[0].target_namespace == "urn:far"
+        root = etree.fromstring(generate_sample(model, _find_element(model, "doc")).encode())
+        assert root[0].tag == "{urn:far}far"
+        assert "{urn:far}code" in root.attrib
+
+    def test_assertion_facet_of_a_simple_content_restriction(self, model) -> None:
+        checked = _find_complex(model, "Checked")
+        assert [a.test for a in checked.assertions] == ["$value != 'x'"]
+        assert [f.kind for f in checked.simple_content_facets] == ["maxLength"]
+
+
+def test_strict_wildcard_skips_excluded_namespaces() -> None:
+    other = (
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:o">'
+        b'<xs:element name="ok" type="xs:string"/></xs:schema>'
+    )
+    main = (
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:m">'
+        b'<xs:import namespace="urn:o" schemaLocation="o.xsd"/>'
+        b'<xs:element name="own" type="xs:string"/>'
+        b'<xs:element name="root"><xs:complexType><xs:sequence>'
+        b'<xs:any notNamespace="##targetNamespace"/>'
+        b"</xs:sequence></xs:complexType></xs:element></xs:schema>"
+    )
+    model = parse_files_map({"m.xsd": main, "o.xsd": other}, main_filename="m.xsd")
+    root = etree.fromstring(generate_sample(model, _find_element(model, "root")).encode())
+    assert [c.tag for c in root] == ["{urn:o}ok"]
+
+
+def test_member_of_a_second_substitution_head_stands_in_for_it() -> None:
+    xsd = (
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+        b'<xs:element name="a" abstract="true"/><xs:element name="b" abstract="true"/>'
+        b'<xs:element name="m" substitutionGroup="a b" type="xs:string"/>'
+        b'<xs:element name="root"><xs:complexType><xs:sequence><xs:element ref="b"/>'
+        b"</xs:sequence></xs:complexType></xs:element></xs:schema>"
+    )
+    model = parse_single(xsd, "heads.xsd")
+    root = etree.fromstring(generate_sample(model, _find_element(model, "root")).encode())
+    assert [c.tag for c in root] == ["m"]

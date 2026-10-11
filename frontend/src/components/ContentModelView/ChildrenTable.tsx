@@ -1,4 +1,5 @@
 import type { Particle } from "../../types/schema";
+import { wildcardNamespaceLabel } from "../../lib/attributeGroups";
 import { flattenParticle } from "../../lib/particles";
 import { useSelection } from "../../stores/selectionStore";
 import { resolveElementRef, resolveReference } from "../../lib/indexSchema";
@@ -132,7 +133,13 @@ export function ChildrenTable({ particle }: ChildrenTableProps) {
                   <td className="py-1.5 pr-3 font-mono italic text-slate-500">any</td>
                   <td className="py-1.5 pr-3 text-xs text-slate-500">wildcard</td>
                   <td className="py-1.5 pr-3 font-mono text-xs text-slate-500">
-                    ns={row.any.namespace ?? "##any"} · {row.any.processContents ?? "strict"}
+                    ns=
+                    {wildcardNamespaceLabel({
+                      namespace: row.any.namespace,
+                      not_namespace: row.any.notNamespace ?? null,
+                      not_qname: row.any.notQName ?? null,
+                    })}{" "}
+                    · {row.any.processContents ?? "strict"}
                   </td>
                   <td className="py-1.5 pr-3 font-mono text-xs">{row.occurs}</td>
                   <td className="py-1.5 pr-3"></td>

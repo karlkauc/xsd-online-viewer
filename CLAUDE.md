@@ -86,7 +86,10 @@ cached and a soft reload can keep showing the old UI.
   in sync when changing shapes — this now also covers `IdentityConstraint`
   (`ElementDecl.identity_constraints`), `IdRole` (`ElementDecl.id_role` /
   `AttributeDecl.id_role`), `ComplexType.simple_content_inline`,
-  `any_attribute` (`ComplexType` / `AttributeGroup`) and `SchemaModel.redefines`.
+  `any_attribute` (`ComplexType` / `AttributeGroup`), `SchemaModel.redefines`,
+  `block` / `final`, `ElementDecl.substitution_groups`, the `wildcard_not_*`
+  particle fields and the schema-level `annotation`, `schema_version` and
+  `notations`.
 - **Parser choice**: we use lxml, not `xmlschema`, because we need to preserve
   annotations, appinfo, comments, and source line numbers.
 - **Default tab is `diagram`** (`selectionStore.ts`), enforced by the e2e

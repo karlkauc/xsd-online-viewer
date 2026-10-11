@@ -128,6 +128,7 @@ export interface SimpleType {
   member_types: QName[];
   member_inline: SimpleType[];
   facets: Facet[];
+  final?: string[];
   annotation: Annotation | null;
   source_ref: SourceRef | null;
   version_constraints?: VersionConstraints | null;
@@ -186,6 +187,8 @@ export interface Particle {
   children: Particle[];
   wildcard_namespace: string | null;
   wildcard_process_contents: "strict" | "lax" | "skip" | null;
+  wildcard_not_namespace?: string | null;
+  wildcard_not_qname?: string | null;
   annotation: Annotation | null;
   version_constraints?: VersionConstraints | null;
 }
@@ -208,7 +211,12 @@ export interface ElementDecl {
   fixed: string | null;
   nillable: boolean;
   abstract: boolean;
+  // The first head; ``substitution_groups`` has all of them (XSD 1.1).
   substitution_group: QName | null;
+  substitution_groups?: QName[];
+  // Derivations ruled out by ``block`` / ``final``, schema defaults applied.
+  block?: string[];
+  final?: string[];
   form: "qualified" | "unqualified" | null;
   target_namespace: string | null;
   is_global: boolean;
@@ -236,6 +244,8 @@ export interface ComplexType {
   attributes: AttributeDecl[];
   attribute_group_refs: QName[];
   any_attribute?: Wildcard | null;
+  block?: string[];
+  final?: string[];
   simple_content_base: QName | null;
   simple_content_facets: Facet[];
   simple_content_inline?: SimpleType | null;
@@ -313,6 +323,16 @@ export interface OverrideDirective {
   source_ref: SourceRef | null;
 }
 
+export interface Notation {
+  id: string;
+  name: string;
+  qname: QName;
+  public: string | null;
+  system: string | null;
+  annotation: Annotation | null;
+  source_ref: SourceRef | null;
+}
+
 export type RedefineKind = "simpleType" | "complexType" | "group" | "attributeGroup";
 
 // ``xs:redefine`` — applied by the parser: the redefinition carries the
@@ -354,6 +374,10 @@ export interface SchemaModel {
   default_open_content?: OpenContent | null;
   overrides?: OverrideDirective[];
   redefines?: RedefineDirective[];
+  notations?: Notation[];
+  // The main file's xs:schema: its annotations and ``version`` attribute.
+  annotation?: Annotation | null;
+  schema_version?: string | null;
 }
 
 export interface SchemaResponse {

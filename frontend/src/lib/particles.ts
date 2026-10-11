@@ -24,7 +24,12 @@ export interface FlatRow {
   /** When this row is a group-ref leaf — the QName of the referenced group. */
   groupRef?: QName;
   /** When this row is a wildcard. */
-  any?: { namespace: string | null; processContents: string | null };
+  any?: {
+    namespace: string | null;
+    processContents: string | null;
+    notNamespace?: string | null;
+    notQName?: string | null;
+  };
   /** When this row is the collapse marker for an elided deep sub-tree. */
   ellipsis?: string;
 }
@@ -81,6 +86,8 @@ function walk(
       any: {
         namespace: particle.wildcard_namespace,
         processContents: particle.wildcard_process_contents,
+        notNamespace: particle.wildcard_not_namespace,
+        notQName: particle.wildcard_not_qname,
       },
     });
     return;

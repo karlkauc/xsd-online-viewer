@@ -185,8 +185,8 @@ def largest_substitution_group(model: SchemaModel) -> tuple[str, int] | None:
     """The biggest substitution group some content model refers to, members counted transitively."""
     members: dict[str, list[str]] = {}
     for element in model.elements:
-        if element.name and element.substitution_group:
-            members.setdefault(_local_name(element.substitution_group), []).append(element.name)
+        for head in element.substitution_groups if element.name else ():
+            members.setdefault(_local_name(head), []).append(element.name)
     if not members:
         return None
     sizes: dict[str, int] = {}

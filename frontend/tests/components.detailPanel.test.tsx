@@ -505,3 +505,67 @@ describe("DetailPanel ID/IDREF", () => {
     expect(screen.getByText("Id8")).toBeInTheDocument();
   });
 });
+
+describe("DetailPanel schema details", () => {
+  beforeEach(() => {
+    useSelection.getState().clearSchema();
+  });
+
+  it("shows block, final and every substitution head of an element", () => {
+    const person = smallModel.elements[0];
+    const model: SchemaModel = {
+      ...smallModel,
+      elements: [
+        {
+          ...person,
+          substitution_group: "tns:First",
+          substitution_groups: ["tns:First", "tns:Second"],
+          block: ["substitution"],
+          final: ["extension", "restriction"],
+        },
+      ],
+    };
+    act(() => {
+      useSelection.getState().setSchema("flags", model);
+      useSelection.getState().setSelected(person.id);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("tns:First")).toBeInTheDocument();
+    expect(screen.getByText("tns:Second")).toBeInTheDocument();
+    expect(screen.getByText("Block")).toBeInTheDocument();
+    expect(screen.getByText("substitution")).toBeInTheDocument();
+    expect(screen.getByText("Final")).toBeInTheDocument();
+    expect(screen.getByText("restriction")).toBeInTheDocument();
+  });
+
+  it("shows the schema's own documentation, version and notations when nothing is selected", () => {
+    const model: SchemaModel = {
+      ...smallModel,
+      schema_version: "3.2",
+      annotation: {
+        documentation: [{ lang: null, text: "Funds data exchange format", source: "documentation" }],
+        appinfo: [],
+        comments: [],
+      },
+      notations: [
+        {
+          id: "notation:gif",
+          name: "gif",
+          qname: "gif",
+          public: "image/gif",
+          system: null,
+          annotation: null,
+          source_ref: null,
+        },
+      ],
+    };
+    act(() => {
+      useSelection.getState().setSchema("overview", model);
+    });
+    render(<DetailPanel />);
+    expect(screen.getByText("Funds data exchange format")).toBeInTheDocument();
+    expect(screen.getByText("3.2")).toBeInTheDocument();
+    expect(screen.getByText("gif")).toBeInTheDocument();
+    expect(screen.getByText(/image\/gif/)).toBeInTheDocument();
+  });
+});

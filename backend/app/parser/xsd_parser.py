@@ -49,6 +49,7 @@ from app.parser.model import (
     Group,
     IdentityConstraint,
     IdentityConstraintKind,
+    Notation,
     OpenContent,
     OverrideDirective,
     OverrideReplacement,
@@ -380,6 +381,24 @@ def _choice[T](elem: etree._Element, name: str, allowed: tuple[str, ...], defaul
 
 
 _FORMS = ("qualified", "unqualified")
+_ELEMENT_BLOCK = ("extension", "restriction", "substitution")
+_COMPLEX_DERIVATIONS = ("extension", "restriction")
+_SIMPLE_FINAL = ("restriction", "list", "union", "extension")
+
+
+def _derivation_set(
+    elem: etree._Element, name: str, loaded: _LoadedFile, allowed: tuple[str, ...]
+) -> list[str]:
+    """``block`` / ``final`` as the derivations it rules out.
+
+    Absent, the file's ``blockDefault`` / ``finalDefault`` applies; ``#all``
+    means every derivation the component knows.
+    """
+    raw = _token(elem, name)
+    if raw is None:
+        raw = _token(loaded.root, f"{name}Default")
+    tokens = (raw or "").split()
+    return list(allowed) if "#all" in tokens else [d for d in allowed if d in tokens]
 _PROCESS_CONTENTS = ("strict", "lax", "skip")
 
 
@@ -629,6 +648,8 @@ class XsdParser:
             xpath_default_namespace=main.root.get("xpathDefaultNamespace"),
             default_attributes=_token(main.root, "defaultAttributes"),
             default_open_content=default_open_content,
+            annotation=self._collect_annotation(main.root),
+            schema_version=_token(main.root, "version"),
         )
 
         for loaded in self.state.files:
@@ -888,7 +909,21 @@ class XsdParser:
             model.groups.append(self._parse_group(elem, loaded))
         elif local == "attributeGroup":
             model.attribute_groups.append(self._parse_attribute_group(elem, loaded))
-        # include/import/redefine/override/annotation/notation — skip here:
+        elif local == "notation":
+            name = _token(elem, "name") or ""
+            qname = self._compose_qname(loaded, name)
+            model.notations.append(
+                Notation(
+                    id=self._make_id("notation", qname),
+                    name=name,
+                    qname=qname,
+                    public=elem.get("public"),
+                    system=elem.get("system"),
+                    annotation=self._collect_annotation(elem),
+                    source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
+                )
+            )
+        # include/import/redefine/override/annotation — skip here:
         # references were followed in _follow_references, redefine and override
         # blocks get their own pass (_process_redefines/_overrides); top-level annotation
         # is attached to the schema node but we omit it from the model for now.
@@ -923,6 +958,7 @@ class XsdParser:
             alternatives.append(self._parse_alternative(alt_elem, loaded))
 
         identity_constraints = self._parse_identity_constraints(elem, loaded)
+        substitution_groups = (_token(elem, "substitutionGroup") or "").split()
 
         qname = self._compose_qname(loaded, name) if name and is_global else None
         identifier = self._make_id("element", qname or ref or f"anon-{self.state.next_anon()}")
@@ -942,9 +978,12 @@ class XsdParser:
             fixed=elem.get("fixed"),
             nillable=_bool_attr(elem, "nillable"),
             abstract=_bool_attr(elem, "abstract"),
-            substitution_group=_token(elem, "substitutionGroup"),
+            substitution_group=substitution_groups[0] if substitution_groups else None,
+            substitution_groups=substitution_groups,
+            block=_derivation_set(elem, "block", loaded, _ELEMENT_BLOCK),
+            final=_derivation_set(elem, "final", loaded, _COMPLEX_DERIVATIONS) if is_global else [],
             form=_choice(elem, "form", _FORMS, None),  # type: ignore[arg-type]
-            target_namespace=loaded.target_ns if is_global else None,
+            target_namespace=loaded.target_ns if is_global else _token(elem, "targetNamespace"),
             is_global=is_global,
             annotation=annotation,
             source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
@@ -1085,7 +1124,7 @@ class XsdParser:
             default=elem.get("default"),
             fixed=elem.get("fixed"),
             form=_choice(elem, "form", _FORMS, None),  # type: ignore[arg-type]
-            target_namespace=loaded.target_ns if is_global else None,
+            target_namespace=loaded.target_ns if is_global else _token(elem, "targetNamespace"),
             is_global=is_global,
             annotation=annotation,
             source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
@@ -1149,6 +1188,7 @@ class XsdParser:
             item_inline=item_inline,
             member_types=member_types,
             member_inline=member_inline,
+            final=[] if anonymous else _derivation_set(elem, "final", loaded, _SIMPLE_FINAL),
             annotation=annotation,
             source_ref=SourceRef(file_id=loaded.file_id, line=elem.sourceline),
             version_constraints=_vc_attrs(elem),
@@ -1207,6 +1247,9 @@ class XsdParser:
                     inline_content = restr.find(_xsd("simpleType"))
                     if inline_content is not None:
                         simple_content_inline = self._parse_simple_type(inline_content, loaded)
+                    # The value assertions among the facets (XSD 1.1).
+                    for assertion_elem in restr.findall(_xsd("assertion")):
+                        assertions.append(self._parse_assertion(assertion_elem, loaded))
                 attrs, groups = self._parse_attribute_children(inner, loaded)
                 attributes.extend(attrs)
                 attribute_group_refs.extend(groups)
@@ -1215,6 +1258,8 @@ class XsdParser:
             else:
                 assert_parent = simple_content
         elif complex_content is not None:
+            # ``mixed`` on xs:complexContent overrides the one on xs:complexType.
+            mixed = _bool_attr(complex_content, "mixed", default=mixed)
             content_kind = "mixed" if mixed else "complex"
             restr = complex_content.find(_xsd("restriction"))
             ext = complex_content.find(_xsd("extension"))
@@ -1267,6 +1312,8 @@ class XsdParser:
             simple_content_facets=simple_content_facets,
             simple_content_inline=simple_content_inline,
             assertions=assertions,
+            block=[] if anonymous else _derivation_set(elem, "block", loaded, _COMPLEX_DERIVATIONS),
+            final=[] if anonymous else _derivation_set(elem, "final", loaded, _COMPLEX_DERIVATIONS),
             open_content=open_content,
             default_attributes_apply=_bool_attr(
                 elem, "defaultAttributesApply", default=True
@@ -1379,6 +1426,8 @@ class XsdParser:
                         max_occurs=_occurs(child.get("maxOccurs"), 1),
                         wildcard_namespace=child.get("namespace"),
                         wildcard_process_contents=_choice(child, "processContents", _PROCESS_CONTENTS, None),  # type: ignore[arg-type]
+                        wildcard_not_namespace=child.get("notNamespace"),
+                        wildcard_not_qname=child.get("notQName"),
                         annotation=self._collect_annotation(child),
                         version_constraints=_vc_attrs(child),
                     )

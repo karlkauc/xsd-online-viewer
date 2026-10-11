@@ -40,10 +40,12 @@ export function sampleRootCandidates(model: SchemaModel): ElementDecl[] {
   const named = computeRootElements(model).filter((el) => el.name);
   const membersByHead = new Map<string, ElementDecl[]>();
   for (const el of model.elements) {
-    if (!el.substitution_group || !el.name) continue;
-    // substitution_group is a prefixed QName; match on its local name.
-    const head = localName(el.substitution_group);
-    membersByHead.set(head, [...(membersByHead.get(head) ?? []), el]);
+    if (!el.name) continue;
+    // The heads are prefixed QNames; match on their local names.
+    for (const qname of substitutionHeads(el)) {
+      const head = localName(qname);
+      membersByHead.set(head, [...(membersByHead.get(head) ?? []), el]);
+    }
   }
   const substitutable = (el: ElementDecl, seen: Set<string>): boolean => {
     if (!el.abstract) return true;
@@ -53,6 +55,13 @@ export function sampleRootCandidates(model: SchemaModel): ElementDecl[] {
   };
   const usable = named.filter((el) => substitutable(el, new Set()));
   return usable.length > 0 ? usable : named;
+}
+
+// Every head an element may substitute; a model from before
+// ``substitution_groups`` only names the first.
+export function substitutionHeads(el: ElementDecl): string[] {
+  if (el.substitution_groups?.length) return el.substitution_groups;
+  return el.substitution_group ? [el.substitution_group] : [];
 }
 
 function localName(qname: string): string {

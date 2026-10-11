@@ -151,4 +151,20 @@ describe("sampleRootCandidates", () => {
 
     expect(candidateNames(model([a, b], [MAIN]))).toEqual(["A", "B"]);
   });
+
+  it("counts a member under every head it names (XSD 1.1)", () => {
+    const first = abstractElement("FirstHead");
+    const second = abstractElement("SecondHead");
+    const member: ElementDecl = {
+      ...globalElement("Member", "main"),
+      substitution_group: "tns:FirstHead",
+      substitution_groups: ["tns:FirstHead", "tns:SecondHead"],
+    };
+
+    expect(candidateNames(model([first, second, member], [MAIN]))).toEqual([
+      "FirstHead",
+      "SecondHead",
+      "Member",
+    ]);
+  });
 });

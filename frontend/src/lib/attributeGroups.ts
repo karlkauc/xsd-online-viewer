@@ -52,7 +52,9 @@ export function collectGroupWildcards(refs: string[], index: NodeIndexEntry[]): 
 
 // Which names a wildcard admits, in the schema's own vocabulary:
 // "##any" when nothing is said, "not …" for the XSD 1.1 exclusions.
-export function wildcardNamespaceLabel(wildcard: Wildcard): string {
+export function wildcardNamespaceLabel(
+  wildcard: Pick<Wildcard, "namespace" | "not_namespace" | "not_qname">,
+): string {
   const parts: string[] = [];
   if (wildcard.namespace) parts.push(wildcard.namespace);
   if (wildcard.not_namespace) parts.push(`not ${wildcard.not_namespace}`);

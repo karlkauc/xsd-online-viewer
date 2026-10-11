@@ -184,6 +184,9 @@ class SimpleType(BaseModel):
     member_inline: list[SimpleType] = Field(default_factory=list)
     facets: list[Facet] = Field(default_factory=list)
     assertions: list[Assertion] = Field(default_factory=list)
+    # Derivations ``final`` rules out (restriction, list, union, extension),
+    # with ``#all`` expanded and the file's ``finalDefault`` applied.
+    final: list[str] = Field(default_factory=list)
     annotation: Annotation | None = None
     source_ref: SourceRef | None = None
     version_constraints: VersionConstraints | None = None
@@ -212,6 +215,7 @@ class AttributeDecl(BaseModel):
     default: str | None = None
     fixed: str | None = None
     form: Literal["qualified", "unqualified"] | None = None
+    # As on ElementDecl: set on a local attribute only by XSD 1.1 ``targetNamespace``.
     target_namespace: str | None = None
     is_global: bool = False
     annotation: Annotation | None = None
@@ -261,6 +265,8 @@ class Particle(BaseModel):
     children: list[Particle] = Field(default_factory=list)
     wildcard_namespace: str | None = None
     wildcard_process_contents: Literal["strict", "lax", "skip"] | None = None
+    wildcard_not_namespace: str | None = None  # XSD 1.1
+    wildcard_not_qname: str | None = None  # XSD 1.1
     annotation: Annotation | None = None
     version_constraints: VersionConstraints | None = None
 
@@ -285,8 +291,18 @@ class ElementDecl(BaseModel):
     fixed: str | None = None
     nillable: bool = False
     abstract: bool = False
+    # The first head, kept for consumers that predate ``substitution_groups``.
     substitution_group: QName | None = None
+    # Every head: XSD 1.1 lets ``substitutionGroup`` list several.
+    substitution_groups: list[QName] = Field(default_factory=list)
+    # What ``block`` (extension, restriction, substitution) and ``final``
+    # (extension, restriction) rule out, with ``#all`` expanded and the file's
+    # ``blockDefault`` / ``finalDefault`` applied.
+    block: list[str] = Field(default_factory=list)
+    final: list[str] = Field(default_factory=list)
     form: Literal["qualified", "unqualified"] | None = None
+    # The declaring file's namespace for a global declaration; for a local one
+    # only an explicit XSD 1.1 ``targetNamespace`` attribute.
     target_namespace: str | None = None
     is_global: bool = False
     annotation: Annotation | None = None
@@ -326,7 +342,11 @@ class ComplexType(BaseModel):
     # <xs:simpleContent><xs:restriction base="…"><xs:simpleType>…: the anonymous
     # type that replaces the base's content type before the facets apply.
     simple_content_inline: SimpleType | None = None
+    # xs:assert, and the xs:assertion facets of a simpleContent restriction.
     assertions: list[Assertion] = Field(default_factory=list)
+    # As on ElementDecl; both take extension and restriction.
+    block: list[str] = Field(default_factory=list)
+    final: list[str] = Field(default_factory=list)
     open_content: OpenContent | None = None  # XSD 1.1 xs:openContent
     # XSD 1.1: when ``SchemaModel.default_attributes`` is set, this flag
     # determines whether the implicit attribute group applies. Defaults to
@@ -407,6 +427,18 @@ class OverrideDirective(BaseModel):
     source_ref: SourceRef | None = None
 
 
+class Notation(BaseModel):
+    """An ``xs:notation`` declaration."""
+
+    id: str
+    name: str
+    qname: QName
+    public: str | None = None
+    system: str | None = None
+    annotation: Annotation | None = None
+    source_ref: SourceRef | None = None
+
+
 RedefineKind = Literal["simpleType", "complexType", "group", "attributeGroup"]
 
 
@@ -459,6 +491,10 @@ class SchemaModel(BaseModel):
     complex_types: list[ComplexType] = Field(default_factory=list)
     groups: list[Group] = Field(default_factory=list)
     attribute_groups: list[AttributeGroup] = Field(default_factory=list)
+    notations: list[Notation] = Field(default_factory=list)
+    # The main file's own xs:schema: its annotations and ``version`` attribute.
+    annotation: Annotation | None = None
+    schema_version: str | None = None
     files: list[SourceFile] = Field(default_factory=list)
     diagnostics: list[Diagnostic] = Field(default_factory=list)
     # XSD 1.1 schema-level information. ``xsd_version`` is heuristic — see

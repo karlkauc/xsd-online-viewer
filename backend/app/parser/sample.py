@@ -1046,6 +1046,8 @@ def _fill_complex(
 
 
 def _attribute_namespace(ctx: _Context, use: AttributeDecl, decl: AttributeDecl) -> str | None:
+    if decl.target_namespace and not decl.is_global:
+        return decl.target_namespace  # XSD 1.1 targetNamespace on a local attribute
     if use.ref or decl.is_global:
         return decl.target_namespace or ctx.namespace_of(decl)
     settings = ctx.settings_of(decl)
@@ -1570,7 +1572,16 @@ def _emit_wildcard(
             etree.SubElement(parent, _tag(namespace, "any"))
             ctx.emitted += 1
             return
-    members = _wildcard_members(ctx, constraint, target)
+    excluded = {
+        target if t == "##targetNamespace" else None if t == "##local" else t
+        for t in (particle.wildcard_not_namespace or "").split()
+    }
+    members = [
+        m
+        for m in _wildcard_members(ctx, constraint, target)
+        if not particle.wildcard_not_namespace
+        or (m.target_namespace or ctx.namespace_of(m)) not in excluded
+    ]
     member = next((m for m in members if m.id not in ctx.open_elements), None)
     if member is None:
         parent.append(etree.Comment(" any element allowed here "))
@@ -1634,8 +1645,8 @@ def _direct_members(ctx: _Context, head: ElementDecl) -> list[ElementDecl]:
     if ctx.members_by_head is None:
         ctx.members_by_head = {}
         for candidate in ctx.model.elements:
-            if candidate.name and candidate.substitution_group:
-                key = ctx.split_qname(candidate.substitution_group, candidate)
+            for head_name in candidate.substitution_groups if candidate.name else ():
+                key = ctx.split_qname(head_name, candidate)
                 ctx.members_by_head.setdefault(key, []).append(candidate)
     exact = ctx.members_by_head.get((head.target_namespace or ctx.namespace_of(head), head.name or ""))
     if exact:
