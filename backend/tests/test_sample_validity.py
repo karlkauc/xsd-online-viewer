@@ -1044,3 +1044,36 @@ def test_an_assertion_on_simple_content_reads_the_value() -> None:
     xml, counts = _generate(xsd)
     assert _errors_11(xsd, xml) == [], xml
     assert counts == {}
+
+
+@pytest.mark.parametrize(
+    ("base", "pattern"),
+    [
+        ("xs:date", r"\d\d58-0\d-\d8"),
+        ("xs:date", r"17\d\d-\d0-1\d"),
+        ("xs:date", r"18\d\d-\d6-0\d"),  # a zero in the month, none in the day
+        ("xs:gMonthDay", r"--0\d-\d8"),
+        ("xs:gYearMonth", r"\d{4}-\d5"),
+        ("xs:dateTime", r"\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\d"),
+        ("xs:negativeInteger", r"-\d{18}"),
+    ],
+)
+def test_a_digit_pattern_yields_a_value_of_the_type(base: str, pattern: str) -> None:
+    """NIST atomic-*-pattern: 0000-00-00 matches the pattern too, but is no date."""
+    root, counts = _valid_sample(
+        f'<xs:element name="R"><xs:simpleType><xs:restriction base="{base}">'
+        f'<xs:pattern value="{pattern}"/></xs:restriction></xs:simpleType></xs:element>'
+    )
+    assert root.text and counts == {}
+
+
+def test_a_pattern_on_a_list_of_dates_is_met_item_by_item() -> None:
+    """NIST list-date-pattern: each part of the pattern needs its own choice of digits."""
+    root, counts = _valid_sample(
+        '<xs:simpleType name="Dates"><xs:list itemType="xs:date"/></xs:simpleType>'
+        '<xs:element name="R"><xs:simpleType><xs:restriction base="t:Dates">'
+        r'<xs:pattern value="\d\d01-\d9-\d4 \d\d52-0\d-1\d 18\d\d-\d6-0\d"/>'
+        "</xs:restriction></xs:simpleType></xs:element>",
+        "R",
+    )
+    assert len(root.text.split()) == 3 and counts == {}

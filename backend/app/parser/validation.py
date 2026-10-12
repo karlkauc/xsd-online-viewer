@@ -787,6 +787,13 @@ def _validate_libxml2(model: SchemaModel, schema: etree.XMLSchema, pretty: bytes
     )
 
 
+def _validator_defect(exc: etree.XMLSchemaValidateError) -> ValidationSetupError:
+    return ValidationSetupError(
+        f"the XSD 1.0 validator failed on this document and could not check it ({exc}); "
+        "that is a defect of the validator, not a finding about the document"
+    )
+
+
 def validate_xml(
     model: SchemaModel, xml_bytes: bytes, *, schema: etree.XMLSchema | None = None
 ) -> ValidationResponse:
@@ -806,6 +813,8 @@ def validate_xml(
             return _validate_libxml2(model, schema, pretty_print_and_parse(xml_bytes))
         except etree.XMLSyntaxError as exc:
             return _not_well_formed(model, exc)
+        except etree.XMLSchemaValidateError as exc:
+            raise _validator_defect(exc) from exc
 
     with _materialised(model) as files:
         failure: ValidationSetupError | None = None
@@ -828,8 +837,20 @@ def validate_xml(
             if failure is not None:
                 raise failure from exc
             return _not_well_formed(model, exc)
+        defect: ValidationSetupError | None = None
         if schema is not None:
-            return _validate_libxml2(model, schema, pretty)
+            try:
+                return _validate_libxml2(model, schema, pretty)
+            except etree.XMLSchemaValidateError as exc:
+                # libxml2 gave up half way ("Internal error", on some regular
+                # expressions); the other validator may still have an answer.
+                defect = _validator_defect(exc)
+
+        if defect is not None:
+            try:
+                return _validate_xsd11(model, files, pretty)
+            except (_Xsd11UnavailableError, _Xsd11SchemaError, ValidationSetupError) as exc:
+                raise defect from exc
 
         try:
             return _validate_xsd11(model, files, pretty)

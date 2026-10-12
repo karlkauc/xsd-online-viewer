@@ -430,6 +430,8 @@ class _Style:
     pad_at: int = -1
     pad: int = 0
     quantifiers: int = 0
+    # The members classes take in turn, each where the class has it.
+    favour: str = ""
 
 
 def _render(node: _Node, style: _Style) -> str:
@@ -438,6 +440,11 @@ def _render(node: _Node, style: _Style) -> str:
         return node[1]
     if kind == "class":
         members = node[1]
+        if style.favour:
+            wanted = style.favour[style.position % len(style.favour)]
+            style.position += 1
+            if wanted in members:
+                return wanted
         if not style.rotate:
             return members[0]
         char = members[style.position % len(members)]
@@ -572,5 +579,17 @@ def samples_from_pattern(pattern: str, min_length: int = 0, limit: int = 40) -> 
                 # A minLength in the tens of thousands makes every sample that long.
                 if len(seen) >= limit or produced > _MAX_SAMPLE_CHARS:
                     return
+    # Digits that are neither zero nor walked through: 0000-00-00 and
+    # 0123-45-67 both match \d\d\d\d-\d\d-\d\d, but only 1111-11-11 is a date.
+    # Then zeros and ones mixed, for the month that must be 06 next to a day 0\d.
+    for favour in ("1", "2", "110", "101", "011", "10", "01", "100", "010", "001"):
+        for branch in range(min(_branch_count(tree), 8 if len(favour) == 1 else 1)):
+            try:
+                value = _render(tree, _Style(stretch=stretches[1], branch=branch, favour=favour))
+            except _UnsupportedError:
+                continue
+            if value and value not in seen:
+                seen.add(value)
+                yield value
     if empty_seen:
         yield ""

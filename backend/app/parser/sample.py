@@ -2781,11 +2781,35 @@ def _list_value(
     if resolved is not None and resolved[0] == "builtin" and resolved[1] not in _UNCHECKED_TYPES:
         checker = _value_checker(resolved[1], _checkable(facets), as_list=True)
         if checker is not None:
-            for candidate in [*candidates, value]:
+            itemwise = [v for v in (_itemwise(resolved[1], pattern) for pattern in patterns) if v]
+            for candidate in [*candidates, *itemwise, value]:
                 if _accepts(checker, candidate):
                     return candidate
             ctx.note("value_unsatisfiable", GENERATOR_LIMIT, simple.name, simple)
     return candidates[0] if candidates else value
+
+
+_PLAIN_ITEMS = re.compile(r"[^()\[\]|]+")
+
+
+def _itemwise(local: str, pattern: str) -> str | None:
+    """A match of ``pattern`` put together from one valid item per space-separated part.
+
+    The samples of the whole pattern vary all items alike, so one of them
+    is rarely a date in every position (NIST: ``\\d\\d01-\\d9-\\d4 \\d\\d52-0\\d-1\\d``).
+    """
+    if not _PLAIN_ITEMS.fullmatch(pattern):
+        return None
+    item_checker = _value_checker(local, ())
+    if item_checker is None:
+        return None
+    items = []
+    for part in pattern.split(" "):
+        item = next((s for s in samples_from_pattern(part) if _accepts(item_checker, s)), None)
+        if item is None:
+            return None
+        items.append(item)
+    return " ".join(items)
 
 
 def _item_count(facets: list[Facet]) -> int:

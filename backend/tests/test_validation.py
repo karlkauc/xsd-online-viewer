@@ -581,3 +581,21 @@ def test_a_schema_known_only_by_its_byte_order_mark_keeps_its_text(encoding: str
     assert model.files[0].content == text
     result = validate_xml(model, "<Gr\u00f6\u00dfe>1</Gr\u00f6\u00dfe>".encode())
     assert result.is_valid
+
+
+def test_an_internal_error_of_libxml2_is_not_a_server_error() -> None:
+    """W3C suite, msData/regex/reK88: libxml2 compiles \\p{IsaA0-a9} and then gives up
+    while validating ("Internal error in XML Schema validation")."""
+    xsd = (
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="doc">'
+        b'<xs:complexType><xs:attribute name="att"><xs:simpleType><xs:restriction base="xs:string">'
+        b'<xs:pattern value="\\p{IsaA0-a9}"/></xs:restriction></xs:simpleType></xs:attribute>'
+        b"</xs:complexType></xs:element></xs:schema>"
+    )
+    model = parse_single(xsd, "k88.xsd")
+    try:
+        result = validate_xml(model, b'<doc att="a"/>')
+    except ValidationSetupError as exc:
+        assert "defect of the validator" in str(exc)
+    else:  # the other validator had an answer
+        assert result.validator == "xmlschema"
