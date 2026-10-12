@@ -125,6 +125,7 @@ Quelle der Defaults: `backend/app/config.py`. In Cloud Run per
 | `STATIC_DIR` | `/app/static` | Default beibehalten |
 | `FETCH_TIMEOUT_SECONDS` | `10` | Default beibehalten |
 | `XSD11_TIMEOUT_SECONDS` | `20` | Zeitlimit für die XSD-1.1-Validierung (eigener Prozess) |
+| `SCHEMA_CHECK_LARGE_TIMEOUT_SECONDS` | `50` | Zeitlimit der Schema-Prüfung auf Anforderung (Schemas über 2 MB); muss unter `--timeout` bleiben |
 | `XSD11_MEMORY_MB` | `1024` | Adressraum-Limit des 1.1-Validators (virtuell, nicht RSS); Default beibehalten |
 | `FETCH_MAX_RESPONSE_MB` | `10` | Default beibehalten |
 | `FETCH_MAX_REDIRECTS` | `3` | Default beibehalten |

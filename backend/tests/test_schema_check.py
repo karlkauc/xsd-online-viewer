@@ -151,3 +151,30 @@ def test_a_very_large_schema_is_left_alone() -> None:
     with patch("app.parser.validation._CHECK_MAX_CHARS", 10):
         result = check_schema(model)
     assert result.status == "not_checked" and "too large" in (result.detail or "")
+    assert result.too_large
+
+
+def test_a_very_large_schema_is_checked_when_asked() -> None:
+    model = parse_single(ILLEGAL_RESTRICTION.encode(), "s.xsd")
+    with patch("app.parser.validation._CHECK_MAX_CHARS", 10):
+        result = check_schema(model, on_demand=True)
+    assert result.status == "findings" and not result.too_large
+
+
+def test_asking_does_not_lift_the_upper_limit() -> None:
+    model = parse_single(VALID.encode(), "s.xsd")
+    with patch("app.parser.validation._CHECK_ON_DEMAND_MAX_CHARS", 10):
+        result = check_schema(model, on_demand=True)
+    assert result.status == "not_checked" and not result.too_large
+
+
+def test_the_api_checks_a_large_schema_on_request(client: TestClient) -> None:
+    # A text of its own: the answer for a schema already checked is kept.
+    text = VALID.replace("<xs:schema", "<!-- large --><xs:schema", 1)
+    loaded = client.post("/api/schema/text", json={"content": text, "filename": "s.xsd"})
+    schema_id = loaded.json()["schema_id"]
+    with patch("app.parser.validation._CHECK_MAX_CHARS", 10):
+        unasked = client.get(f"/api/schema/{schema_id}/check").json()
+        asked = client.get(f"/api/schema/{schema_id}/check", params={"large": "true"}).json()
+    assert unasked["status"] == "not_checked" and unasked["too_large"]
+    assert asked["status"] == "ok" and not asked["too_large"]

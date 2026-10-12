@@ -157,6 +157,18 @@ export function ApiDocsPage() {
           </a>
           ). A <Code>404 schema not found or expired</Code> during validation simply means: repeat step 1.
         </Note>
+        <H3>Optional: is the XSD itself valid?</H3>
+        <p>
+          Loading a schema does not prove it obeys every rule of XSD. A second validator reads it on
+          request and lists what it breaks, each finding with its file and line:
+        </p>
+        <Pre>{`curl -s ${API}/schema/$SCHEMA_ID/check | jq '{status, version, findings}'`}</Pre>
+        <p>
+          <Code>status</Code> is <Code>ok</Code>, <Code>findings</Code> or <Code>not_checked</Code> (with
+          the reason in <Code>detail</Code>). A schema of more than 2 MB is only checked when asked
+          for with <Code>?large=true</Code>, which can take up to a minute. The check is advisory: a
+          schema with findings can still be used for validation.
+        </p>
 
         <H2 id="step-2">Step 2: Validate the XML</H2>
         <H3>Upload an XML file</H3>

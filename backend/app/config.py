@@ -28,6 +28,7 @@ class Settings:
     usage_drain_seconds: float
     xsd11_timeout_seconds: float
     xsd11_memory_mb: int
+    schema_check_large_timeout_seconds: float
 
     @property
     def usage_enabled(self) -> bool:
@@ -83,6 +84,10 @@ def load_settings() -> Settings:
         usage_drain_seconds=float(os.getenv("USAGE_DRAIN_SECONDS", "2")),
         xsd11_timeout_seconds=float(os.getenv("XSD11_TIMEOUT_SECONDS", "20")),
         xsd11_memory_mb=int(os.getenv("XSD11_MEMORY_MB", "1024")),
+        # Must stay below the request timeout of whatever serves the app (Cloud Run: 60 s).
+        schema_check_large_timeout_seconds=float(
+            os.getenv("SCHEMA_CHECK_LARGE_TIMEOUT_SECONDS", "50")
+        ),
     )
 
 

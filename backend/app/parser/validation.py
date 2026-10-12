@@ -665,18 +665,23 @@ class _Xsd11SchemaError(Exception):
     """The schema does not compile as XSD 1.1 either."""
 
 
-def _worker_request(files: _Materialised) -> dict:
+def _worker_request(files: _Materialised, timeout: float | None = None) -> dict:
     return {
         "root": str(files.root),
         "main": str(files.main),
         "locations": [[ns, str(path)] for ns, path in files.by_namespace.items()],
         "urls": {url: str(path) for url, path in files.by_url.items()},
-        "cpu_seconds": int(settings.xsd11_timeout_seconds) + 1,
+        "cpu_seconds": int(timeout or settings.xsd11_timeout_seconds) + 1,
         "memory_mb": settings.xsd11_memory_mb,
     }
 
 
+# Up to this size the check runs unasked on every schema loaded. xmlschema needs
+# eleven seconds for a schema of 8 MB (FundsXML) on a fast machine, and a
+# multiple of that on the server, so beyond it the check waits to be asked for
+# and is given more time (``schema_check_large_timeout_seconds``).
 _CHECK_MAX_CHARS = 2_000_000
+_CHECK_ON_DEMAND_MAX_CHARS = 30_000_000
 
 
 class SchemaCheckResponse(BaseModel):
@@ -691,9 +696,11 @@ class SchemaCheckResponse(BaseModel):
     # Findings beyond the ones listed.
     more: int = 0
     detail: str | None = None
+    # Not checked only because of the schema's size: asking for it runs the check.
+    too_large: bool = False
 
 
-def check_schema(model: SchemaModel) -> SchemaCheckResponse:
+def check_schema(model: SchemaModel, *, on_demand: bool = False) -> SchemaCheckResponse:
     """Read the schema with ``xmlschema`` and list the rules of XSD it breaks.
 
     libxml2, which validates XSD 1.0 documents here, lets a good many invalid
@@ -701,6 +708,9 @@ def check_schema(model: SchemaModel) -> SchemaCheckResponse:
     that contradict their base, regular expressions XSD does not have).
     ``xmlschema`` reports nearly all of them. It is a second opinion, not a
     gate: the schema stays loaded and usable either way.
+
+    ``on_demand`` says somebody asked for this check and is waiting for it,
+    which is what a large schema takes.
     """
     version: Literal["1.0", "1.1"] = "1.1" if model.xsd_version == "1.1" else "1.0"
 
@@ -712,16 +722,20 @@ def check_schema(model: SchemaModel) -> SchemaCheckResponse:
         # Every reference into a missing file would be reported as undefined.
         return answer("not_checked", detail=f"not all files of the schema are loaded: {missing[0]}")
     size = sum(len(source.content or "") for source in model.files)
+    if size > _CHECK_ON_DEMAND_MAX_CHARS:
+        return answer("not_checked", detail="the schema is too large to be checked here")
+    if size > _CHECK_MAX_CHARS and not on_demand:
+        return answer(
+            "not_checked", detail="the schema is too large for the automatic check", too_large=True
+        )
+    timeout = settings.xsd11_timeout_seconds
     if size > _CHECK_MAX_CHARS:
-        # The check runs unasked on every schema loaded, and xmlschema needs
-        # ten seconds and several hundred megabytes for one of 8 MB (FundsXML).
-        return answer("not_checked", detail="the schema is too large for the automatic check")
+        timeout = max(timeout, settings.schema_check_large_timeout_seconds)
     try:
         with _materialised(model) as files:
             if files.unavailable:
                 return answer("not_checked", detail="the schema's source is not available")
-            request = _worker_request(files) | {"check": version}
-            timeout = settings.xsd11_timeout_seconds
+            request = _worker_request(files, timeout) | {"check": version}
             with _WORKER_SLOTS:
                 try:
                     done = subprocess.run(  # noqa: S603 - fixed argv, no shell

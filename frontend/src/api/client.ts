@@ -228,10 +228,14 @@ function parseMissingReferences(raw: string | null): MissingReferences | null {
 /**
  * What a second validator finds wrong with the schema itself. Advisory: null
  * when the check is unavailable, so a failure never gets in the viewer's way.
+ * A large schema is only checked when `large` asks for it, which takes a while.
  */
-export async function fetchSchemaCheck(schemaId: string): Promise<SchemaCheckResponse | null> {
+export async function fetchSchemaCheck(
+  schemaId: string,
+  large = false,
+): Promise<SchemaCheckResponse | null> {
   try {
-    const response = await fetch(`${API_BASE}/schema/${schemaId}/check`);
+    const response = await fetch(`${API_BASE}/schema/${schemaId}/check${large ? "?large=true" : ""}`);
     if (!response.ok) return null;
     return (await response.json()) as SchemaCheckResponse;
   } catch {

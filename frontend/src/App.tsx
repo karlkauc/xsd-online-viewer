@@ -347,6 +347,18 @@ export default function App() {
               <span className="hidden sm:inline"> diagnostic{diagnosticsCount === 1 ? "" : "s"}</span>
             </button>
           )}
+          {diagnosticsCount === 0 && schemaCheck?.too_large && !diagnosticsVisible && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setDiagnosticsVisible(true)}
+              title="This schema was not checked against the rules of XSD yet"
+              aria-label="Show the schema check"
+            >
+              <span aria-hidden="true">🔍</span>
+              <span className="hidden sm:inline"> Schema check</span>
+            </button>
+          )}
           <button
             type="button"
             className="btn"

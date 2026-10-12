@@ -335,15 +335,21 @@ _CHECK_RESULTS_MAX = 256
 
 @router.get("/schema/{schema_id}/check", response_model=SchemaCheckResponse)
 @limiter.limit(WRITE_LIMIT)
-async def check_cached_schema(request: Request, schema_id: str) -> SchemaCheckResponse:
-    """What is wrong with the schema itself, by the rules of XSD (see ``check_schema``)."""
+async def check_cached_schema(
+    request: Request, schema_id: str, large: bool = False
+) -> SchemaCheckResponse:
+    """What is wrong with the schema itself, by the rules of XSD (see ``check_schema``).
+
+    A large schema is not checked unasked (``too_large`` in the answer);
+    ``?large=true`` asks for it and waits.
+    """
     model = schema_cache.get(schema_id)
     if model is None:
         raise HTTPException(status_code=404, detail="schema not found or expired")
     known = _CHECK_RESULTS.get(schema_id)
     if known is not None:
         return known
-    result = await asyncio.to_thread(check_schema, model)
+    result = await asyncio.to_thread(check_schema, model, on_demand=large)
     if result.status != "not_checked":
         if len(_CHECK_RESULTS) >= _CHECK_RESULTS_MAX:
             _CHECK_RESULTS.pop(next(iter(_CHECK_RESULTS)))

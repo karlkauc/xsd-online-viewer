@@ -58,6 +58,8 @@ export interface SchemaCheckResponse {
   findings: Diagnostic[];
   more: number;
   detail: string | null;
+  // Not checked only because of its size; `?large=true` runs the check.
+  too_large: boolean;
 }
 
 // XSD 1.1 conditional-inclusion vocabulary (vc:*). Display-only.

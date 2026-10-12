@@ -284,8 +284,12 @@ schemas. The SPA asks once per loaded schema and lists the findings in the
 diagnostics bar, each with its file and line (xmlschema reads with
 ElementTree, so the worker finds the line again in an lxml parse by the
 element's position). It is advisory: nothing is refused, libxml2 keeps
-validating XSD 1.0 documents, and a schema with files missing or larger than
-2 MB of source is not checked. Answers are kept per schema id.
+validating XSD 1.0 documents, and a schema with files missing is not checked.
+One larger than 2 MB of source is not checked unasked — xmlschema takes eleven
+seconds for FundsXML's 8 MB on a fast machine: the answer says `too_large`,
+the bar offers the check, and `?large=true` runs it with 50 seconds instead of
+twenty (`SCHEMA_CHECK_LARGE_TIMEOUT_SECONDS`, kept below Cloud Run's request
+timeout of 60 s; up to 30 MB). Answers are kept per schema id.
 
 The sample generator (`app/parser/sample.py`) does read schema-authored XPath
 in the server, as it always has for identity-constraint selectors and type
