@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
+from typing import Literal
 from urllib.parse import quote
 
 from lxml import etree
@@ -35,6 +36,7 @@ from app.parser.model import (
     AttributeDecl,
     AttributeGroup,
     ComplexType,
+    Diagnostic,
     ElementDecl,
     Group,
     QName,
@@ -663,18 +665,105 @@ class _Xsd11SchemaError(Exception):
     """The schema does not compile as XSD 1.1 either."""
 
 
-def _run_worker(files: _Materialised, pretty: bytes) -> list[dict]:
-    """Validate ``pretty`` against the materialised schema as XSD 1.1; the raw error records."""
-    timeout = settings.xsd11_timeout_seconds
-    request = {
+def _worker_request(files: _Materialised) -> dict:
+    return {
         "root": str(files.root),
         "main": str(files.main),
         "locations": [[ns, str(path)] for ns, path in files.by_namespace.items()],
         "urls": {url: str(path) for url, path in files.by_url.items()},
-        "xml": pretty.decode("utf-8"),
-        "cpu_seconds": int(timeout) + 1,
+        "cpu_seconds": int(settings.xsd11_timeout_seconds) + 1,
         "memory_mb": settings.xsd11_memory_mb,
     }
+
+
+_CHECK_MAX_CHARS = 2_000_000
+
+
+class SchemaCheckResponse(BaseModel):
+    """What a second reading of the schema itself found (mirrored in schema.ts)."""
+
+    schema_id: str
+    # ``not_checked``: the check could not run or finish; ``detail`` says why.
+    status: Literal["ok", "findings", "not_checked"]
+    # The XSD version the schema was read as.
+    version: Literal["1.0", "1.1"]
+    findings: list[Diagnostic] = Field(default_factory=list)
+    # Findings beyond the ones listed.
+    more: int = 0
+    detail: str | None = None
+
+
+def check_schema(model: SchemaModel) -> SchemaCheckResponse:
+    """Read the schema with ``xmlschema`` and list the rules of XSD it breaks.
+
+    libxml2, which validates XSD 1.0 documents here, lets a good many invalid
+    schemas through (the W3C test suite: restrictions that are none, facets
+    that contradict their base, regular expressions XSD does not have).
+    ``xmlschema`` reports nearly all of them. It is a second opinion, not a
+    gate: the schema stays loaded and usable either way.
+    """
+    version: Literal["1.0", "1.1"] = "1.1" if model.xsd_version == "1.1" else "1.0"
+
+    def answer(status: str, **fields: object) -> SchemaCheckResponse:
+        return SchemaCheckResponse(schema_id=model.schema_id, status=status, version=version, **fields)
+
+    missing = unloaded_files(model)
+    if missing:
+        # Every reference into a missing file would be reported as undefined.
+        return answer("not_checked", detail=f"not all files of the schema are loaded: {missing[0]}")
+    size = sum(len(source.content or "") for source in model.files)
+    if size > _CHECK_MAX_CHARS:
+        # The check runs unasked on every schema loaded, and xmlschema needs
+        # ten seconds and several hundred megabytes for one of 8 MB (FundsXML).
+        return answer("not_checked", detail="the schema is too large for the automatic check")
+    try:
+        with _materialised(model) as files:
+            if files.unavailable:
+                return answer("not_checked", detail="the schema's source is not available")
+            request = _worker_request(files) | {"check": version}
+            timeout = settings.xsd11_timeout_seconds
+            with _WORKER_SLOTS:
+                try:
+                    done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+                        [sys.executable, "-I", str(_WORKER)],
+                        input=json.dumps(request).encode("utf-8"),
+                        capture_output=True,
+                        timeout=timeout,
+                        env={},
+                        cwd=str(files.root),
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired:
+                    return answer("not_checked", detail=f"the check took longer than {timeout:g} s")
+            try:
+                reply = json.loads(done.stdout)
+            except ValueError:
+                logger.warning("schema check worker exited %s", done.returncode)
+                return answer("not_checked", detail="the check exceeded this server's limits")
+            if reply["status"] != "checked":
+                detail = str(reply.get("message") or reply["status"]).replace(f"{files.root}/", "")
+                return answer("not_checked", detail=detail[:300])
+            ids_by_name = {source.filename: source.id for source in model.files}
+            findings = []
+            for found in reply["findings"]:
+                name = files.names_by_path.get(str(found.get("file") or "").removeprefix("file://"))
+                findings.append(
+                    Diagnostic(
+                        severity="error",
+                        message=str(found["message"]).replace(f"{files.root}/", ""),
+                        file_id=ids_by_name.get(name) if name else None,
+                        line=found.get("line"),
+                    )
+                )
+    except ValidationSetupError as exc:
+        return answer("not_checked", detail=str(exc))
+    return answer("findings" if findings else "ok", findings=findings, more=int(reply.get("more") or 0))
+
+
+def _run_worker(files: _Materialised, pretty: bytes) -> list[dict]:
+    """Validate ``pretty`` against the materialised schema as XSD 1.1; the raw error records."""
+    timeout = settings.xsd11_timeout_seconds
+    request = _worker_request(files) | {"xml": pretty.decode("utf-8")}
     with _WORKER_SLOTS:
         try:
             # -I: no user site, no PYTHON* variables, and not the directory the

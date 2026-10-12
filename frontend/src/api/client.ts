@@ -1,4 +1,4 @@
-import type { SchemaResponse, ValidationResponse } from "../types/schema";
+import type { SchemaCheckResponse, SchemaResponse, ValidationResponse } from "../types/schema";
 
 const API_BASE = "/api";
 
@@ -220,6 +220,20 @@ function parseMissingReferences(raw: string | null): MissingReferences | null {
     const parsed = JSON.parse(decodeURIComponent(raw));
     if (typeof parsed?.count !== "number" || parsed.count <= 0 || !Array.isArray(parsed.names)) return null;
     return { count: parsed.count, names: parsed.names.filter((n: unknown): n is string => typeof n === "string") };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What a second validator finds wrong with the schema itself. Advisory: null
+ * when the check is unavailable, so a failure never gets in the viewer's way.
+ */
+export async function fetchSchemaCheck(schemaId: string): Promise<SchemaCheckResponse | null> {
+  try {
+    const response = await fetch(`${API_BASE}/schema/${schemaId}/check`);
+    if (!response.ok) return null;
+    return (await response.json()) as SchemaCheckResponse;
   } catch {
     return null;
   }

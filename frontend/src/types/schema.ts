@@ -49,6 +49,17 @@ export interface Diagnostic {
   line: number | null;
 }
 
+// GET /api/schema/{id}/check — a second reading of the schema itself
+// (backend: validation.SchemaCheckResponse).
+export interface SchemaCheckResponse {
+  schema_id: string;
+  status: "ok" | "findings" | "not_checked";
+  version: "1.0" | "1.1";
+  findings: Diagnostic[];
+  more: number;
+  detail: string | null;
+}
+
 // XSD 1.1 conditional-inclusion vocabulary (vc:*). Display-only.
 export interface VersionConstraints {
   min_version: string | null;

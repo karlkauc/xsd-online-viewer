@@ -4,6 +4,7 @@ import type {
   NodeIndexEntry,
   OverrideDirective,
   OverrideReplacement,
+  SchemaCheckResponse,
   SchemaModel,
   SchemaNode,
   SchemaNodeKind,
@@ -40,6 +41,9 @@ interface SelectionState {
   filterKinds: Set<SchemaNodeKind>;
   searchQuery: string;
   validationResult: ValidationResponse | null;
+  /** What the backend's second reading of the schema found; null until it
+   *  answers (and for good when the check is unavailable). */
+  schemaCheck: SchemaCheckResponse | null;
   diagnosticsVisible: boolean;
   minimapVisible: boolean;
   /** Set by jumpToSource — an arbitrary source location (e.g. a
@@ -67,6 +71,8 @@ interface SelectionState {
   setSearchQuery: (query: string) => void;
   setValidationResult: (result: ValidationResponse | null) => void;
   setDiagnosticsVisible: (visible: boolean) => void;
+  /** Ignored when `result` is for a schema that is no longer the loaded one. */
+  setSchemaCheck: (result: SchemaCheckResponse) => void;
   setMinimapVisible: (visible: boolean) => void;
 }
 
@@ -107,6 +113,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
   filterKinds: new Set(ALL_KINDS),
   searchQuery: "",
   validationResult: null,
+  schemaCheck: null,
   diagnosticsVisible: true,
   minimapVisible: defaultMinimapVisible(),
   sourceJump: null,
@@ -138,6 +145,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
       expandedIds: new Set(),
       searchQuery: "",
       validationResult: null,
+      schemaCheck: null,
       diagnosticsVisible: true,
       minimapVisible: defaultMinimapVisible(),
       sourceJump: null,
@@ -162,6 +170,7 @@ export const useSelection = create<SelectionState>((set, get) => ({
       selectedId: null,
       expandedIds: new Set(),
       validationResult: null,
+      schemaCheck: null,
       sourceJump: null,
     }),
 
@@ -204,6 +213,12 @@ export const useSelection = create<SelectionState>((set, get) => ({
   setSearchQuery: (query) => set({ searchQuery: query }),
   setValidationResult: (result) => set({ validationResult: result }),
   setDiagnosticsVisible: (visible) => set({ diagnosticsVisible: visible }),
+  setSchemaCheck: (result) => {
+    if (result.schema_id !== get().schemaId) return;
+    // Findings arrive after the bar may have been dismissed for the parser's
+    // own diagnostics; they are news, so the bar comes back.
+    set({ schemaCheck: result, ...(result.findings.length > 0 ? { diagnosticsVisible: true } : {}) });
+  },
   setMinimapVisible: (visible) => set({ minimapVisible: visible }),
 }));
 

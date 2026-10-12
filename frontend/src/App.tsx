@@ -21,7 +21,7 @@ import { MobileNav, type MobilePane } from "./components/MobileNav";
 import { HeaderActions, type HeaderAction } from "./components/HeaderActions";
 import { MD_QUERY, useMediaQuery } from "./lib/useMediaQuery";
 import { useSelection, type ViewTab } from "./stores/selectionStore";
-import { exportHtmlUrl } from "./api/client";
+import { exportHtmlUrl, fetchSchemaCheck } from "./api/client";
 import { downloadSchemaExport } from "./lib/schemaSession";
 import { isShareable, shareLink } from "./lib/schemaSource";
 import { useCopy } from "./lib/useCopy";
@@ -97,7 +97,23 @@ export default function App() {
   const clearSchema = useSelection((s) => s.clearSchema);
   const diagnosticsVisible = useSelection((s) => s.diagnosticsVisible);
   const setDiagnosticsVisible = useSelection((s) => s.setDiagnosticsVisible);
-  const diagnosticsCount = model?.diagnostics?.length ?? 0;
+  const schemaCheck = useSelection((s) => s.schemaCheck);
+  const setSchemaCheck = useSelection((s) => s.setSchemaCheck);
+  const diagnosticsCount =
+    (model?.diagnostics?.length ?? 0) + (schemaCheck?.findings.length ?? 0) + (schemaCheck?.more ?? 0);
+  const hasModel = model !== null;
+  // A second reading of the schema itself, once per loaded schema. Advisory:
+  // the viewer never waits for it.
+  useEffect(() => {
+    if (!schemaId || !hasModel) return;
+    let cancelled = false;
+    void fetchSchemaCheck(schemaId).then((result) => {
+      if (!cancelled && result) setSchemaCheck(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [schemaId, hasModel, setSchemaCheck]);
   const docsRoute = isApiDocsRoute();
 
   const [structureCollapsed, setStructureCollapsed] = useState<boolean>(() => {

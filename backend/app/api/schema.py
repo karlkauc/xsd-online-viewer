@@ -19,9 +19,11 @@ from app.parser.sample import find_element
 from app.parser.security import SecurityError, fetch_schema_url
 from app.parser.urls import html_response_message, looks_like_html
 from app.parser.validation import (
+    SchemaCheckResponse,
     ValidationErrorItem,
     ValidationResponse,
     ValidationSetupError,
+    check_schema,
     utf8_bytes,
     validate_xml,
 )
@@ -319,6 +321,34 @@ async def get_cached_schema(schema_id: str) -> SchemaResponse:
     if model is None:
         raise HTTPException(status_code=404, detail="schema not found or expired")
     return SchemaResponse(schema_id=schema_id, model=model)
+
+
+# ---------------------------------------------------------------------------
+# A second reading of the schema itself
+# ---------------------------------------------------------------------------
+
+# The check starts a process and takes a second or more, and the answer for a
+# schema id never changes. Results that say the check did not run are not kept.
+_CHECK_RESULTS: dict[str, SchemaCheckResponse] = {}
+_CHECK_RESULTS_MAX = 256
+
+
+@router.get("/schema/{schema_id}/check", response_model=SchemaCheckResponse)
+@limiter.limit(WRITE_LIMIT)
+async def check_cached_schema(request: Request, schema_id: str) -> SchemaCheckResponse:
+    """What is wrong with the schema itself, by the rules of XSD (see ``check_schema``)."""
+    model = schema_cache.get(schema_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="schema not found or expired")
+    known = _CHECK_RESULTS.get(schema_id)
+    if known is not None:
+        return known
+    result = await asyncio.to_thread(check_schema, model)
+    if result.status != "not_checked":
+        if len(_CHECK_RESULTS) >= _CHECK_RESULTS_MAX:
+            _CHECK_RESULTS.pop(next(iter(_CHECK_RESULTS)))
+        _CHECK_RESULTS[schema_id] = result
+    return result
 
 
 # ---------------------------------------------------------------------------

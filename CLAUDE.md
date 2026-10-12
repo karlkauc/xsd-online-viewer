@@ -106,7 +106,9 @@ cached and a soft reload can keep showing the old UI.
   `IdentityConstraint.field_xpath_default_namespaces` and `ref` / `ref_id`
   (a constraint used by reference), the effective
   `qualified` on local `ElementDecl` / `AttributeDecl` and the per-file
-  `element_form_default` / `attribute_form_default` on `SourceFile`.
+  `element_form_default` / `attribute_form_default` on `SourceFile`. Outside
+  the model, `SchemaCheckResponse` (`validation.py`, the schema check) is
+  mirrored the same way.
 - **Not every tree row is a declaration**: `xs:any` / `xs:anyAttribute` rows
   carry a synthetic id and select their owner; `xs:notation` is a real node
   kind (`notation:…`). The attribute wildcard shown is the one in effect

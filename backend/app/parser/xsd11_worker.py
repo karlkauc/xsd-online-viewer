@@ -16,6 +16,11 @@ Protocol: a JSON request on stdin, a JSON reply on stdout.
     {"status": "schema-error", "message": text, "file": path | null, "line": n | null}
     {"status": "unavailable", "message": text}
     {"status": "validator-error", "message": text}   (xmlschema itself failed)
+
+A request with ``"check": "1.0" | "1.1"`` and no ``xml`` asks what is wrong with
+the schema itself, read as that version:
+
+    {"status": "checked", "findings": [{"message", "file", "line"}, ...], "more": n}
 """
 
 from __future__ import annotations
@@ -75,8 +80,92 @@ def _error(error) -> dict:  # noqa: ANN001 - xmlschema.XMLSchemaValidationError
     }
 
 
+_FINDINGS = 50
+
+
+def _line_of(error, lines: dict) -> int | None:  # noqa: ANN001 - xmlschema.XMLSchemaParseError
+    """The source line of the element an error is about.
+
+    xmlschema reads schemas with ElementTree, which keeps no line numbers; the
+    element's position in document order finds it again in an lxml parse.
+    """
+    from lxml import etree
+
+    elem = getattr(error, "elem", None)
+    schema = getattr(getattr(error, "validator", None), "schema", None)
+    url = getattr(schema, "url", None)
+    root = getattr(getattr(schema, "source", None), "root", None)
+    if elem is None or root is None or not url or not url.startswith("file://"):
+        return getattr(elem, "sourceline", None)
+    if url not in lines:
+        parser = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
+        try:
+            located = [e.sourceline for e in etree.parse(url[7:], parser).getroot().iter("*")]
+        except (etree.LxmlError, OSError):
+            located = []
+        lines[url] = ([id(e) for e in root.iter()], located)
+    ids, located = lines[url]
+    try:
+        index = ids.index(id(elem))
+    except ValueError:
+        return None
+    return located[index] if len(located) == len(ids) else None
+
+
+def check(request: dict) -> dict:
+    """Every rule of XSD the schema breaks, as far as xmlschema finds them."""
+    try:
+        import xmlschema
+        from lxml import etree
+    except ImportError as exc:
+        return {"status": "unavailable", "message": str(exc)}
+    urls: dict[str, str] = request.get("urls") or {}
+
+    def mapper(uri: str) -> str:
+        return urls.get(_url_key(uri), uri) if "://" in uri and not uri.startswith("file:") else uri
+
+    reader = xmlschema.XMLSchema11 if request["check"] == "1.1" else xmlschema.XMLSchema10
+    try:
+        schema = reader(
+            request["main"],
+            locations=[tuple(pair) for pair in request.get("locations") or ()],
+            base_url=request["root"],
+            allow="sandbox",
+            uri_mapper=mapper,
+            validation="lax",
+        )
+        # Of every file read, not only the main one.
+        errors = list(getattr(schema.maps, "all_errors", None) or schema.all_errors)
+    except (xmlschema.XMLSchemaException, etree.LxmlError, OSError, ValueError, SyntaxError) as exc:
+        # What stops the reading altogether, lax or not.
+        errors = [exc]
+    except (MemoryError, RecursionError):
+        raise
+    except Exception as exc:  # noqa: BLE001 - a defect in the validator
+        return {"status": "validator-error", "message": f"{type(exc).__name__}: {exc}"[:300]}
+    lines: dict = {}
+    findings, seen = [], set()
+    for error in errors:
+        found = _schema_error(error)
+        line = _line_of(error, lines)
+        key = (found["message"], found["file"], line, id(getattr(error, "elem", None)))
+        if key in seen:
+            continue
+        seen.add(key)
+        # Without the dump of the component and its path that some messages carry.
+        message = found["message"].split("\n\nSchema component", 1)[0].split("\n\nPath:", 1)[0]
+        findings.append({"message": message.strip()[:500], "file": found["file"], "line": line})
+    return {
+        "status": "checked",
+        "findings": findings[:_FINDINGS],
+        "more": max(0, len(findings) - _FINDINGS),
+    }
+
+
 def run(request: dict) -> dict:
     _limit(request)
+    if request.get("check"):
+        return check(request)
     try:
         import xmlschema
         from lxml import etree

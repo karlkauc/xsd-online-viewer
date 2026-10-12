@@ -146,6 +146,7 @@ and opened from anywhere via window events (`xsdv:open-search`,
 | GET    | `/api/schema/{schema_id}`                           | Retrieve cached schema                          |
 | POST   | `/api/schema/{schema_id}/validate/{upload,text,url}` | Validate an XML document against the schema   |
 | GET    | `/api/schema/{schema_id}/sample?element=<id>`       | Sample XML instance for one element (`optional`, `repeat` 1–5, `depth`) |
+| GET    | `/api/schema/{schema_id}/check`                     | What a second validator finds wrong with the schema itself |
 | GET    | `/api/schema/{schema_id}/export/html`               | Standalone HTML export                          |
 | GET    | `/api/schema/{schema_id}/file/{file_id}/formatted`  | Pretty-printed source of one file               |
 | GET    | `/api/fundsxml/releases`                            | FundsXML releases from GitHub (cached)          |
@@ -272,6 +273,19 @@ loads schema files only from the temp directory (`allow="sandbox"`; absolute
 URLs are mapped onto the copies), and XPath 2.0 as elementpath implements it
 has no function that reads a file or URL. The app itself still never imports
 `xmlschema`.
+
+The same worker gives a second opinion on the schema itself
+(`validation.check_schema`, `GET /api/schema/{id}/check`). libxml2 compiles
+many schemas that are not valid XSD — in the W3C test suite 451 of them:
+restrictions that restrict nothing, facets contradicting their base type,
+regular expressions XSD does not have. Read by `xmlschema` in lax mode, 439 of
+those come back with findings, against two false alarms on 11,000 valid
+schemas. The SPA asks once per loaded schema and lists the findings in the
+diagnostics bar, each with its file and line (xmlschema reads with
+ElementTree, so the worker finds the line again in an lxml parse by the
+element's position). It is advisory: nothing is refused, libxml2 keeps
+validating XSD 1.0 documents, and a schema with files missing or larger than
+2 MB of source is not checked. Answers are kept per schema id.
 
 The sample generator (`app/parser/sample.py`) does read schema-authored XPath
 in the server, as it always has for identity-constraint selectors and type
