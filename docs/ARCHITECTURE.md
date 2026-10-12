@@ -279,7 +279,10 @@ alternative tests: `xs:assert` tests are translated to XPath 1.0
 (`_xpath_1`: value comparisons, `xpathDefaultNamespace` as a stand-in prefix)
 and run by libxml2 on the generated element, to repair what is cheap to
 repair — optional attributes a test asks for or rules out, two values the
-wrong way round. That is kept narrow on purpose (`_assertion_reach`): no path
+wrong way round, a value the test itself names (`e = 'present'`). The
+`xs:assertion` facets of simple types are checked the same way while a value
+is produced, with `$value` bound to the candidate (`_asserted_value`); a test
+on a whole list is not evaluated. That is kept narrow on purpose (`_assertion_reach`): no path
 out of the element, at most two descendant searches and only on a small
 subtree, a cap on evaluations per sample, and no `matches()` — a regular
 expression from the schema never runs on Python's `re`. Whatever falls

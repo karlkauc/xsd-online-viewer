@@ -877,3 +877,170 @@ def test_white_space_around_a_target_namespace_is_not_part_of_it() -> None:
     assert model.target_namespace == "urn:spaced"
     xml, _ = generate_sample_with_report(model, model.elements[0], SampleOptions())
     assert etree.fromstring(xml.encode("utf-8")).tag == "{urn:spaced}R"
+
+
+@needs_xmlschema
+@pytest.mark.parametrize(
+    ("base", "test"),
+    [
+        ("xs:int", "$value mod 2 = 0"),
+        ("xs:int", "$value eq 100"),
+        ("xs:string", "ends-with($value, 'xyz')"),
+        ("xs:string", "$value = 'present'"),
+        ("xs:string", "normalize-space($value) = '100'"),
+        ("xs:date", "year-from-date($value) eq 2008"),
+        ("xs:date", "starts-with(string($value), '2008')"),
+    ],
+)
+def test_a_value_meets_the_assertion_of_its_simple_type(base: str, test: str) -> None:
+    xsd = _schema(
+        f'<xs:element name="R"><xs:simpleType><xs:restriction base="{base}">'
+        f'<xs:assertion test="{test}"/></xs:restriction></xs:simpleType></xs:element>'
+    )
+    xml, counts = _generate(xsd)
+    assert _errors_11(xsd, xml) == [], xml
+    assert counts == {}
+
+
+@needs_xmlschema
+def test_assertions_of_item_and_member_types_apply_to_each_value() -> None:
+    """IBM listunion: the items of a list answer to their own type's assertion."""
+    xsd = _schema(
+        '<xs:simpleType name="Even"><xs:restriction base="xs:int">'
+        '<xs:assertion test="$value mod 2 = 0"/></xs:restriction></xs:simpleType>'
+        '<xs:element name="R"><xs:complexType><xs:sequence>'
+        '<xs:element name="list"><xs:simpleType><xs:restriction><xs:simpleType>'
+        '<xs:list itemType="t:Even"/></xs:simpleType><xs:minLength value="3"/></xs:restriction>'
+        "</xs:simpleType></xs:element>"
+        '<xs:element name="union"><xs:simpleType><xs:union memberTypes="t:Even xs:boolean"/>'
+        "</xs:simpleType></xs:element>"
+        "</xs:sequence></xs:complexType></xs:element>"
+    )
+    xml, counts = _generate(xsd)
+    assert _errors_11(xsd, xml) == [], xml
+    assert counts == {}
+
+
+def test_a_value_assertion_that_cannot_be_met_or_read_is_reported() -> None:
+    def counts_for(base: str, test: str) -> dict[str, int]:
+        return _generate(
+            _schema(
+                f'<xs:element name="R"><xs:simpleType><xs:restriction base="{base}">'
+                f'<xs:assertion test="{test}"/></xs:restriction></xs:simpleType></xs:element>'
+            )
+        )[1]
+
+    assert counts_for("xs:int", "$value castable as xs:double") == {"assertion_not_evaluated": 1}
+    assert counts_for("xs:int", "$value mod 2 = 0.5") == {"assertion_unsettled": 1}
+    # The whole list is a sequence, which XPath 1.0 cannot test.
+    assert _generate(
+        _schema(
+            '<xs:element name="R"><xs:simpleType><xs:restriction><xs:simpleType>'
+            '<xs:list itemType="xs:int"/></xs:simpleType>'
+            '<xs:assertion test="count($value) = 2"/></xs:restriction></xs:simpleType></xs:element>'
+        )
+    )[1] == {"assertion_not_evaluated": 1}
+
+
+@needs_xmlschema
+@pytest.mark.parametrize(
+    ("content", "test"),
+    [
+        ('<xs:sequence><xs:element name="e" type="xs:string"/></xs:sequence>', "t:e = 'present'"),
+        (
+            '<xs:sequence><xs:element name="start" type="xs:string"/>'
+            '<xs:element name="end" type="xs:string"/></xs:sequence>',
+            "(t:start = 's1' and t:end = 'e1') or (t:start = 's2' and t:end = 'e2')",
+        ),
+        # The optional attribute goes in, with the value the test names.
+        ('<xs:attribute name="a" type="xs:string"/>', "starts-with(@a, 'prefix')"),
+        (
+            '<xs:sequence><xs:element name="item" type="xs:string" maxOccurs="unbounded"/>'
+            '</xs:sequence><xs:attribute name="length" type="xs:int"/>',
+            "@length eq count(t:item)",
+        ),
+    ],
+)
+def test_an_assertion_is_met_with_the_values_it_names(content: str, test: str) -> None:
+    xsd = _schema(
+        f'<xs:element name="R"><xs:complexType>{content}<xs:assert test="{test}"/>'
+        "</xs:complexType></xs:element>"
+    )
+    xml, counts = _generate(xsd)
+    assert _errors_11(xsd, xml) == [], xml
+    assert counts == {}
+
+
+@pytest.mark.parametrize("field", ["attribute::code", "t:cell/@code", "t:cell/attribute::code"])
+def test_a_key_field_behind_a_path_or_the_attribute_axis_is_supplied(field: str) -> None:
+    """MS idL042: the optional attribute a key reads need not sit on the selected node."""
+    selector = "t:row" if "/" in field else "t:row/t:cell"
+    root, counts = _valid_sample(
+        '<xs:element name="R"><xs:complexType><xs:sequence>'
+        '<xs:element name="row"><xs:complexType><xs:sequence>'
+        '<xs:element name="cell"><xs:complexType><xs:simpleContent><xs:extension base="xs:string">'
+        '<xs:attribute name="code" type="xs:string"/></xs:extension></xs:simpleContent>'
+        "</xs:complexType></xs:element></xs:sequence></xs:complexType></xs:element>"
+        "</xs:sequence></xs:complexType>"
+        f'<xs:key name="k"><xs:selector xpath="{selector}"/><xs:field xpath="{field}"/></xs:key>'
+        "</xs:element>"
+    )
+    assert root[0][0].get("code") and counts == {}
+
+
+def test_a_keyref_with_a_default_value_gets_a_key_that_matches() -> None:
+    """MS idH015: the reference cannot move, so the key takes its value."""
+    root, counts = _valid_sample(
+        '<xs:element name="R"><xs:complexType><xs:sequence>'
+        '<xs:element name="ref"><xs:complexType>'
+        '<xs:attribute name="to" type="xs:string" default="test"/></xs:complexType></xs:element>'
+        '<xs:element name="item"><xs:complexType>'
+        '<xs:attribute name="id" type="xs:string" use="required"/></xs:complexType></xs:element>'
+        "</xs:sequence></xs:complexType>"
+        '<xs:keyref name="r" refer="t:k"><xs:selector xpath="t:ref"/><xs:field xpath="@to"/></xs:keyref>'
+        '<xs:key name="k"><xs:selector xpath="t:item"/><xs:field xpath="@id"/></xs:key>'
+        "</xs:element>",
+        include_optional=True,
+    )
+    assert root[1].get("id") == "test" and counts == {}
+
+
+def test_a_keyref_to_a_unique_without_rows_gets_one() -> None:
+    """MS idK006: the unique's field is optional and was left out."""
+    root, counts = _valid_sample(
+        '<xs:element name="R"><xs:complexType><xs:sequence>'
+        '<xs:element name="item"><xs:complexType>'
+        '<xs:attribute name="id" type="xs:string"/></xs:complexType></xs:element>'
+        '<xs:element name="ref" type="xs:string"/>'
+        "</xs:sequence></xs:complexType>"
+        '<xs:unique name="u"><xs:selector xpath="t:item"/><xs:field xpath="@id"/></xs:unique>'
+        '<xs:keyref name="r" refer="t:u"><xs:selector xpath="t:ref"/><xs:field xpath="."/></xs:keyref>'
+        "</xs:element>"
+    )
+    assert root[0].get("id") == root[1].text and counts == {}
+
+
+def test_a_field_on_an_element_of_a_complex_type_is_reported() -> None:
+    """MS idF012: xs:anyType has no simple value, whatever the element holds."""
+    _, counts = _generate(
+        _schema(
+            '<xs:element name="R"><xs:complexType><xs:sequence>'
+            '<xs:element name="item" type="xs:anyType"/></xs:sequence></xs:complexType>'
+            '<xs:unique name="u"><xs:selector xpath="t:item"/><xs:field xpath="."/></xs:unique>'
+            "</xs:element>"
+        )
+    )
+    assert counts == {"identity_field_unusable": 1}
+
+
+@needs_xmlschema
+def test_an_assertion_on_simple_content_reads_the_value() -> None:
+    """IBM test16: on a complex type, $value is the text of the element."""
+    xsd = _schema(
+        '<xs:element name="R"><xs:complexType><xs:simpleContent><xs:extension base="xs:string">'
+        '<xs:assert test="contains($value, \'Element\')"/></xs:extension></xs:simpleContent>'
+        "</xs:complexType></xs:element>"
+    )
+    xml, counts = _generate(xsd)
+    assert _errors_11(xsd, xml) == [], xml
+    assert counts == {}

@@ -337,6 +337,9 @@ class _Context:
     )
     assertion_xpaths: dict[int, tuple[etree.XPath, bool] | None] = field(default_factory=dict)
     assertion_evaluations: int = 0
+    # The xs:assertion facets of the simple types the value being produced
+    # derives from, each with the type that declares it.
+    value_assertions: list[tuple[Assertion, SimpleType]] = field(default_factory=list)
     unusable_constraints: set[str] = field(default_factory=set)
 
     def note(
@@ -1765,6 +1768,13 @@ def _xp_numbers(value: object) -> list[float]:
     return [float(_xp_string(item)) for item in items]
 
 
+_DATE_PARTS = re.compile(r"\s*(-?\d{4,})-(\d\d)-(\d\d)")
+
+
+def _xp_date_part(value: object, index: int) -> float:
+    return float(_DATE_PARTS.match(_xp_string(value)).groups()[index])  # no date: an AttributeError
+
+
 _XPATH_2_FUNCTIONS = {
     (None, "exists"): lambda _c, value: bool(value) if isinstance(value, list) else True,
     (None, "empty"): lambda _c, value: not value if isinstance(value, list) else False,
@@ -1775,6 +1785,12 @@ _XPATH_2_FUNCTIONS = {
     (None, "min"): lambda _c, value: min(_xp_numbers(value)),
     (None, "max"): lambda _c, value: max(_xp_numbers(value)),
     (None, "avg"): lambda _c, value: sum(_xp_numbers(value)) / len(_xp_numbers(value)),
+    (None, "data"): lambda _c, value: value,
+    **{
+        (None, f"{part}-from-{kind}"): (lambda _c, value, index=index: _xp_date_part(value, index))
+        for kind in ("date", "dateTime")
+        for index, part in enumerate(("year", "month", "day"))
+    },
 }
 _TEST_ATTRIBUTE = re.compile(r"@(?:[\w.-]+:)?([\w.-]+)")
 _ASSERTION_REPAIRS = 24
@@ -1843,9 +1859,11 @@ def _assertion_holds(
     ):
         return None
     ctx.assertion_evaluations += 1
+    local = ctx.value_specs.get((node, None), ("string", []))[0]
     try:
-        return bool(xpath(node))
-    except (etree.XPathError, ValueError, ZeroDivisionError, IndexError, TypeError):
+        # $value: the content of a type with simple content.
+        return bool(xpath(node, value=_xpath_value(local, node.text or "")))
+    except (etree.XPathError, ValueError, ZeroDivisionError, IndexError, TypeError, AttributeError):
         return None
 
 
@@ -1892,7 +1910,8 @@ def _repair_for_assertion(
             return False
         for tag in group:
             _set_attribute(ctx, node, tag, etree.QName(tag).namespace, skipped[tag])
-        if holds():
+        # With the attribute there, the test may still want a value it names.
+        if holds() or _repair_by_literals(ctx, assertion, node, holds):
             for tag in group:
                 ctx.optional_attributes.add((node, tag))
                 del skipped[tag]
@@ -1938,7 +1957,73 @@ def _repair_for_assertion(
             return True
         _write(first, one)
         _write(second, other)
+    return _repair_by_literals(ctx, assertion, node, holds)
+
+
+def _repair_by_literals(
+    ctx: _Context, assertion: Assertion, node: etree._Element, holds: Callable[[], bool]
+) -> bool:
+    """Try the values the test itself names, on one value of ``node`` or on two.
+
+    ``e = 'present'``, ``starts-with(@a, 'x')``, ``@n eq count(item)`` and
+    pairs such as ``start = 's1' and end = 'e1'``. Every value written is one
+    its own type accepts.
+    """
+    options: dict[tuple[etree._Element, str | None], list[str]] = {}
+    slots = [(node, tag) for tag in node.attrib] + [(node, None)] + [(child, None) for child in node]
+    for slot in slots:
+        spec = ctx.value_specs.get(slot)
+        if spec is None or (slot[1] is None and len(slot[0])):
+            continue
+        local, facets = spec
+        if local in _ASSERTION_FIXED_TYPES or local not in _BUILTIN_VALUES:
+            continue
+        checker = None if local in _UNCHECKED_TYPES else _value_checker(local, _checkable(facets))
+        current = _read(slot) or ""
+        values = [
+            value
+            for value in _unique(_test_candidates([assertion.test], local, current, plain=True))
+            if value != current and (checker is None or _accepts(checker, value))
+        ]
+        if values:
+            options[slot] = values[:_LITERALS_PER_SLOT]
+        if len(options) == _LITERAL_SLOTS:
+            break
+    tries = 0
+    for slot, values in options.items():
+        before = _read(slot)
+        for value in values:
+            _write(slot, value)
+            if holds():
+                return True
+        _restore(slot, before)
+    for (first, first_values), (second, second_values) in itertools.combinations(options.items(), 2):
+        saved = _read(first), _read(second)
+        for one, other in itertools.product(first_values, second_values):
+            tries += 1
+            if tries > _LITERAL_PAIRS:
+                break
+            _write(first, one)
+            _write(second, other)
+            if holds():
+                return True
+        _restore(first, saved[0])
+        _restore(second, saved[1])
+        if tries > _LITERAL_PAIRS:
+            break
     return False
+
+
+_LITERAL_SLOTS = 6
+_LITERALS_PER_SLOT = 8
+_LITERAL_PAIRS = 150
+
+
+def _restore(slot: tuple[etree._Element, str | None], value: str | None) -> None:
+    if value is None and slot[1] is None:
+        slot[0].text = None
+    elif value is not None:
+        _write(slot, value)
 
 
 # ---------------------------------------------------------------------------
@@ -2017,6 +2102,9 @@ def _xpath_1(expression: str, *, qualify: bool, value_operators: bool = False) -
     for index, token in enumerate(tokens):
         before = tokens[index - 1] if index else None
         after = tokens[index + 1] if index + 1 < len(tokens) else None
+        if before == "$":
+            out[-1] += token  # XPath 1.0 allows no space inside a variable reference
+            continue
         if not (token[0].isalpha() or token[0] == "_") or ":" in token:
             out.append(token)
             continue
@@ -2170,12 +2258,23 @@ def _field_unusable(ctx: _Context, constraint: IdentityConstraint, target: etree
         result = _run_xpath(ctx, constraint, expression, target)
         if len(result) > 1:
             return True
-        if result and isinstance(result[0], etree._Element) and len(result[0]) > 0:
+        if not result or not isinstance(result[0], etree._Element):
+            continue
+        hit = result[0]
+        if len(hit) > 0:
+            return True
+        # An empty element no simple value was produced for has a complex type
+        # (xs:anyType, an empty content model), which a field may not reach.
+        spec = ctx.value_specs.get((hit, None))
+        if spec is None and not (hit.text or "").strip():
+            return True
+        if spec is not None and spec[0] == "anyType":
             return True
     return False
 
 
-_ATTRIBUTE_FIELD = re.compile(r"^@(?:[\w.-]+:)?([\w.-]+)$")
+# A field that ends in an attribute step: ``@a``, ``attribute::p:a``, ``row/@a``.
+_ATTRIBUTE_FIELD = re.compile(r"^(?:(.*)/)?\s*(?:@|attribute\s*::)\s*(?:[\w.-]+:)?([\w.-]+)$")
 
 
 def _supply_key_fields(ctx: _Context, constraint: IdentityConstraint, target: etree._Element) -> bool:
@@ -2184,17 +2283,24 @@ def _supply_key_fields(ctx: _Context, constraint: IdentityConstraint, target: et
     Required-only output leaves optional attributes out, but a key makes its
     fields mandatory on every node it selects.
     """
-    skipped = ctx.skipped_attributes.get(target, {})
     for expression in constraint.fields:
         if len(_run_xpath(ctx, constraint, expression, target)) == 1:
             continue
         match = _ATTRIBUTE_FIELD.match(expression.strip())
-        tag = next(
-            (t for t in skipped if match and etree.QName(t).localname == match.group(1)), None
-        )
+        if match is None or "|" in expression:
+            return False
+        # The element the attribute sits on: the target, or what the steps before reach.
+        owners = [target]
+        if match.group(1) is not None and match.group(1).strip():
+            owners = _run_xpath(ctx, constraint, match.group(1), target)
+        if len(owners) != 1 or not isinstance(owners[0], etree._Element):
+            return False
+        owner = owners[0]
+        skipped = ctx.skipped_attributes.get(owner, {})
+        tag = next((t for t in skipped if etree.QName(t).localname == match.group(2)), None)
         if tag is None:
             return False
-        _set_attribute(ctx, target, tag, etree.QName(tag).namespace, skipped.pop(tag))
+        _set_attribute(ctx, owner, tag, etree.QName(tag).namespace, skipped.pop(tag))
     return _fields(ctx, constraint, target) is not None
 
 
@@ -2359,6 +2465,9 @@ def _resolve_keyref(
         ctx.note("keyref_target_unknown", SCHEMA_INCOMPLETE, constraint.refer, constraint)
         return
     key_tuples: list[tuple[str, ...]] = []
+    key_rows: list[list[object]] = []
+    # Nodes a unique selects without all their fields: no row yet, but one can be made.
+    incomplete: list[tuple[IdentityConstraint, etree._Element]] = []
     # A key's table is visible in its own scope and every ancestor scope.
     for node, declaration in scopes:
         if not _in_tree(node, root) or not (node is scope or any(a is scope for a in node.iterancestors())):
@@ -2371,21 +2480,62 @@ def _resolve_keyref(
                 hits = _fields(ctx, key, target)
                 if hits is not None:
                     key_tuples.append(tuple(_hit_value(hit) for hit in hits))
+                    key_rows.append(hits)
+                elif _in_tree(target, root):
+                    incomplete.append((key, target))
+    referred: set[tuple[str, ...]] = set()
     for target in _select(ctx, constraint, scope):
         if not _in_tree(target, root):
             continue
         hits = _fields(ctx, constraint, target)
         if hits is None:
             continue  # a keyref with an absent field constrains nothing
-        if tuple(_hit_value(hit) for hit in hits) in key_tuples:
+        values = tuple(_hit_value(hit) for hit in hits)
+        if values in key_tuples:
+            referred.add(values)
             continue
         if key_tuples and _point_at(ctx, hits, key_tuples):
+            referred.add(tuple(_hit_value(hit) for hit in hits))
+            continue
+        # The reference cannot move (a default or fixed value): a key nothing
+        # refers to yet takes its value instead.
+        moved = next(
+            (
+                index
+                for index, row in enumerate(key_rows)
+                if key_tuples[index] not in referred and _point_at(ctx, row, [values])
+            ),
+            None,
+        )
+        if moved is not None:
+            key_tuples[moved] = values
+            referred.add(values)
+            continue
+        if _complete_row_for(ctx, incomplete, values):
+            key_tuples.append(values)
+            referred.add(values)
             continue
         removable = _removable(ctx, target, root)
         if removable is not None:
             _drop(ctx, removable)
         else:
             ctx.note("keyref_without_key", GENERATOR_LIMIT, constraint.name, constraint)
+
+
+def _complete_row_for(
+    ctx: _Context,
+    incomplete: list[tuple[IdentityConstraint, etree._Element]],
+    values: tuple[str, ...],
+) -> bool:
+    """Give one node of ``incomplete`` its optional fields, holding ``values``."""
+    while incomplete:
+        key, target = incomplete.pop(0)
+        if not _supply_key_fields(ctx, key, target):
+            continue
+        row = _fields(ctx, key, target)
+        if row is not None and _point_at(ctx, row, [values]):
+            return True
+    return False
 
 
 def _point_at(ctx: _Context, hits: list[object], key_tuples: list[tuple[str, ...]]) -> bool:
@@ -2552,6 +2702,22 @@ def _simple_value(
     if simple.id in stack:
         ctx.note("simple_recursion", GENERATOR_LIMIT, simple.name, simple)
         return "text"
+    if simple.assertions:
+        outer = ctx.value_assertions
+        ctx.value_assertions = outer + [(assertion, simple) for assertion in simple.assertions]
+        try:
+            return _simple_value_of(ctx, simple, stack, extra_facets)
+        finally:
+            ctx.value_assertions = outer
+    return _simple_value_of(ctx, simple, stack, extra_facets)
+
+
+def _simple_value_of(
+    ctx: _Context,
+    simple: SimpleType,
+    stack: tuple[str, ...],
+    extra_facets: list[Facet] | None = None,
+) -> str:
     stack = stack + (simple.id,)
     own = _by_step(simple.facets)
     extra = list(extra_facets or [])
@@ -2590,10 +2756,18 @@ def _list_value(
     enumeration = next((f.value for f in facets if f.kind == "enumeration"), None)
     if enumeration is not None:
         return enumeration
-    if simple.item_inline is not None:
-        item = _simple_value(ctx, simple.item_inline, stack)
-    else:
-        item = _value_for_type_name(ctx, simple.item_type, [], simple, stack)
+    # The assertions of a list test the sequence of its items, which XPath 1.0
+    # has no word for; the items answer to their own type's assertions only.
+    on_list, ctx.value_assertions = ctx.value_assertions, []
+    try:
+        if simple.item_inline is not None:
+            item = _simple_value(ctx, simple.item_inline, stack)
+        else:
+            item = _value_for_type_name(ctx, simple.item_type, [], simple, stack)
+    finally:
+        ctx.value_assertions = on_list
+    for assertion, owner in on_list:
+        ctx.note("assertion_not_evaluated", GENERATOR_LIMIT, assertion.test, _located(assertion, owner))
     value = " ".join([item] * _item_count(facets))
     patterns = [f.value for f in reversed(facets) if f.kind == "pattern"]
     if not patterns:
@@ -2691,6 +2865,142 @@ def _enumeration_value(local: str, facets: list[Facet]) -> str | None:
 
 
 def _builtin_value(ctx: _Context, local: str, facets: list[Facet]) -> str:
+    """A value of built-in type ``local`` under ``facets`` and the assertions in force."""
+    value = _facet_value(ctx, local, facets)
+    if not ctx.value_assertions:
+        return value
+    spec = ctx.last_spec
+    try:
+        return _asserted_value(ctx, local, facets, value)
+    finally:
+        ctx.last_spec = spec
+
+
+# Types whose values are settled elsewhere (ids, references) or need a
+# namespace context: an assertion on them is checked, never worked towards.
+_ASSERTION_FIXED_TYPES = frozenset(("ID", "IDREF", "IDREFS", "ENTITY", "ENTITIES", "QName", "NOTATION"))
+_TEST_LITERAL = re.compile(r"""'([^']*)'|"([^"]*)"|(?<![\w.$-])(\d+(?:\.\d+)?)(?![\w.])""")
+_YEAR = re.compile(r"\d{4}")
+_ASSERTION_CANDIDATES = 60
+
+
+def _located(assertion: Assertion, owner: object) -> object:
+    return assertion if assertion.source_ref is not None else owner
+
+
+def _xpath_value(local: str, text: str) -> object:
+    """``text`` as the XPath 1.0 value closest to its typed value."""
+    if local in _INTEGER_TYPES or local in _DECIMAL_TYPES:
+        try:
+            return float(text)
+        except ValueError:
+            return text
+    if local == "boolean":
+        return text.strip() in ("true", "1")
+    return text
+
+
+def _value_assertion_holds(
+    ctx: _Context, assertion: Assertion, owner: SimpleType, local: str, value: str
+) -> bool | None:
+    """Whether ``assertion`` holds for ``$value``; None when XPath 1.0 cannot say.
+
+    A test on a simple type has no context item, so it may not walk anywhere.
+    """
+    key = id(assertion)
+    if key not in ctx.assertion_xpaths:
+        namespaces, _ = _xpath_namespaces(ctx, _located(assertion, owner), None)
+        compiled = None
+        if _assertion_reach(assertion.test) == 0:
+            try:
+                compiled = etree.XPath(
+                    f"boolean({_xpath_1(assertion.test, qualify=False, value_operators=True)})",
+                    namespaces=namespaces,
+                    extensions=_XPATH_2_FUNCTIONS,
+                )
+            except etree.XPathError:
+                compiled = None
+        ctx.assertion_xpaths[key] = None if compiled is None else (compiled, False)
+    entry = ctx.assertion_xpaths[key]
+    if entry is None or ctx.assertion_evaluations >= _ASSERTION_EVALUATIONS:
+        return None
+    ctx.assertion_evaluations += 1
+    try:
+        return bool(entry[0](_NO_CONTEXT, value=_xpath_value(local, value)))
+    except (etree.XPathError, ValueError, ZeroDivisionError, IndexError, TypeError, AttributeError):
+        return None
+
+
+_NO_CONTEXT = etree.Element("none")
+
+
+def _asserted_value(ctx: _Context, local: str, facets: list[Facet], value: str) -> str:
+    """``value``, or another value of the type for which the assertions in force hold.
+
+    The other values are the type's usual candidates and what the tests
+    themselves name: the literals they compare with, alone or around the
+    placeholder, and a few small numbers for the arithmetic ones.
+    """
+
+    def verdict(candidate: str) -> tuple[bool | None, tuple[Assertion, SimpleType] | None]:
+        for assertion, owner in ctx.value_assertions:
+            holds = _value_assertion_holds(ctx, assertion, owner, local, candidate)
+            if holds is not True:
+                return holds, (assertion, owner)
+        return True, None
+
+    holds, failed = verdict(value)
+    if holds is True:
+        return value
+    if holds is False and local not in _ASSERTION_FIXED_TYPES and local in _BUILTIN_VALUES:
+        checker = None if local in _UNCHECKED_TYPES else _value_checker(local, _checkable(facets))
+        notes_before = len(ctx.report)
+        tests = [assertion.test for assertion, _ in ctx.value_assertions]
+        candidates = _unique(_test_candidates(tests, local, value) + _candidates(ctx, local, facets))
+        del ctx.report[notes_before:]
+        for candidate in candidates[:_ASSERTION_CANDIDATES]:
+            if checker is not None and not _accepts(checker, candidate):
+                continue
+            if verdict(candidate)[0] is True:
+                return candidate
+    assertion, owner = failed
+    ctx.note(
+        "assertion_unsettled" if holds is False else "assertion_not_evaluated",
+        GENERATOR_LIMIT,
+        assertion.test,
+        _located(assertion, owner),
+    )
+    return value
+
+
+def _test_candidates(tests: list[str], local: str, value: str, *, plain: bool = False) -> list[str]:
+    """Values ``tests`` point at for a value of type ``local`` that is ``value`` now.
+
+    ``plain`` leaves out the forms built around ``value``.
+    """
+    words: list[str] = []
+    numbers: list[str] = []
+    for test in tests:
+        for single, double, number in _TEST_LITERAL.findall(test):
+            if number:
+                numbers.append(number)
+            else:
+                words.append(single or double)
+    if local in _INTEGER_TYPES or local in _DECIMAL_TYPES:
+        near = [str(int(float(n)) + step) for n in numbers for step in (1, -1, 2, -2)]
+        if plain:
+            return [*numbers, "0", "1", "2", "3"]
+        return [*numbers, *near, "0", "2", "10", "100", "1", "3", "-2", "-1"]
+    if local in _STRING_TYPES:
+        if plain:
+            return words + numbers
+        return [form for word in words + numbers for form in (word, word + value, value + word)]
+    # Dates and the like: the year a test names, in the placeholder's place.
+    years = [w for w in words + numbers if _YEAR.fullmatch(w)]
+    return [*words, *(_YEAR.sub(year, value, count=1) for year in years)]
+
+
+def _facet_value(ctx: _Context, local: str, facets: list[Facet]) -> str:
     """A value of built-in type ``local`` that satisfies ``facets``.
 
     Candidates come from the enumeration, the type's placeholder and lexical
