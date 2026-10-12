@@ -407,18 +407,24 @@ def _record_sample_issue(
     )
 
 
+# ``?xsd_version=`` on the validate endpoints: the validator to use instead of
+# the one the schema's syntax suggests (see ``validate_xml``).
+XsdVersionChoice = Literal["1.0", "1.1"] | None
+
+
 def _validate_xml_against_schema(
     schema_id: str,
     xml_bytes: bytes,
     source: str,
     sample: SampleContext | None = None,
+    xsd_version: XsdVersionChoice = None,
 ) -> ValidationResponse:
     started = time.perf_counter()
     model = schema_cache.get(schema_id)
     if model is None:
         raise reject("validate", source, 404, "schema not found or expired", input_bytes=len(xml_bytes))
     try:
-        result = validate_xml(model, xml_bytes)
+        result = validate_xml(model, xml_bytes, version=xsd_version)
     except ValidationSetupError as exc:
         if sample is not None:
             # Not a sample defect: the schema itself does not compile — XSD 1.1,
@@ -450,28 +456,36 @@ def _validate_xml_against_schema(
 @router.post("/schema/{schema_id}/validate/upload", response_model=ValidationResponse)
 @limiter.limit(WRITE_LIMIT)
 async def validate_xml_upload(
-    request: Request, schema_id: str, file: UploadFile
+    request: Request, schema_id: str, file: UploadFile, xsd_version: XsdVersionChoice = None
 ) -> ValidationResponse:
     content = await _read_upload(file, event_type="validate", source="upload")
-    return _validate_xml_against_schema(schema_id, content, "upload")
+    return _validate_xml_against_schema(schema_id, content, "upload", xsd_version=xsd_version)
 
 
 @router.post("/schema/{schema_id}/validate/text", response_model=ValidationResponse)
 @limiter.limit(WRITE_LIMIT)
 async def validate_xml_text(
-    request: Request, schema_id: str, payload: ValidateTextPayload
+    request: Request,
+    schema_id: str,
+    payload: ValidateTextPayload,
+    xsd_version: XsdVersionChoice = None,
 ) -> ValidationResponse:
     data = utf8_bytes(payload.content)
     if len(data) > settings.max_upload_bytes:
         raise reject("validate", payload.origin, 413, f"content exceeds {settings.max_upload_mb} MB limit")
     sample = payload.sample if payload.origin == "sample" else None
-    return _validate_xml_against_schema(schema_id, data, payload.origin, sample=sample)
+    return _validate_xml_against_schema(
+        schema_id, data, payload.origin, sample=sample, xsd_version=xsd_version
+    )
 
 
 @router.post("/schema/{schema_id}/validate/url", response_model=ValidationResponse)
 @limiter.limit(WRITE_LIMIT)
 async def validate_xml_url(
-    request: Request, schema_id: str, payload: ValidateUrlPayload
+    request: Request,
+    schema_id: str,
+    payload: ValidateUrlPayload,
+    xsd_version: XsdVersionChoice = None,
 ) -> ValidationResponse:
     try:
         fetched = await asyncio.to_thread(fetch_schema_url, payload.url)
@@ -479,4 +493,4 @@ async def validate_xml_url(
         raise reject(
             "validate", "url", 400, str(exc), schema_name=schema_display_name("url", payload.url)
         ) from exc
-    return _validate_xml_against_schema(schema_id, fetched.content, "url")
+    return _validate_xml_against_schema(schema_id, fetched.content, "url", xsd_version=xsd_version)

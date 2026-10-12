@@ -78,6 +78,27 @@ describe("ValidationPanel", () => {
     expect(await screen.findByText(/Checked as XSD 1\.1/)).toBeInTheDocument();
   });
 
+  it("validates as the XSD version chosen, and as the backend sees fit otherwise", async () => {
+    validateXmlText.mockResolvedValue({
+      schema_id: "test",
+      is_valid: true,
+      reformatted_xml: "<Person/>\n",
+      errors: [],
+    } satisfies ValidationResponse);
+    openValidationTab();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Paste" }));
+    await userEvent.type(screen.getByPlaceholderText("<root>…</root>"), "<Person/>");
+    await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+    expect(await screen.findByText("Checked as XSD 1.0.")).toBeInTheDocument();
+    expect(validateXmlText.mock.calls[0][5]).toBeUndefined();
+
+    await userEvent.selectOptions(screen.getByLabelText("Validate as"), "XSD 1.1");
+    await userEvent.click(screen.getByRole("button", { name: "Validate" }));
+    await waitFor(() => expect(validateXmlText).toHaveBeenCalledTimes(2));
+    expect(validateXmlText.mock.calls[1][5]).toBe("1.1");
+  });
+
   it("lists errors with ±1 line context and deep-links into the XSD", async () => {
     const ref = smallModel.complex_types[0];
     const bad: ValidationResponse = {

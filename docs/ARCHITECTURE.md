@@ -263,7 +263,12 @@ libxml2 implements XSD 1.0 only. A schema detected as 1.1
 loaded (the detection is a heuristic: a schema whose only 1.1 feature is
 `xs:dateTimeStamp` looks like 1.0), is validated by the `xmlschema` package
 instead, from the same materialised files. `ValidationResponse.validator` says
-which one ran. `xmlschema` is pure Python, its patterns run on the backtracking
+which one ran. Syntax cannot tell for a schema that reads the same in both
+versions and means something else (several ID attributes on an element, a
+wildcard beside a declared element, the order of dates with a time zone — 60
+instance tests of the W3C suite), so `?xsd_version=1.0|1.1` on the validate
+endpoints, the "Validate as" choice of the Validation tab, names the validator
+and rules out the fallback to the other. `xmlschema` is pure Python, its patterns run on the backtracking
 `re` engine and an `xs:assert` is XPath the schema author wrote, so it never
 runs inside the server: `validation._run_worker` starts
 `app/parser/xsd11_worker.py` as a script (`python -I`, empty environment), with

@@ -185,6 +185,17 @@ export function ApiDocsPage() {
   | curl -s -H "Content-Type: application/json" -d @- \\
     ${API}/schema/$SCHEMA_ID/validate/text \\
     -o report.json`}</Pre>
+        <H3>XSD 1.0 or XSD 1.1?</H3>
+        <p>
+          A schema that uses XSD 1.1 syntax (<Code>xs:assert</Code>, <Code>xs:alternative</Code>, …) is
+          validated as XSD 1.1, any other as XSD 1.0. Some schemas read the same in both versions and
+          mean something else — several ID attributes on one element, a wildcard next to a declared
+          element, dates with a time zone. Add <Code>?xsd_version=1.0</Code> or{" "}
+          <Code>?xsd_version=1.1</Code> to any of the three endpoints to choose:
+        </p>
+        <Pre>{`curl -s -F "file=@document.xml" \\
+  "${API}/schema/$SCHEMA_ID/validate/upload?xsd_version=1.1" \\
+  -o report.json`}</Pre>
 
         <H2 id="report">The error report</H2>
         <p>

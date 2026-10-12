@@ -132,14 +132,26 @@ async function handleJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
+/**
+ * The XSD version to validate as, when the caller says so. Left out, the
+ * backend goes by what the schema's syntax suggests — which says nothing for
+ * a schema that reads the same in both versions and means something else.
+ */
+export type XsdVersionChoice = "1.0" | "1.1";
+
+function versionQuery(xsdVersion: XsdVersionChoice | undefined): string {
+  return xsdVersion ? `?xsd_version=${xsdVersion}` : "";
+}
+
 export async function validateXmlFile(
   schemaId: string,
   file: File,
+  xsdVersion?: XsdVersionChoice,
 ): Promise<ValidationResponse> {
   const form = new FormData();
   form.append("file", file);
   const response = await fetch(
-    `${API_BASE}/schema/${schemaId}/validate/upload`,
+    `${API_BASE}/schema/${schemaId}/validate/upload${versionQuery(xsdVersion)}`,
     { method: "POST", body: form },
   );
   return handleJson<ValidationResponse>(response);
@@ -171,8 +183,9 @@ export async function validateXmlText(
   filename = "document.xml",
   origin: ValidateTextOrigin = "text",
   sample?: SampleContext,
+  xsdVersion?: XsdVersionChoice,
 ): Promise<ValidationResponse> {
-  const response = await fetch(`${API_BASE}/schema/${schemaId}/validate/text`, {
+  const response = await fetch(`${API_BASE}/schema/${schemaId}/validate/text${versionQuery(xsdVersion)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ content, filename, origin, sample: sample ?? null }),
@@ -183,8 +196,9 @@ export async function validateXmlText(
 export async function validateXmlUrl(
   schemaId: string,
   url: string,
+  xsdVersion?: XsdVersionChoice,
 ): Promise<ValidationResponse> {
-  const response = await fetch(`${API_BASE}/schema/${schemaId}/validate/url`, {
+  const response = await fetch(`${API_BASE}/schema/${schemaId}/validate/url${versionQuery(xsdVersion)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ url }),

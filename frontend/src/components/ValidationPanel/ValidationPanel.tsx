@@ -4,6 +4,7 @@ import {
   validateXmlFile,
   validateXmlText,
   validateXmlUrl,
+  type XsdVersionChoice,
 } from "../../api/client";
 import { useSelection } from "../../stores/selectionStore";
 import { withSchemaRetry } from "../../lib/schemaSession";
@@ -126,6 +127,10 @@ export function ValidationPanel() {
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [url, setUrl] = useState("");
+  // "" leaves the choice of validator to the backend.
+  const [version, setVersion] = useState<XsdVersionChoice | "">("");
+  const detected = useSelection((s) => s.model?.xsd_version);
+  const xsdVersion = version || undefined;
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   const run = useCallback(
@@ -147,25 +152,27 @@ export function ValidationPanel() {
     (file: File) => {
       if (!schemaId) return;
       void run(async () => {
-        setResult(await withSchemaRetry((id) => validateXmlFile(id, file)));
+        setResult(await withSchemaRetry((id) => validateXmlFile(id, file, xsdVersion)));
       });
     },
-    [schemaId, run, setResult],
+    [schemaId, xsdVersion, run, setResult],
   );
 
   const onText = useCallback(() => {
     if (!schemaId) return;
     void run(async () => {
-      setResult(await withSchemaRetry((id) => validateXmlText(id, text)));
+      setResult(
+        await withSchemaRetry((id) => validateXmlText(id, text, undefined, "text", undefined, xsdVersion)),
+      );
     });
-  }, [schemaId, text, run, setResult]);
+  }, [schemaId, text, xsdVersion, run, setResult]);
 
   const onUrl = useCallback(() => {
     if (!schemaId) return;
     void run(async () => {
-      setResult(await withSchemaRetry((id) => validateXmlUrl(id, url.trim())));
+      setResult(await withSchemaRetry((id) => validateXmlUrl(id, url.trim(), xsdVersion)));
     });
-  }, [schemaId, url, run, setResult]);
+  }, [schemaId, url, xsdVersion, run, setResult]);
 
   return (
     <div className="h-full overflow-auto p-6">
@@ -178,6 +185,22 @@ export function ValidationPanel() {
           reformatted first, so reported line numbers match the formatted text
           shown below.
         </p>
+
+        <label className="flex flex-wrap items-center gap-2 mb-4 text-sm">
+          <span className="text-slate-600 dark:text-slate-400">Validate as</span>
+          <select
+            className="px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
+            value={version}
+            onChange={(e) => setVersion(e.target.value as XsdVersionChoice | "")}
+            title="A schema without XSD 1.1 syntax is validated as XSD 1.0. The versions differ where nothing in the schema shows it: ID attributes, wildcards next to declared elements, dates with a time zone."
+          >
+            <option value="">
+              Automatic{detected === "1.0" || detected === "1.1" ? ` (XSD ${detected})` : ""}
+            </option>
+            <option value="1.0">XSD 1.0</option>
+            <option value="1.1">XSD 1.1</option>
+          </select>
+        </label>
 
         <div className="flex flex-wrap gap-1 mb-4" role="tablist">
           {(["file", "text", "url"] as Mode[]).map((value) => (
@@ -294,10 +317,14 @@ export function ValidationPanel() {
               </div>
             )}
 
-            {result.validator === "xmlschema" && (
+            {result.validator === "xmlschema" ? (
               <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                 Checked as XSD 1.1, assertions and type alternatives included.
               </p>
+            ) : (
+              result.reformatted_xml !== null && (
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Checked as XSD 1.0.</p>
+              )
             )}
 
             {result.reformatted_xml === null && (

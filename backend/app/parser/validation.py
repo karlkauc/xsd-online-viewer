@@ -287,7 +287,11 @@ def _incomplete(model: SchemaModel, detail: str) -> ValidationSetupError | None:
 
 
 def _compile_failure(
-    exc: etree.XMLSchemaParseError, model: SchemaModel, files: _Materialised
+    exc: etree.XMLSchemaParseError,
+    model: SchemaModel,
+    files: _Materialised,
+    *,
+    as_asked: bool = False,
 ) -> ValidationSetupError:
     """Say why the schema does not compile in terms the user can act on.
 
@@ -305,6 +309,9 @@ def _compile_failure(
     incomplete = _incomplete(model, detail)
     if incomplete is not None:
         return incomplete
+    if as_asked:
+        # The caller chose XSD 1.0; the other validator is theirs to choose too.
+        return ValidationSetupError(f"read as XSD 1.0, the schema is not valid: {detail}")
     if model.xsd_version == "1.1":
         return ValidationSetupError(
             "the schema uses XSD 1.1 (xs:assert, xs:alternative, …), and the validator here "
@@ -898,7 +905,11 @@ def _validator_defect(exc: etree.XMLSchemaValidateError) -> ValidationSetupError
 
 
 def validate_xml(
-    model: SchemaModel, xml_bytes: bytes, *, schema: etree.XMLSchema | None = None
+    model: SchemaModel,
+    xml_bytes: bytes,
+    *,
+    schema: etree.XMLSchema | None = None,
+    version: Literal["1.0", "1.1"] | None = None,
 ) -> ValidationResponse:
     """Reformat then validate ``xml_bytes`` against ``model``'s schema.
 
@@ -907,6 +918,12 @@ def validate_xml(
     package instead (:mod:`app.parser.xsd11_worker`): the version detection is
     a heuristic, and a schema whose only 1.1 feature is ``xs:dateTimeStamp``
     looks like 1.0 to it.
+
+    ``version`` is the caller's word on it and settles which validator runs,
+    with no falling back to the other. It matters for a schema that reads the
+    same in both versions and means something else: XSD 1.1 allows several ID
+    attributes on an element, lets a wildcard give way to a declared element,
+    and orders dates with a time zone differently.
 
     ``schema`` lets a batch caller (tools/sample_audit.py) compile the schema
     once with :func:`build_xmlschema` instead of on every document.
@@ -921,16 +938,17 @@ def validate_xml(
 
     with _materialised(model) as files:
         failure: ValidationSetupError | None = None
-        if model.xsd_version != "1.1":
+        if version == "1.0" or (version is None and model.xsd_version != "1.1"):
             too_large = _too_large(model)
             if too_large is not None:
                 raise too_large
             try:
                 schema = _compile(files)
             except etree.XMLSchemaParseError as exc:
-                failure = _compile_failure(exc, model, files)
-                if unloaded_files(model) or files.unavailable:
-                    raise failure from exc  # no validator can make up for a missing file
+                failure = _compile_failure(exc, model, files, as_asked=version is not None)
+                if version is not None or unloaded_files(model) or files.unavailable:
+                    # Asked for 1.0, or no validator can make up for a missing file.
+                    raise failure from exc
             except etree.XMLSyntaxError as exc:
                 raise _unparsable(exc, files) from exc
 
@@ -948,6 +966,8 @@ def validate_xml(
                 # libxml2 gave up half way ("Internal error", on some regular
                 # expressions); the other validator may still have an answer.
                 defect = _validator_defect(exc)
+                if version is not None:
+                    raise defect from exc
 
         if defect is not None:
             try:
@@ -958,6 +978,8 @@ def validate_xml(
         try:
             return _validate_xsd11(model, files, pretty)
         except _Xsd11UnavailableError:
+            if version is not None:
+                raise ValidationSetupError("the XSD 1.1 validator is not installed") from None
             if failure is None:  # detected as 1.1: let libxml2 say where it stops
                 try:
                     _compile(files)

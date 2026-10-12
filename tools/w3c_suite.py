@@ -383,6 +383,17 @@ def run_group(group: dict, suite_dir: str, samples: int, timeout: float) -> list
                 record("instance", instance, verdict, mode=mode, **extra)
             if _wrong_version(instance["versions"], records[-1].get("mode", "1.0")):
                 records[-1]["wrong_version"] = True
+                # Nothing in such a schema says which version it is for; the
+                # app lets its user say. The verdict when they do:
+                declared = "1.1" if "1.1" in instance["versions"] else "1.0"
+                try:
+                    chosen = validate_xml(model, content, version=declared)
+                except (SecurityError, ValidationSetupError):
+                    records[-1]["as_declared"] = "not_checked"
+                else:
+                    records[-1]["as_declared"] = _verdict(
+                        _expected_for(instance["expected"], declared), chosen.is_valid
+                    )
         except _TimeoutError:
             record("instance", instance, "timeout", **extra)
         except Exception as exc:  # noqa: BLE001
@@ -450,6 +461,7 @@ def summarise(records: list[dict], suite_revision: str | None) -> dict:
     examples: dict[tuple[str, str], str] = {}
     warnings: Counter = Counter()
     wrong_version = Counter()
+    as_declared: Counter = Counter()
     unreported = 0
     for r in records:
         verdict = r["verdict"]
@@ -459,6 +471,8 @@ def summarise(records: list[dict], suite_revision: str | None) -> dict:
         by_set[r["set"]][verdict] += 1
         if r.get("wrong_version") and verdict in FINDINGS:
             wrong_version[r["kind"]] += 1
+        if r.get("as_declared") and (verdict in FINDINGS or r["as_declared"] in FINDINGS):
+            as_declared[f"{verdict} -> {r['as_declared']}"] += 1
         if verdict in FINDINGS:
             shape = _shape(r.get("detail") or "(no message)")
             key = f"{r['kind']} {verdict}"
@@ -477,6 +491,8 @@ def summarise(records: list[dict], suite_revision: str | None) -> dict:
             for kind, counts in sorted(by_kind.items())
         },
         "findings_on_tests_for_the_other_xsd_version": dict(wrong_version),
+        # Instances of those tests again, validated as the version the test is for.
+        "those_instances_with_the_version_chosen": dict(as_declared.most_common()),
         # The generator's report said nothing, so the sample claimed to be valid.
         "invalid_samples_the_generator_did_not_report": unreported,
         "sets_with_most_findings": [
