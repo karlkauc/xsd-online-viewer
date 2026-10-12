@@ -557,6 +557,7 @@ def generate_sample_with_report(
         ctx = _build_context(model, options)
         root = _unfinished_root(ctx, declaration or element)
     _merge_repeated_comments(root)
+    _declare_literal_prefixes(ctx, root)
     # Declare the prefixes we used (and only those) on the root.
     nsmap = dict(ctx.nsmap)
     default_namespace = _default_namespace(ctx, declaration, root)
@@ -629,6 +630,41 @@ def _unfinished_root(ctx: _Context, element: ElementDecl) -> etree._Element:
     root.append(etree.Comment(" content nests too deeply to generate "))
     ctx.note("recursion_limit", GENERATOR_LIMIT, element.name, element)
     return root
+
+
+def _declare_literal_prefixes(ctx: _Context, root: etree._Element) -> None:
+    """Bind the prefix of a value the schema spells out, the way the schema binds it.
+
+    A fixed or default value and an enumerated member of a union are copied
+    as they stand; when one is a QName (``fixed="a:b"``) the document needs
+    the declaration its prefix had in the schema.
+    """
+    for node in root.iter(etree.Element):
+        slots: list[tuple[str | None, str | None]] = [(None, node.text if len(node) == 0 else None)]
+        slots += [(tag, value) for tag, value in node.attrib.items() if not tag.startswith(f"{{{XSI_NS}}}")]
+        for attribute, value in slots:
+            if value is None or (node, attribute) in ctx.value_specs:
+                continue
+            # Every item, for a list of QNames.
+            for token in value.split()[:_LITERAL_TOKENS]:
+                prefixed = _PREFIXED.match(token)
+                if prefixed is None or prefixed.group(1) in ctx.nsmap:
+                    continue
+                prefix = prefixed.group(1)
+                namespace = ctx.model.namespaces.get(prefix) or next(
+                    (
+                        settings.prefixes[prefix]
+                        for settings in ctx.file_settings.values()
+                        if settings.prefixes.get(prefix)
+                    ),
+                    None,
+                )
+                if namespace:
+                    ctx.nsmap[prefix] = namespace
+                    ctx.value_prefixes.add(prefix)
+
+
+_LITERAL_TOKENS = 50
 
 
 def _merge_repeated_comments(root: etree._Element) -> None:
@@ -1262,6 +1298,12 @@ def _emit_choice(
     type_stack: tuple[str, ...],
     turn: int = 0,
 ) -> None:
+    if not particle.children and particle.min_occurs > 0:
+        # <xs:choice/> offers nothing to choose, so nothing satisfies it.
+        parent.append(etree.Comment(" a choice without branches cannot be satisfied "))
+        ctx.cuts += 1
+        ctx.note("choice_without_branches", SCHEMA_INCOMPLETE, "xs:choice")
+        return
     picked = _pick_choice(ctx, particle.children, type_stack, turn)
     if picked is None:
         return
@@ -1719,6 +1761,8 @@ def _substitution_member(ctx: _Context, head: ElementDecl) -> ElementDecl | None
     queue, seen = [head], {head.id}
     while queue:
         current = queue.pop(0)
+        if "substitution" in current.block:
+            continue  # block="substitution": nothing may stand in for this one
         for candidate in _direct_members(ctx, current):
             if candidate.id in seen:
                 continue
@@ -3049,10 +3093,10 @@ def _facet_value(ctx: _Context, local: str, facets: list[Facet]) -> str:
     if not known:
         # Not a built-in we know: the value below is a guess.
         ctx.note("builtin_unknown", GENERATOR_LIMIT, local)
-    checkable = known and local not in _UNCHECKED_TYPES
+    checkable = known and (local not in _UNCHECKED_TYPES or local in _STAND_INS)
     if checkable:
         preferred = _preferred(ctx, local, facets)
-        checker = _value_checker(local, _checkable(facets)) if preferred else None
+        checker = _type_checker(local, facets) if preferred else None
         if checker is not None:
             for candidate in preferred:
                 if _accepts(checker, candidate):
@@ -3061,7 +3105,7 @@ def _facet_value(ctx: _Context, local: str, facets: list[Facet]) -> str:
     candidates = _candidates(ctx, local, facets) or ["string"]
     checker = None
     if checkable and facets:
-        checker = _value_checker(local, _checkable(facets))
+        checker = _type_checker(local, facets)
     if checker is None:
         return candidates[0]
     for candidate in candidates:
@@ -3546,6 +3590,23 @@ _UNCHECKED_TYPES = {
 }
 
 
+# The XSD 1.1 types libxml2 does not know, as the 1.0 type they restrict and
+# the pattern that makes the difference.
+_STAND_INS = {
+    "dateTimeStamp": ("dateTime", r".*(Z|[+\-][0-9]{2}:[0-9]{2})"),
+    "dayTimeDuration": ("duration", r"[^YM]*(T.*)?"),
+    "yearMonthDuration": ("duration", r"[^DT]*"),
+}
+
+
+def _type_checker(local: str, facets: list[Facet]) -> etree.XMLSchema | None:
+    """The checker for ``local`` under ``facets``, through a stand-in type where needed."""
+    if local not in _STAND_INS:
+        return _value_checker(local, _checkable(facets))
+    base, lexical = _STAND_INS[local]
+    return _value_checker(base, (*_checkable(facets), ("pattern", lexical)))
+
+
 def _checkable(facets: list[Facet]) -> tuple[tuple[str, str], ...]:
     """Hashable facet list for the checker: repeatable facets all, the others most derived."""
     single: dict[str, str] = {}
@@ -3571,10 +3632,37 @@ def _value_checker(
     of its own: side by side in one restriction they would be alternatives.
     """
     patterns = [value for kind, value in facets if kind == "pattern"]
+    kinds = {kind for kind, _ in facets}
+    # An inclusive and an exclusive bound on the same side come from two
+    # derivation steps and may not share a restriction; which one is the
+    # outer step is not recorded, so both orders are tried.
+    clash = [
+        pair
+        for pair in (("minInclusive", "minExclusive"), ("maxInclusive", "maxExclusive"))
+        if kinds.issuperset(pair)
+    ]
+    splits: list[frozenset[str]] = [frozenset()]
+    for inclusive, exclusive in clash:
+        splits = [split | {kind} for split in splits for kind in (exclusive, inclusive)]
+    for outer in splits:
+        checker = _compile_checker(local, facets, patterns, outer, as_list)
+        if checker is not None:
+            return checker
+    return None
+
+
+def _compile_checker(
+    local: str,
+    facets: tuple[tuple[str, str], ...],
+    patterns: list[str],
+    outer: frozenset[str],
+    as_list: bool,
+) -> etree.XMLSchema | None:
+    """One-element schema for _value_checker; the facets in ``outer`` get a step of their own."""
     body = "".join(
         f"<xs:{kind} value={quoteattr(value)}/>"
         for kind, value in facets
-        if kind != "pattern" or value is patterns[0]
+        if kind not in outer and (kind != "pattern" or value is patterns[0])
     )
     if as_list:
         # The facets then sit on a list of ``local`` and concern the whole value.
@@ -3587,6 +3675,11 @@ def _value_checker(
             f'<xs:simpleType><xs:restriction base="xs:{local}">{body}</xs:restriction>'
             "</xs:simpleType>"
         )
+    if outer:
+        later = "".join(
+            f"<xs:{kind} value={quoteattr(value)}/>" for kind, value in facets if kind in outer
+        )
+        simple = f"<xs:simpleType><xs:restriction>{simple}{later}</xs:restriction></xs:simpleType>"
     for pattern in patterns[1:]:
         simple = (
             f"<xs:simpleType><xs:restriction>{simple}"
@@ -3596,7 +3689,7 @@ def _value_checker(
     try:
         return etree.XMLSchema(etree.fromstring(xsd))
     except (etree.XMLSchemaParseError, etree.XMLSyntaxError):
-        # Contradictory facets (minInclusive next to minExclusive) and the like.
+        # Contradictory facets (a bound outside its base's range) and the like.
         return None
 
 

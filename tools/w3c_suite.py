@@ -450,8 +450,11 @@ def summarise(records: list[dict], suite_revision: str | None) -> dict:
     examples: dict[tuple[str, str], str] = {}
     warnings: Counter = Counter()
     wrong_version = Counter()
+    unreported = 0
     for r in records:
         verdict = r["verdict"]
+        if verdict == "sample_invalid" and not r.get("report"):
+            unreported += 1
         by_kind[r["kind"]][verdict] += 1
         by_set[r["set"]][verdict] += 1
         if r.get("wrong_version") and verdict in FINDINGS:
@@ -474,6 +477,8 @@ def summarise(records: list[dict], suite_revision: str | None) -> dict:
             for kind, counts in sorted(by_kind.items())
         },
         "findings_on_tests_for_the_other_xsd_version": dict(wrong_version),
+        # The generator's report said nothing, so the sample claimed to be valid.
+        "invalid_samples_the_generator_did_not_report": unreported,
         "sets_with_most_findings": [
             {"set": name, **{k: v for k, v in counts.items() if k in FINDINGS}}
             for name, counts in sorted(
@@ -505,6 +510,10 @@ def print_summary(summary: dict) -> None:
     for kind, counts in summary["by_kind"].items():
         rest = ", ".join(f"{k} {v}" for k, v in counts.items() if k != "agreement")
         print(f"  {kind:9} agreement {counts['agreement']:>6}   {rest}")
+    print(
+        "  invalid samples the generator did not report: "
+        f"{summary['invalid_samples_the_generator_did_not_report']}"
+    )
     for key, items in summary["clusters"].items():
         print(f"\n{key}")
         for item in items[:6]:

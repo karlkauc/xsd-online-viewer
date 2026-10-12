@@ -51,6 +51,10 @@ cd frontend && npm ci && npm run dev
   repo) through the upload, validation and sample-generator code and lists
   where the app disagrees with the expected results. A full run takes a while;
   `--only <test set>` narrows it, `--compare before after` shows regressions.
+  Most invalid samples left are ones the generator reports as beyond it (a
+  strict wildcard nothing is declared for, a key on a node without a simple
+  value); the summary's "invalid samples the generator did not report" is the
+  list of actual defects.
 
 ## Deployment (read before redeploying)
 

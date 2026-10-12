@@ -1077,3 +1077,72 @@ def test_a_pattern_on_a_list_of_dates_is_met_item_by_item() -> None:
         "R",
     )
     assert len(root.text.split()) == 3 and counts == {}
+
+
+def test_a_fixed_qname_brings_the_declaration_of_its_prefix() -> None:
+    """MS stE079 / stE094: a literal is copied as it stands, so its prefix must be bound."""
+    xsd = (
+        b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:a="urn:a" xmlns:b="urn:b">'
+        b'<xs:simpleType name="Names"><xs:list itemType="xs:QName"/></xs:simpleType>'
+        b'<xs:element name="R"><xs:complexType><xs:sequence>'
+        b'<xs:element name="one" type="xs:QName" fixed="a:x"/>'
+        b'<xs:element name="many" type="Names" default="a:x b:y plain"/>'
+        b'</xs:sequence><xs:attribute name="q" type="xs:QName" fixed="b:z"/>'
+        b"</xs:complexType></xs:element></xs:schema>"
+    )
+    xml, counts = _generate(xsd, include_optional=True)
+    assert _errors(xsd, xml) == [], xml
+    assert 'xmlns:a="urn:a"' in xml and 'xmlns:b="urn:b"' in xml and counts == {}
+
+
+def test_a_head_that_blocks_substitution_gets_no_member() -> None:
+    """MS particlesDc004: abstract and block="substitution" leaves nothing to emit."""
+    xml, counts = _generate(
+        _schema(
+            '<xs:element name="R"><xs:complexType><xs:sequence><xs:element ref="t:head"/>'
+            "</xs:sequence></xs:complexType></xs:element>"
+            '<xs:element name="head" abstract="true" block="substitution"/>'
+            '<xs:element name="member" substitutionGroup="t:head"/>'
+        )
+    )
+    assert "member" not in xml and counts == {"abstract_no_substitution": 1}
+
+
+@needs_xmlschema
+@pytest.mark.parametrize(
+    ("base", "facets"),
+    [
+        ("xs:dayTimeDuration", '<xs:minInclusive value="P1DT535.4S"/>'),
+        ("xs:dayTimeDuration", '<xs:minExclusive value="P2D"/>'),
+        ("xs:yearMonthDuration", '<xs:minInclusive value="P2Y"/>'),
+        ("xs:dateTimeStamp", '<xs:minInclusive value="2030-01-01T00:00:00Z"/>'),
+    ],
+)
+def test_facets_on_the_xsd_11_date_and_duration_types(base: str, facets: str) -> None:
+    """IBM D3_4_27/28: libxml2 does not know these types, a stand-in type checks them."""
+    xsd = _schema(
+        f'<xs:element name="R"><xs:simpleType><xs:restriction base="{base}">{facets}'
+        "</xs:restriction></xs:simpleType></xs:element>"
+    )
+    xml, counts = _generate(xsd)
+    assert _errors_11(xsd, xml) == [], xml
+    assert counts == {}
+
+
+def test_an_exclusive_bound_on_top_of_an_inclusive_one() -> None:
+    """Two derivation steps, one bound each: both sat in one restriction, which is no schema."""
+    root, counts = _valid_sample(
+        _simple("Base", "xs:int", '<xs:minInclusive value="1"/><xs:maxInclusive value="50"/>')
+        + _simple("Narrow", "t:Base", '<xs:minExclusive value="20"/><xs:maxExclusive value="23"/>')
+        + '<xs:element name="R" type="t:Narrow"/>',
+        "R",
+    )
+    assert 20 < int(root.text) < 23 and counts == {}
+
+
+def test_a_required_choice_without_branches_is_reported() -> None:
+    """Saxon complex022: <xs:choice/> can never be satisfied."""
+    _, counts = _generate(
+        _schema('<xs:element name="R"><xs:complexType><xs:choice/></xs:complexType></xs:element>')
+    )
+    assert counts == {"choice_without_branches": 1}
