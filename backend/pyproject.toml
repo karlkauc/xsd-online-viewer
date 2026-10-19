@@ -38,7 +38,7 @@ where = ["."]
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["parser/w3c/*.xsd", "parser/w3c/*.txt", "content/template.html", "content/faq.toml", "content/pages/**/*.md"]
+app = ["parser/w3c/*.xsd", "parser/w3c/*.txt", "content/template.html", "content/faq.toml", "content/pages/**/*.md", "standards/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

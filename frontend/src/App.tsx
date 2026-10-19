@@ -222,7 +222,8 @@ export default function App() {
               ariaLabel: "Copy share link",
               onClick: () => {
                 void copyLink(shareLink(source));
-                if (source && isShareable(source)) pingShare(source.kind === "release" ? "fundsxml" : "url");
+                if (source && isShareable(source))
+                  pingShare(source.kind === "release" ? "fundsxml" : source.kind === "iso20022" ? "iso20022" : "url");
               },
             },
             {

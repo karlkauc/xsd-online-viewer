@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
+  loadIso20022,
   loadSchemaFromRelease,
   loadSchemaFromUrl,
   uploadSchemaFiles,
@@ -9,6 +10,7 @@ import {
 import { useSelection } from "../stores/selectionStore";
 import { readModeFromPath, writeModePath, type Mode } from "../lib/modeRoute";
 import { FundsXmlReleases } from "./FundsXmlReleases";
+import { Iso20022Messages } from "./Iso20022Messages";
 import { UploadError } from "./UploadError";
 import { looksLikeSchema, shouldSniff, XML_VIEWER_URL } from "../lib/uploadErrors";
 import { listZipEntries, pickMainXsd, xsdEntries } from "../lib/zipEntries";
@@ -35,12 +37,13 @@ const MODE_LABELS: Record<Mode, string> = {
   text: "Paste",
   url: "URL",
   releases: "FundsXML Releases",
+  iso20022: "ISO 20022",
 };
 
 // Server-rendered pages (backend/app/content); /guides lists all of them.
 const GUIDES: [string, string][] = [
   ["/fundsxml/releases", "FundsXML releases and what changed"],
-  ["/standards/iso-20022", "ISO 20022 schemas (pain, camt, pacs)"],
+  ["/iso20022", "ISO 20022 schemas (pain, camt, pacs)"],
   ["/features/diagram", "XSD diagram online"],
   ["/features/documentation", "HTML documentation from an XSD"],
   ["/features/badge", "Embed a diagram, badge and bookmarklet"],
@@ -198,6 +201,27 @@ export function Uploader() {
     [setSchema],
   );
 
+  const loadFromIso20022 = useCallback(
+    async (id: string) => {
+      setError(null);
+      setErrorFile(id);
+      setPendingFile(null);
+      setLastFile(null);
+      setBusy(true);
+      try {
+        const response = await loadIso20022(id);
+        const source: SchemaSource = { kind: "iso20022", id };
+        writeSourcePath(source);
+        setSchema(response.schema_id, response.model, source);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [setSchema],
+  );
+
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
@@ -220,8 +244,10 @@ export function Uploader() {
       void loadFromUrl(source.url);
     } else if (source.kind === "release") {
       void loadFromRelease(source.tag, source.filename);
+    } else if (source.kind === "iso20022") {
+      void loadFromIso20022(source.id);
     }
-  }, [loadFromUrl, loadFromRelease]);
+  }, [loadFromUrl, loadFromRelease, loadFromIso20022]);
 
   // Reflect the selected tab in the URL path so each option is shareable.
   useEffect(() => {
@@ -251,7 +277,7 @@ export function Uploader() {
       </p>
 
       <div className="flex flex-wrap gap-1 mb-4" role="tablist">
-        {(["file", "text", "url", "releases"] as Mode[]).map((value) => (
+        {(["file", "text", "url", "releases", "iso20022"] as Mode[]).map((value) => (
           <button
             key={value}
             type="button"
@@ -394,6 +420,8 @@ export function Uploader() {
           </button>
         </div>
       )}
+
+      {mode === "iso20022" && <Iso20022Messages onSelect={(id) => void loadFromIso20022(id)} busy={busy} />}
 
       {mode === "releases" && (
         <FundsXmlReleases

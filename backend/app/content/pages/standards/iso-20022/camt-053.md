@@ -2,9 +2,9 @@
 title = "camt.053 XSD: Bank To Customer Statement — structure and viewer"
 heading = "camt.053 — Bank To Customer Statement"
 description = "Structure of the ISO 20022 camt.053 (Bank To Customer Statement) XML Schema: root element, main blocks and how to view the XSD as a diagram and validate camt.053 files online."
-lastmod = 2026-10-19
-cta_label = "Open the XSD viewer"
-cta_href = "/url"
+lastmod = 2026-10-20
+cta_label = "Open camt.053.001.12 in the viewer"
+cta_href = "/iso20022?message=camt.053.001.12"
 +++
 
 **camt.053** is the ISO 20022 message for the end-of-day account statement: opening and closing balances and every booked entry, the XML successor of MT940.
@@ -23,14 +23,13 @@ your bank's or scheme's implementation guide (for example the EPC rulebooks for 
 
 ## View the schema
 
-1. Download the camt.053 XSD for the version you need from the
-   [ISO 20022 message catalogue](https://www.iso20022.org/catalogue-messages), or take the one from your bank's
-   implementation guide.
-2. Open it in the [XSD viewer](/): upload the file, or paste a public URL into the [URL tab](/url).
-3. Explore `Document/BkToCstmrStmt` as a diagram, search for element names (Ctrl/⌘ + K), and export the diagram or an
-   HTML documentation for your team.
+Open [camt.053.001.12](/iso20022?message=camt.053.001.12), the latest version, directly in the viewer — or pick another version of
+camt.053 in the [ISO 20022 tab](/iso20022?q=camt.053). Then explore `Document/BkToCstmrStmt` as a diagram, search for element names
+(Ctrl/⌘ + K), and export the diagram or an HTML documentation for your team.
 
-This site does not mirror ISO 20022 schemas; load them from the official source.
+The schemas are loaded from a public mirror of the ISO 20022 catalogue, unchanged; the authoritative source is the
+[ISO 20022 message catalogue](https://www.iso20022.org/catalogue-messages). Your bank's implementation guide may
+require a specific version — the version is the last part of the file's namespace.
 
 ## Validate a camt.053 file
 

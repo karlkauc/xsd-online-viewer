@@ -78,6 +78,12 @@ ROUTE_META: dict[str, RouteMeta] = {
         "and types as a tree or XMLSpy-style diagram and validate FundsXML documents.",
         "/fundsxml",
     ),
+    "iso20022": RouteMeta(
+        "ISO 20022 XSD viewer: pain, camt, pacs schemas — Online XSD Viewer",
+        "Open any ISO 20022 message schema — pain.001, pain.002, camt.053, camt.054, pacs.008 and 300 more, "
+        "every version — as a tree or XMLSpy-style diagram, search it and validate XML files against it.",
+        "/iso20022",
+    ),
     "api-docs": RouteMeta(
         "XML validation via API (curl, PowerShell, Python) — Online XSD Viewer",
         "Validate XML against an XSD from the command line: upload the schema, validate the "

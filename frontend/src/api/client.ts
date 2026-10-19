@@ -325,7 +325,7 @@ export async function fetchHealth(): Promise<HealthResponse> {
 }
 
 /** Count a copied share link (the copy itself never reaches the server). Fire and forget. */
-export function pingShare(source: "url" | "fundsxml"): void {
+export function pingShare(source: "url" | "fundsxml" | "iso20022"): void {
   void fetch(`${API_BASE}/usage/share?source=${source}`, { method: "POST", keepalive: true }).catch(() => undefined);
 }
 
@@ -338,4 +338,34 @@ export function fetchContentPages(): Promise<Set<string>> {
     .then((slugs) => new Set(slugs))
     .catch(() => new Set<string>());
   return contentPages;
+}
+
+// --- ISO 20022 (pinned public mirror, backend/app/api/iso20022.py) ---------
+
+export interface Iso20022Message {
+  id: string;
+  message: string;
+  variant: string;
+  version: string;
+  area: string;
+  area_label: string;
+  name: string;
+  root: string;
+  path: string;
+}
+
+export interface Iso20022Catalog {
+  source: { repo: string; commit: string; license: string; base_url: string; official: string };
+  messages: Iso20022Message[];
+}
+
+export async function listIso20022Messages(): Promise<Iso20022Catalog> {
+  const response = await fetch(`${API_BASE}/iso20022/messages`);
+  if (!response.ok) throw await errorFromResponse(response);
+  return (await response.json()) as Iso20022Catalog;
+}
+
+export async function loadIso20022(id: string): Promise<SchemaResponse> {
+  const response = await fetch(`${API_BASE}/iso20022/${encodeURIComponent(id)}/load`, { method: "POST" });
+  return handle(response);
 }

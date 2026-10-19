@@ -20,6 +20,7 @@ from app.api.content import router as content_router
 from app.api.export import router as export_router
 from app.api.feedback import router as feedback_router
 from app.api.go import router as go_router
+from app.api.iso20022 import router as iso20022_router
 from app.api.releases import router as releases_router
 from app.api.schema import router as schema_router
 from app.api.usage import router as usage_router
@@ -262,6 +263,7 @@ async def health() -> dict[str, str]:
 app.include_router(schema_router, prefix="/api")
 app.include_router(export_router, prefix="/api")
 app.include_router(releases_router, prefix="/api")
+app.include_router(iso20022_router, prefix="/api")
 app.include_router(feedback_router, prefix="/api")
 app.include_router(usage_router, prefix="/api")
 app.include_router(content_router, prefix="/api")

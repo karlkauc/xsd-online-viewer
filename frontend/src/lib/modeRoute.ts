@@ -5,7 +5,7 @@
 // backend/app/spa.py — the server injects per-route <head> metadata into the shell and
 // serves the SPA shell only for these paths and answers 404 for anything else.
 
-export type Mode = "file" | "text" | "url" | "releases";
+export type Mode = "file" | "text" | "url" | "releases" | "iso20022";
 
 // Static documentation page for the validation API. Not an input mode, but
 // it is a client route the server must serve the shell for.
@@ -31,12 +31,14 @@ const MODE_TO_PATH: Record<Mode, string> = {
   text: "/paste",
   url: "/url",
   releases: "/fundsxml",
+  iso20022: "/iso20022",
 };
 
 const PATH_TO_MODE: Record<string, Mode> = {
   "/paste": "text",
   "/url": "url",
   "/fundsxml": "releases",
+  "/iso20022": "iso20022",
 };
 
 export function readModeFromPath(): Mode {

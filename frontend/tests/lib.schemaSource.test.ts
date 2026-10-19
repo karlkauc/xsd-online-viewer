@@ -19,6 +19,15 @@ describe("schemaSource", () => {
     expect(sourceFromLocation(loc(rpath, `?${rsearch}`))).toEqual(release);
   });
 
+  it("encodes an ISO 20022 message as /iso20022?message=…", () => {
+    const iso = { kind: "iso20022" as const, id: "pain.001.001.12" };
+    expect(sourcePath(iso)).toBe("/iso20022?message=pain.001.001.12");
+    expect(sourceFromLocation(loc("/iso20022", "?message=pain.001.001.12"))).toEqual(iso);
+    expect(isShareable(iso)).toBe(true);
+    expect(sourceFromLocation(loc("/iso20022", "?message=../../etc"))).toBeNull();
+    expect(sourceFromLocation(loc("/iso20022", "?q=pain.001"))).toBeNull();
+  });
+
   it("has no path for local input and ignores bogus parameters", () => {
     expect(sourcePath({ kind: "text", content: "<xs:schema/>" })).toBeNull();
     expect(sourcePath({ kind: "upload", files: [] })).toBeNull();

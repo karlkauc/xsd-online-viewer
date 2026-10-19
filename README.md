@@ -65,6 +65,13 @@ side by side, all linked to the same selection.
 - **Handles real-world schemas.** Tested up to ~50 MB with virtual scrolling
   and lazy diagram rendering.
 
+## ISO 20022 messages by name
+
+The **ISO 20022** tab ([www.xsd-viewer.online/iso20022](https://www.xsd-viewer.online/iso20022)) lists
+more than 300 payment, cash-management, collateral and remittance messages — pain.001, camt.053,
+pacs.008 and the rest, every version — searchable by code, name or root element. One click loads the
+schema; links such as `/iso20022?message=pain.001.001.12` open it directly.
+
 ## Load FundsXML releases with one click
 
 If you work with [FundsXML](https://fundsxml.org/), the viewer pulls the

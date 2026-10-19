@@ -25,7 +25,7 @@ class TestIsSpaRoute:
         assert not is_spa_route(path)
 
     def test_routes_mirror_frontend(self) -> None:
-        assert frozenset({"", "paste", "url", "fundsxml", "api-docs", "embed"}) == SPA_ROUTES
+        assert frozenset({"", "paste", "url", "fundsxml", "iso20022", "api-docs", "embed"}) == SPA_ROUTES
 
 
 SHELL = """<html><head>

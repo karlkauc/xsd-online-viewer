@@ -20,7 +20,7 @@ One row per event in table `usage_event` (DDL: `backend/sql/usage_stats.sql`):
 
 | Column | Meaning |
 |---|---|
-| `event_type` | `page_view` (SPA shell or content page served), `schema_load`, `validate`, `export`, `share` (the Share button copied a link: `source` = `url` or `fundsxml`) |
+| `event_type` | `page_view` (SPA shell or content page served), `schema_load`, `validate`, `export`, `share` (the Share button copied a link: `source` = `url`, `fundsxml` or `iso20022`); `schema_load` with `source=iso20022` and `schema_name` = message id is a load from the ISO 20022 tab |
 | `visitor_hash` | `sha256(daily_salt ‖ ip ‖ user-agent)[:32]`; salt = `HMAC(USAGE_HASH_SECRET, date)` ⇒ same visitor within a day, unlinkable across days, not reversible |
 | `country_code` | ISO-3166-1 alpha-2 derived server-side via MaxMind GeoLite2; NULL if unknown |
 | `user_agent`, `device` | UA string (≤255) and a cheap classification `desktop`/`mobile`/`bot`/`unknown` |

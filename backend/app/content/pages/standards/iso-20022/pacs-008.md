@@ -2,9 +2,9 @@
 title = "pacs.008 XSD: FI To FI Customer Credit Transfer — structure and viewer"
 heading = "pacs.008 — FI To FI Customer Credit Transfer"
 description = "Structure of the ISO 20022 pacs.008 (FI To FI Customer Credit Transfer) XML Schema: root element, main blocks and how to view the XSD as a diagram and validate pacs.008 files online."
-lastmod = 2026-10-19
-cta_label = "Open the XSD viewer"
-cta_href = "/url"
+lastmod = 2026-10-20
+cta_label = "Open pacs.008.001.13 in the viewer"
+cta_href = "/iso20022?message=pacs.008.001.13"
 +++
 
 **pacs.008** is the ISO 20022 message for the interbank message that carries a customer credit transfer between banks — the core message of SEPA, of the ISO 20022 migration of cross-border payments (CBPR+) and of many instant payment schemes.
@@ -22,14 +22,13 @@ your bank's or scheme's implementation guide (for example the EPC rulebooks for 
 
 ## View the schema
 
-1. Download the pacs.008 XSD for the version you need from the
-   [ISO 20022 message catalogue](https://www.iso20022.org/catalogue-messages), or take the one from your bank's
-   implementation guide.
-2. Open it in the [XSD viewer](/): upload the file, or paste a public URL into the [URL tab](/url).
-3. Explore `Document/FIToFICstmrCdtTrf` as a diagram, search for element names (Ctrl/⌘ + K), and export the diagram or an
-   HTML documentation for your team.
+Open [pacs.008.001.13](/iso20022?message=pacs.008.001.13), the latest version, directly in the viewer — or pick another version of
+pacs.008 in the [ISO 20022 tab](/iso20022?q=pacs.008). Then explore `Document/FIToFICstmrCdtTrf` as a diagram, search for element names
+(Ctrl/⌘ + K), and export the diagram or an HTML documentation for your team.
 
-This site does not mirror ISO 20022 schemas; load them from the official source.
+The schemas are loaded from a public mirror of the ISO 20022 catalogue, unchanged; the authoritative source is the
+[ISO 20022 message catalogue](https://www.iso20022.org/catalogue-messages). Your bank's implementation guide may
+require a specific version — the version is the last part of the file's namespace.
 
 ## Validate a pacs.008 file
 

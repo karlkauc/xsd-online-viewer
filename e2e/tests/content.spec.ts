@@ -81,3 +81,45 @@ test("the FundsXML releases tab and the landing page link to the release pages",
   await expect(page.getByRole("heading", { level: 1, name: "Guides and resources" })).toBeVisible();
   await expect(page.getByRole("link", { name: /FundsXML schema releases/ })).toBeVisible();
 });
+
+const ISO_XSD = `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.12"
+  targetNamespace="urn:iso:std:iso:20022:tech:xsd:camt.053.001.12" elementFormDefault="qualified">
+  <xs:element name="Document" type="Document"/>
+  <xs:complexType name="Document"><xs:sequence><xs:element name="BkToCstmrStmt" type="xs:string"/></xs:sequence></xs:complexType>
+</xs:schema>`;
+
+const ISO_CATALOG = {
+  source: { repo: "phoughton/pyiso20022", commit: "c".repeat(40), license: "MIT", base_url: "https://raw.githubusercontent.com/x/y/z/", official: "https://www.iso20022.org/catalogue-messages" },
+  messages: [
+    { id: "pain.001.001.09", message: "pain.001", variant: "001", version: "09", area: "payments_initiation", area_label: "Payments initiation", name: "Customer Credit Transfer Initiation", root: "CstmrCdtTrfInitn", path: "p" },
+    { id: "pain.001.001.12", message: "pain.001", variant: "001", version: "12", area: "payments_initiation", area_label: "Payments initiation", name: "Customer Credit Transfer Initiation", root: "CstmrCdtTrfInitn", path: "p" },
+    { id: "camt.053.001.12", message: "camt.053", variant: "001", version: "12", area: "cash_management", area_label: "Cash management", name: "Bank To Customer Statement", root: "BkToCstmrStmt", path: "p" },
+  ],
+};
+
+test("the ISO 20022 tab lists, filters and loads a message by name", async ({ page, request }) => {
+  const parsed = await (await request.post("/api/schema/text", { data: { content: ISO_XSD, filename: "camt.053.001.12.xsd" } })).json();
+  await page.route("**/api/iso20022/messages", (route) => route.fulfill({ json: ISO_CATALOG }));
+  const loads: string[] = [];
+  await page.route("**/api/iso20022/*/load", (route) => {
+    loads.push(new URL(route.request().url()).pathname);
+    return route.fulfill({ json: parsed });
+  });
+  await page.goto("/iso20022");
+  await expect(page.getByRole("tab", { name: "ISO 20022" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("2 of 2 messages")).toBeVisible();
+  await page.getByRole("searchbox", { name: "Search ISO 20022 messages" }).fill("statement");
+  await expect(page.getByText("Customer Credit Transfer Initiation")).toHaveCount(0);
+  await page.getByRole("button", { name: ".12" }).click();
+  await expect(page).toHaveURL(/\/iso20022\?message=camt\.053\.001\.12/);
+  expect(loads).toEqual(["/api/iso20022/camt.053.001.12/load"]);
+  await expect(page.locator(".react-flow__node").first()).toBeVisible({ timeout: 30_000 });
+});
+
+test("a /iso20022?message= link loads the schema on arrival, and the content page links to it", async ({ page, request }) => {
+  const parsed = await (await request.post("/api/schema/text", { data: { content: ISO_XSD, filename: "camt.053.001.12.xsd" } })).json();
+  await page.route("**/api/iso20022/camt.053.001.12/load", (route) => route.fulfill({ json: parsed }));
+  await page.goto("/standards/iso-20022/camt-053");
+  await page.getByRole("link", { name: "Open camt.053.001.12 in the viewer" }).click();
+  await expect(page.locator(".react-flow__node").first()).toBeVisible({ timeout: 30_000 });
+});
