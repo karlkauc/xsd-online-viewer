@@ -1,5 +1,7 @@
 # Online XSD Viewer
 
+[![Try it live](https://img.shields.io/badge/try%20it%20live-xsd--viewer.online-2563eb)](https://www.xsd-viewer.online/?utm_source=github&utm_medium=readme)
+
 **Read, understand and share XML Schemas in your browser — no install, no
 account, no upload that sticks around.**
 
@@ -95,6 +97,23 @@ one click away, including its `xmldsig-core-schema.xsd` companion.
 - **No account, no login.** Just open the site and drop a file.
 - **You can run it yourself.** The whole app is a single Docker container —
   see [docs/TECHNICAL.md](docs/TECHNICAL.md) for self-hosting.
+
+## Self-host with Docker
+
+Keep schemas inside your network, or let colleagues use it without internet access:
+
+```bash
+docker run --rm -p 8080:8080 ghcr.io/karlkauc/online-xsd-viewer:latest
+```
+
+Then open <http://localhost:8080>. Configuration and Cloud Run deployment:
+[docs/TECHNICAL.md](docs/TECHNICAL.md).
+
+## Embed a diagram or add a badge
+
+Show an interactive diagram of a public schema on your own documentation site, or put an
+"Open in XSD Viewer" badge into a repository that publishes XSDs:
+[www.xsd-viewer.online/features/badge](https://www.xsd-viewer.online/features/badge).
 
 ## No warranty
 

@@ -32,6 +32,7 @@ class Settings:
     xsd11_memory_mb: int
     schema_check_large_timeout_seconds: float
     trusted_proxy_hops: int
+    indexnow_key: str
 
     @property
     def usage_enabled(self) -> bool:
@@ -98,6 +99,8 @@ def load_settings() -> Settings:
         # Proxies in front of the app that append to X-Forwarded-For (Cloud Run: 1;
         # 0 = use the TCP peer, e.g. when uvicorn is reachable directly).
         trusted_proxy_hops=int(os.getenv("TRUSTED_PROXY_HOPS", "1")),
+        # Served as /<key>.txt for IndexNow (Bing, Yandex, …); empty = no key file.
+        indexnow_key=re.sub(r"[^A-Za-z0-9-]", "", os.getenv("INDEXNOW_KEY", "")),
     )
 
 

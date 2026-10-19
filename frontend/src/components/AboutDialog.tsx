@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchHealth } from "../api/client";
-import { FREEXMLTOOLKIT_GO, GITHUB_REPO_URL, SPONSOR_GO, XML_VIEWER_URL } from "../lib/links";
+import { FREEXMLTOOLKIT_GO, GITHUB_REPO_URL, SPONSOR_GO } from "../lib/links";
+import { FamilyFooter } from "./FamilyFooter";
 import { openFeedback } from "./UploadError";
 import { API_DOCS_PATH } from "../lib/modeRoute";
 import { KindBadge } from "./TreeView/KindBadge";
@@ -156,10 +157,7 @@ export function AboutDialog() {
             {" — validate XML against an XSD from curl, PowerShell or Python"}
           </li>
           <li>
-            <a className={linkClass} href={XML_VIEWER_URL} target="_blank" rel="noopener noreferrer">
-              XML Viewer
-            </a>
-            {" — sister tool for viewing and validating XML documents"}
+            <FamilyFooter />
           </li>
           <li>
             <a className={linkClass} href={FREEXMLTOOLKIT_GO} target="_blank" rel="noopener noreferrer">

@@ -25,7 +25,7 @@ class TestIsSpaRoute:
         assert not is_spa_route(path)
 
     def test_routes_mirror_frontend(self) -> None:
-        assert frozenset({"", "paste", "url", "fundsxml", "api-docs"}) == SPA_ROUTES
+        assert frozenset({"", "paste", "url", "fundsxml", "api-docs", "embed"}) == SPA_ROUTES
 
 
 SHELL = """<html><head>
@@ -42,9 +42,9 @@ SHELL = """<html><head>
 
 
 class TestRenderShell:
-    def test_home_keeps_defaults(self) -> None:
+    def test_home_gets_the_search_title(self) -> None:
         out = render_shell(SHELL, "")
-        assert "<title>Online XSD Viewer</title>" in out
+        assert "<title>XSD Viewer Online – XML Schema Diagram, Tree &amp; Validator (Free)</title>" in out
         assert 'href="https://www.xsd-viewer.online/"' in out
 
     def test_api_docs_gets_own_title_description_canonical(self) -> None:

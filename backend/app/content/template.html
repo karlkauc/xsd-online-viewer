@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="robots" content="${robots}" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>${title}</title>
+    <meta name="description" content="${description}" />
+    <link rel="canonical" href="${canonical}" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="${site_name}" />
+    <meta property="og:title" content="${title}" />
+    <meta property="og:description" content="${description}" />
+    <meta property="og:url" content="${canonical}" />
+    <meta name="twitter:card" content="summary" />
+    <link rel="stylesheet" href="/content.css" />
+    ${json_ld}
+    <script src="/theme-init.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/"><img src="${logo}" alt="" width="24" height="24" /> ${site_name}</a>
+      <a class="button" href="${viewer}">Open the viewer</a>
+    </header>
+    <main class="content">
+      <nav class="crumbs" aria-label="Breadcrumb"><a href="/">${site_name}</a> › <span>${h1}</span></nav>
+      <h1>${h1}</h1>
+      ${body}
+      ${cta}
+      ${faq}
+    </main>
+    <footer class="site-footer">
+      <p>${family}</p>
+      <p>Free and open source · no account · nothing stored · self-hostable</p>
+    </footer>
+  </body>
+</html>

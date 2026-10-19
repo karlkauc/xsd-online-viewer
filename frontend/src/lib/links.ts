@@ -1,6 +1,11 @@
 /** External links shared by the header, the About dialog and the landing page. */
 export const GITHUB_REPO_URL = "https://github.com/karlkauc/xsd-online-viewer";
 export const XML_VIEWER_URL = "https://www.xml-viewer.online/";
+export const ODATA_VIEWER_URL = "https://www.odata-viewer.online/";
+/** Counted redirects (backend/app/api/go.py) that add utm_source for the sister site's stats. */
+export const XSD_VIEWER_GO = "/go/xsd-viewer";
+export const XML_VIEWER_GO = "/go/xml-viewer";
+export const ODATA_VIEWER_GO = "/go/odata-viewer";
 
 /**
  * FreeXmlToolkit — the author's free desktop XML workstation (Java, Apache

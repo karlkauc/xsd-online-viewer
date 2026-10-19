@@ -21,6 +21,7 @@ dependencies = [
     "geoip2>=4.8",
     # XSD 1.1 validation; only ever imported by app/parser/xsd11_worker.py, a process of its own.
     "xmlschema>=4.1",
+    "markdown-it-py>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -37,7 +38,7 @@ where = ["."]
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["parser/w3c/*.xsd", "parser/w3c/*.txt"]
+app = ["parser/w3c/*.xsd", "parser/w3c/*.txt", "content/template.html", "content/faq.toml", "content/pages/**/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

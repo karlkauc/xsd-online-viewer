@@ -20,12 +20,13 @@ One row per event in table `usage_event` (DDL: `backend/sql/usage_stats.sql`):
 
 | Column | Meaning |
 |---|---|
-| `event_type` | `page_view` (SPA shell served), `schema_load`, `validate`, `export` |
+| `event_type` | `page_view` (SPA shell or content page served), `schema_load`, `validate`, `export`, `share` (the Share button copied a link: `source` = `url` or `fundsxml`) |
 | `visitor_hash` | `sha256(daily_salt ‖ ip ‖ user-agent)[:32]`; salt = `HMAC(USAGE_HASH_SECRET, date)` ⇒ same visitor within a day, unlinkable across days, not reversible |
 | `country_code` | ISO-3166-1 alpha-2 derived server-side via MaxMind GeoLite2; NULL if unknown |
 | `user_agent`, `device` | UA string (≤255) and a cheap classification `desktop`/`mobile`/`bot`/`unknown` |
 | `referrer` | `scheme://host/path` of the `Referer` header, query dropped |
-| `path` | page_view only — SPA path (`/`, `/paste`, `/url`, `/fundsxml`); unknown paths get a 404 and are not recorded. `/go/freexmltoolkit/docs` or `/go/freexmltoolkit/releases` with `source=freexmltoolkit` and `status_code=302` is an outbound click on a FreeXmlToolkit link (Learn more / Download); `/go/sponsor` with `source=sponsor` is a click on the GitHub Sponsors link (both counted redirects, see `app/api/go.py`) |
+| `utm_source`, `utm_medium`, `utm_campaign` | page_view only — the request's `utm_*` parameters, lower-cased, kept only as slugs of ≤64 `[a-z0-9._-]`. The sister sites link here with `utm_source=<site>&utm_medium=sister`; the badge and embeds use `utm_source=badge` / `embed` |
+| `path` | page_view only — SPA path (`/`, `/paste`, `/url`, `/fundsxml`, `/api-docs`, `/embed` with `source=embed`) or content page (`backend/app/content/pages/**`, e.g. `/fundsxml/4.2.11`); unknown paths get a 404 and are not recorded. `/go/xml-viewer`, `/go/odata-viewer` are clicks to the sister sites. `/go/freexmltoolkit/docs` or `/go/freexmltoolkit/releases` with `source=freexmltoolkit` and `status_code=302` is an outbound click on a FreeXmlToolkit link (Learn more / Download); `/go/sponsor` with `source=sponsor` is a click on the GitHub Sponsors link (both counted redirects, see `app/api/go.py`) |
 | `source` | `upload`/`text`/`url`/`release` (loads, validations); `html`/`formatted`/`sample` (exports — `sample` is a generated sample XML instance; `input_bytes` then holds the size of the generated document). A `validate` event with `source='sample'` is the automatic schema check the sample dialog runs on a generated document — only document roots are checked, so such an event marks the preceding sample export (same visitor, same `input_bytes`) as a whole-document sample; its `status` (`ok`/`invalid`/`rejected`) tells whether the generated XML was schema-valid |
 | `schema_name` | upload/text: file **basename**; url: URL without query string (for `validate` events with `source='url'` this is the URL of the XML *document*); release: `tag/file`; sample export: main file of the loaded schema |
 | `target_namespace` | of the main schema |

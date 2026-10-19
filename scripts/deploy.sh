@@ -36,5 +36,14 @@ fi
 
 [[ -s "$DEST" ]] || echo "!! $DEST missing — the image will fall back to a runtime download" >&2
 
+# IndexNow key (public by design: served as /<key>.txt); tools/indexnow_ping.py uses it.
+INDEXNOW_KEY='a6e5d4bfa4c51bafe5e4bc6eba13d987'
+
 echo ">> deploying $SERVICE to $PROJECT/$REGION"
-gcloud run deploy "$SERVICE" --source . --region "$REGION" --project "$PROJECT" "$@"
+gcloud run deploy "$SERVICE" --source . --region "$REGION" --project "$PROJECT" \
+  --update-env-vars "INDEXNOW_KEY=$INDEXNOW_KEY" "$@"
+
+# Tell Bing & co. about new or changed pages (sitemap URLs). Opt-in: INDEXNOW_PING=1 scripts/deploy.sh
+if [[ "${INDEXNOW_PING:-0}" == "1" ]]; then
+  python3 tools/indexnow_ping.py --key "$INDEXNOW_KEY" --site "https://www.xsd-viewer.online"
+fi

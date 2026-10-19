@@ -1,0 +1,42 @@
+# Home page FAQ: rendered into the static shell (crawlers, no-JS), as FAQPage
+# JSON-LD, and available to the SPA via /api/content/faq. Answers are Markdown.
+
+[[faq]]
+q = "What does the XSD viewer show?"
+a = """
+Every declaration of an XML Schema — elements, attributes, simple and complex types, groups, facets,
+`xs:documentation` and `xs:appinfo` — as an expandable tree, an XMLSpy-style diagram with sequences, choices
+and cardinalities, and the highlighted source with line numbers. The three views share one selection.
+"""
+
+[[faq]]
+q = "Can it read schemas that import or include other files?"
+a = """
+Yes. Drop several `.xsd` files at once or a `.zip` with the main schema and its `xs:import`, `xs:include` and
+`xs:redefine` targets. The viewer resolves the references and treats the bundle as one model; when more than one
+file could be the root, it asks which one.
+"""
+
+[[faq]]
+q = "Is my schema stored?"
+a = """
+No. Uploads are parsed in memory and dropped from a short-lived cache; schema files are never written to disk.
+The anonymous usage statistics record the file name or URL, size and outcome, never the content.
+To keep everything inside your network, [run the viewer with Docker](https://github.com/karlkauc/xsd-online-viewer#self-host-with-docker).
+"""
+
+[[faq]]
+q = "Can I validate an XML file against the schema?"
+a = """
+Yes, in the browser after loading the schema, or from scripts and CI with the [REST API](/api-docs) (curl,
+PowerShell, Python). XSD 1.0 and XSD 1.1 are supported. For browsing large XML documents and exporting the
+validation errors to Excel, use the sister tool [XML Viewer](/go/xml-viewer).
+"""
+
+[[faq]]
+q = "Which FundsXML versions are available?"
+a = """
+All releases published in the official [fundsxml/schema](https://github.com/fundsxml/schema/releases) repository,
+loaded with one click on [/fundsxml](/fundsxml). Each release has a page with its structure and the changes to the
+previous version under [/fundsxml/…](/fundsxml/releases).
+"""

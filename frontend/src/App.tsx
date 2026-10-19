@@ -15,13 +15,13 @@ import { ContentModelView } from "./components/ContentModelView/ContentModelView
 import { Breadcrumb } from "./components/Breadcrumb";
 import { Diagnostics } from "./components/Diagnostics";
 import { ThemeToggle } from "./components/ThemeToggle";
-import { FREEXMLTOOLKIT_GO, SPONSOR_GO, XML_VIEWER_URL } from "./lib/links";
+import { FREEXMLTOOLKIT_GO, ODATA_VIEWER_GO, SPONSOR_GO, XML_VIEWER_GO } from "./lib/links";
 import { DesktopAppCard } from "./components/DesktopAppCard";
 import { MobileNav, type MobilePane } from "./components/MobileNav";
 import { HeaderActions, type HeaderAction } from "./components/HeaderActions";
 import { MD_QUERY, useMediaQuery } from "./lib/useMediaQuery";
 import { useSelection, type ViewTab } from "./stores/selectionStore";
-import { exportHtmlUrl, fetchSchemaCheck } from "./api/client";
+import { exportHtmlUrl, fetchSchemaCheck, pingShare } from "./api/client";
 import { downloadSchemaExport } from "./lib/schemaSession";
 import { isShareable, shareLink } from "./lib/schemaSource";
 import { useCopy } from "./lib/useCopy";
@@ -218,7 +218,10 @@ export default function App() {
                 ? "Copy a link that loads this schema and selection"
                 : "Copy a link to this selection (the recipient must load the same file first)",
               ariaLabel: "Copy share link",
-              onClick: () => void copyLink(shareLink(source)),
+              onClick: () => {
+                void copyLink(shareLink(source));
+                if (source && isShareable(source)) pingShare(source.kind === "release" ? "fundsxml" : "url");
+              },
             },
             {
               key: "export-html",
@@ -243,7 +246,15 @@ export default function App() {
         label: "XML Viewer ↗",
         title: "Have an XML document instead? Open our sister tool XML Viewer",
         ariaLabel: "Open XML Viewer (sister tool for XML documents)",
-        href: XML_VIEWER_URL,
+        href: XML_VIEWER_GO,
+        external: true,
+      },
+      {
+        key: "odata-viewer",
+        label: "OData Viewer ↗",
+        title: "Sister tool for OData services: $metadata as tree, ER diagram and live data",
+        ariaLabel: "Open OData Viewer (sister tool for OData services)",
+        href: ODATA_VIEWER_GO,
         external: true,
       },
       {

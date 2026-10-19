@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from datetime import date
 from urllib.parse import urlsplit, urlunsplit
@@ -48,6 +49,9 @@ class UsageEvent:
     duration_ms: int | None = None
     status: str | None = None
     error_detail: str | None = None
+    utm_source: str | None = None
+    utm_medium: str | None = None
+    utm_campaign: str | None = None
 
     def as_row(self) -> tuple:
         return tuple(getattr(self, f.name) for f in fields(self))
@@ -111,6 +115,22 @@ def clean_referrer(header: str | None) -> str | None:
         return None
     netloc = parts.hostname + (f":{parts.port}" if parts.port else "")
     return truncate(urlunsplit((parts.scheme, netloc, parts.path or "/", "", "")))
+
+
+_UTM_RE = re.compile(r"[a-z0-9._-]{1,64}")
+UTM_KEYS = ("utm_source", "utm_medium", "utm_campaign")
+
+
+def utm_fields(query: Mapping[str, str]) -> dict[str, str]:
+    """Campaign tags of a page view. The sites send ``Referrer-Policy: no-referrer``,
+    so links between the sibling viewers and from posts carry ``utm_source`` instead;
+    anything that is not a short slug is dropped rather than stored."""
+    tags: dict[str, str] = {}
+    for key in UTM_KEYS:
+        value = (query.get(key) or "").strip().lower()
+        if _UTM_RE.fullmatch(value):
+            tags[key] = value
+    return tags
 
 
 def schema_display_name(source: str, name: str | None) -> str | None:

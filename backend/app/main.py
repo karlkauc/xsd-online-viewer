@@ -16,11 +16,13 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app import __version__
+from app.api.content import router as content_router
 from app.api.export import router as export_router
 from app.api.feedback import router as feedback_router
 from app.api.go import router as go_router
 from app.api.releases import router as releases_router
 from app.api.schema import router as schema_router
+from app.api.usage import router as usage_router
 from app.config import settings
 from app.logging_setup import configure_logging, new_request_id, request_id_var
 from app.rate_limit import client_ip, limiter
@@ -172,7 +174,9 @@ if settings.cors_allow_origins:
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
+    # The /embed shell allows framing through its own CSP; DENY would override it.
+    if "frame-ancestors *" not in response.headers.get("Content-Security-Policy", ""):
+        response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault(
         "Content-Security-Policy", "default-src 'none'; form-action 'none'; frame-ancestors 'none'; sandbox"
@@ -259,6 +263,8 @@ app.include_router(schema_router, prefix="/api")
 app.include_router(export_router, prefix="/api")
 app.include_router(releases_router, prefix="/api")
 app.include_router(feedback_router, prefix="/api")
+app.include_router(usage_router, prefix="/api")
+app.include_router(content_router, prefix="/api")
 app.include_router(go_router)  # /go/… redirects, registered before the SPA catch-all
 
 # --- Static frontend ------------------------------------------------------

@@ -10,7 +10,7 @@
       backend (backend/app/spa.py, render_shell) rewrites them for each client
       route before serving the shell. Keep the attribute order as-is.
     -->
-    <title>Online XSD Viewer</title>
+    <title>XSD Viewer Online – XML Schema Diagram, Tree &amp; Validator (Free)</title>
     <meta
       name="description"
       content="Free online XSD viewer: upload an XML Schema and explore it as a tree, XMLSpy-style diagram or highlighted source. Validate XML documents against the schema in the browser or via REST API."
@@ -48,20 +48,28 @@
           "Syntax-highlighted XSD source with annotations",
           "XML validation against an XSD in the browser",
           "REST API for XML validation (curl, PowerShell, Python)",
-          "FundsXML schema releases built in"
+          "FundsXML schema releases built in",
+          "Multi-file schemas: xs:import, xs:include and xs:redefine from a ZIP",
+          "Shareable deep links to every schema node",
+          "Sample XML generation and HTML documentation export"
         ],
         "screenshot": "https://www.xsd-viewer.online/og-image.png",
-        "isRelatedTo": {
-          "@type": "SoftwareApplication",
-          "name": "FreeXmlToolkit",
-          "url": "https://karlkauc.github.io/FreeXmlToolkit/",
-          "applicationCategory": "DeveloperApplication",
-          "operatingSystem": "Windows, macOS, Linux",
-          "isAccessibleForFree": true
-        },
+        "isRelatedTo": [
+          {
+            "@type": "SoftwareApplication",
+            "name": "FreeXmlToolkit",
+            "url": "https://karlkauc.github.io/FreeXmlToolkit/",
+            "applicationCategory": "DeveloperApplication",
+            "operatingSystem": "Windows, macOS, Linux",
+            "isAccessibleForFree": true
+          },
+          { "@type": "WebApplication", "name": "XML Online Viewer", "url": "https://www.xml-viewer.online/" },
+          { "@type": "WebApplication", "name": "Online OData Viewer", "url": "https://www.odata-viewer.online/" }
+        ],
         "license": "https://github.com/karlkauc/xsd-online-viewer/blob/master/LICENSE"
       }
     </script>
+    <!--faq-jsonld-->
     <script src="/theme-init.js"></script>
   </head>
   <body class="bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100">
@@ -92,6 +100,12 @@
           IntelliSense, XSD documentation and sample-data generation, Schematron, XSLT, XProc,
           XML signatures and PDF output — for Windows, macOS and Linux.
         </p>
+        <p class="mt-4">
+          Sister tools by the same author:
+          <a class="underline" href="https://www.xml-viewer.online/">XML Online Viewer</a> and
+          <a class="underline" href="https://www.odata-viewer.online/">Online OData Viewer</a>.
+        </p>
+        <!--faq-->
         <noscript>
           <p class="mt-4">Please enable JavaScript to use the viewer.</p>
         </noscript>

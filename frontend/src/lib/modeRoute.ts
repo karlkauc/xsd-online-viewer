@@ -15,6 +15,13 @@ export const API_DOCS_TITLE = "XML validation via API (curl, PowerShell, Python)
 export const API_DOCS_DESCRIPTION =
   "Validate XML against an XSD from the command line: upload the schema, validate the document, save the JSON error report. Examples for curl, PowerShell and Python, plus size, timeout and rate limits.";
 
+// The diagram alone for iframes (components/EmbedView.tsx); `embed` in ROUTE_META.
+export const EMBED_PATH = "/embed";
+
+export function isEmbedRoute(): boolean {
+  return window.location.pathname.replace(/\/+$/, "") === EMBED_PATH;
+}
+
 export function isApiDocsRoute(): boolean {
   return window.location.pathname.replace(/\/+$/, "") === API_DOCS_PATH;
 }

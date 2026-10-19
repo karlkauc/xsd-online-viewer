@@ -14,6 +14,7 @@ import { looksLikeSchema, shouldSniff, XML_VIEWER_URL } from "../lib/uploadError
 import { listZipEntries, pickMainXsd, xsdEntries } from "../lib/zipEntries";
 import { sourceFromLocation, writeSourcePath, type SchemaSource } from "../lib/schemaSource";
 import { COARSE_POINTER_QUERY, useMediaQuery } from "../lib/useMediaQuery";
+import { FamilyFooter } from "./FamilyFooter";
 import { DesktopAppCard } from "./DesktopAppCard";
 
 /** Files chosen but not yet uploaded because the main schema needs confirming. */
@@ -411,6 +412,7 @@ export function Uploader() {
           "Schematron rules, XSLT and XProc, XML signatures, PDF — all offline",
         ]}
       />
+      <FamilyFooter className="mt-6 text-xs text-slate-500 dark:text-slate-400" />
     </div>
   );
 }
