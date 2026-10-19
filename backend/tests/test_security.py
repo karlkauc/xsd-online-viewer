@@ -8,9 +8,11 @@ import pytest
 from lxml import etree
 
 from app import config as config_module
+from app.parser import security
 from app.parser.security import (
     SecurityError,
     fetch_schema_url,
+    inspect_dtd,
     parse_bytes,
 )
 from app.parser.validation import validate_xml
@@ -232,3 +234,34 @@ class TestFetchBehaviour:
         with pytest.raises(FetchError, match=r"fetching 'https://example.org/slow.xsd' failed: .*timed out"):
             fetch_schema_url("https://example.org/slow.xsd")
         assert issubclass(FetchError, SecurityError)
+
+
+SPLIT_COMMENT_SUBSET = '<!ENTITY a "<!--"><!ENTITY x SYSTEM "file://{path}"><!ENTITY b "-->">'
+
+
+def test_comment_split_across_entity_values_is_rejected(tmp_path) -> None:
+    canary = tmp_path / "canary.txt"
+    canary.write_text("CANARY-SECRET")
+    doc = f"<!DOCTYPE r [{SPLIT_COMMENT_SUBSET.format(path=canary)}]><r>&x;</r>".encode()
+    with pytest.raises(SecurityError):
+        inspect_dtd(doc)
+
+
+def test_internal_entity_parser_never_reads_external_entities(tmp_path) -> None:
+    canary = tmp_path / "canary.txt"
+    canary.write_text("CANARY-SECRET")
+    doc = f'<!DOCTYPE r [<!ENTITY x SYSTEM "file://{canary}">]><r>&x;</r>'.encode()
+    with pytest.raises(etree.XMLSyntaxError):
+        etree.fromstring(doc, security.make_parser(internal_entities=True))
+
+
+def test_comment_split_xxe_in_a_schema(tmp_path) -> None:
+    canary = tmp_path / "canary.txt"
+    canary.write_text("CANARY-SECRET")
+    subset = SPLIT_COMMENT_SUBSET.format(path=canary)
+    data = (
+        f"<!DOCTYPE schema [{subset}]>"
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" targetNamespace="&x;"/>'
+    ).encode()
+    with pytest.raises(SecurityError):
+        parse_bytes(data, "s.xsd")

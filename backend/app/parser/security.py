@@ -75,7 +75,8 @@ def make_parser(*, internal_entities: bool = False, recover: bool = False) -> et
       whose sole fault is a repeated ID.
     """
     return etree.XMLParser(
-        resolve_entities=internal_entities,
+        # "internal" never substitutes an external entity, even if inspect_dtd were fooled.
+        resolve_entities="internal" if internal_entities else False,
         no_network=True,
         load_dtd=False,
         dtd_validation=False,
@@ -131,7 +132,6 @@ MAX_ENTITY_VALUE_CHARS = 512
 
 _DTD_TOKENS = (b"<!DOCTYPE", b"<!ENTITY", b"<!ATTLIST", b"<!NOTATION", b"<!ELEMENT")
 _DOCTYPE_RE = re.compile(rb"<!DOCTYPE\b(?P<header>[^\[>]*)(?:\[(?P<subset>.*?)\]\s*)?>", re.S)
-_COMMENT_RE = re.compile(rb"<!--.*?-->", re.S)
 _DECL_RE = re.compile(rb"<!(?P<kind>ENTITY|ATTLIST)\b(?P<body>[^>]*)>", re.S)
 _ENTITY_BODY_RE = re.compile(
     rb"^\s*(?:%\s+)?[A-Za-z_:][\w.:-]*\s+(?P<q>[\"'])(?P<value>[^\"']*)(?P=q)\s*$", re.S
@@ -142,6 +142,34 @@ DTD_REJECTED_MESSAGE = (
     "DTD constructs are not allowed in uploads (only a DOCTYPE with simple, literal-value "
     "<!ENTITY> declarations is accepted); remove the DOCTYPE and inline the entity values"
 )
+
+
+def _strip_comments(subset: bytes) -> bytes:
+    """Drop ``<!--…-->`` from a DTD subset, but never inside a quoted literal.
+
+    A quote-blind regex let ``<!ENTITY a "<!--"> <!ENTITY x SYSTEM …> <!ENTITY b "-->">``
+    pass as one harmless entity while libxml2 saw the external one.
+    """
+    out = bytearray()
+    quote: int | None = None
+    i = 0
+    while i < len(subset):
+        ch = subset[i]
+        if quote is None and subset.startswith(b"<!--", i):
+            end = subset.find(b"-->", i + 4)
+            if end < 0:
+                raise SecurityError(DTD_REJECTED_MESSAGE)
+            i = end + 3
+            continue
+        if quote is None and ch in b"\"'":
+            quote = ch
+        elif ch == quote:
+            quote = None
+        out.append(ch)
+        i += 1
+    if quote is not None:
+        raise SecurityError(DTD_REJECTED_MESSAGE)
+    return bytes(out)
 
 
 def inspect_dtd(data: bytes) -> bool:
@@ -167,7 +195,7 @@ def inspect_dtd(data: bytes) -> bool:
     remainder = head[: match.start()] + head[match.end() :]
     if any(token in remainder.upper() for token in _DTD_TOKENS):
         raise SecurityError(DTD_REJECTED_MESSAGE)
-    subset = _COMMENT_RE.sub(b"", match.group("subset") or b"")
+    subset = _strip_comments(match.group("subset") or b"")
     declarations = 0
     pos = 0
     for decl in _DECL_RE.finditer(subset):
