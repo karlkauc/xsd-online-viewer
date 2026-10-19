@@ -17,3 +17,17 @@ FAMILY: tuple[tuple[str, str, str], ...] = (
     ("odata", "OData Viewer", "/go/odata-viewer"),
     ("desktop", "Desktop app", "/go/freexmltoolkit"),
 )
+
+# /guides lists these sections in this order (app/content/pages.py, _hub). A prefix
+# ending in "/" takes every page below it; pages in no section are not listed.
+# The single FundsXML release pages are linked from fundsxml/releases.
+HUB_INTRO = (
+    "Guides for reading XML Schemas: FundsXML releases and their changes, ISO 20022 messages, "
+    "diagrams, documentation, sample XML, embedding, and how the viewer compares."
+)
+HUB_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("FundsXML", ("fundsxml/releases",)),
+    ("Standards", ("standards/",)),
+    ("Features", ("features/",)),
+    ("Comparisons", ("alternatives/",)),
+)

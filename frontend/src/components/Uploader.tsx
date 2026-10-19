@@ -37,6 +37,16 @@ const MODE_LABELS: Record<Mode, string> = {
   releases: "FundsXML Releases",
 };
 
+// Server-rendered pages (backend/app/content); /guides lists all of them.
+const GUIDES: [string, string][] = [
+  ["/fundsxml/releases", "FundsXML releases and what changed"],
+  ["/standards/iso-20022", "ISO 20022 schemas (pain, camt, pacs)"],
+  ["/features/diagram", "XSD diagram online"],
+  ["/features/documentation", "HTML documentation from an XSD"],
+  ["/features/badge", "Embed a diagram, badge and bookmarklet"],
+  ["/guides", "All guides and resources →"],
+];
+
 export function Uploader() {
   const setSchema = useSelection((s) => s.setSchema);
   const [mode, setMode] = useState<Mode>(() => readModeFromPath());
@@ -412,6 +422,18 @@ export function Uploader() {
           "Schematron rules, XSLT and XProc, XML signatures, PDF — all offline",
         ]}
       />
+      <section className="mt-8 text-sm">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Guides</h3>
+        <ul className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
+          {GUIDES.map(([href, label]) => (
+            <li key={href}>
+              <a className="text-accent hover:underline" href={href}>
+                {label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
       <FamilyFooter className="mt-6 text-xs text-slate-500 dark:text-slate-400" />
     </div>
   );

@@ -11,7 +11,7 @@ from xml.sax.saxutils import escape as xml_escape
 from markdown_it import MarkdownIt
 
 from app.content import site
-from app.content.pages import FaqItem, Page
+from app.content.pages import HUB_SLUG, FaqItem, Page
 
 # Raw HTML stays off: page sources are ours, but escaping costs nothing and
 # keeps a stray "<" in a guide from turning into markup.
@@ -72,9 +72,25 @@ def family_html() -> str:
     return "Part of the FreeXmlToolkit family: " + " · ".join(parts)
 
 
+def _trail(page: Page) -> list[tuple[str, str]]:
+    """Site › Guides › page; the hub itself sits directly below the site."""
+    trail = [(site.SITE_NAME, "/")]
+    if page.slug != HUB_SLUG:
+        trail.append(("Guides", f"/{HUB_SLUG}"))
+    return [*trail, (page.h1, f"/{page.slug}")]
+
+
+def _crumbs_html(page: Page) -> str:
+    *links, (current, _) = _trail(page)
+    parts = [f'<a href="{html.escape(href)}">{html.escape(name)}</a>' for name, href in links]
+    return " › ".join([*parts, f"<span>{html.escape(current)}</span>"])
+
+
 def _breadcrumbs(page: Page, origin: str) -> dict:
-    items = [{"@type": "ListItem", "position": 1, "name": site.SITE_NAME, "item": origin + "/"}]
-    items.append({"@type": "ListItem", "position": 2, "name": page.h1, "item": f"{origin}/{page.slug}"})
+    items = [
+        {"@type": "ListItem", "position": i, "name": name, "item": origin + href}
+        for i, (name, href) in enumerate(_trail(page), start=1)
+    ]
     return {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": items}
 
 
@@ -110,6 +126,7 @@ def render_page(page: Page, origin: str) -> str:
         logo=site.LOGO_PATH,
         viewer=site.VIEWER_PATH,
         json_ld="\n".join(f'<script type="application/ld+json">\n{s}\n</script>' for s in scripts),
+        crumbs=_crumbs_html(page),
         h1=html.escape(page.h1),
         body=markdown(page.body),
         cta=cta,

@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
+from app.content import site
+
 CONTENT_DIR = Path(__file__).resolve().parent
 PAGES_DIR = CONTENT_DIR / "pages"
 FAQ_FILE = CONTENT_DIR / "faq.toml"
@@ -78,6 +80,34 @@ def register_provider(provider: PageProvider) -> None:
     all_pages.cache_clear()
 
 
+HUB_SLUG = "guides"
+
+
+def _in_section(slug: str, prefixes: tuple[str, ...]) -> bool:
+    return any(slug == p.rstrip("/") or (p.endswith("/") and slug.startswith(p)) for p in prefixes)
+
+
+def _hub(pages: dict[str, Page]) -> Page:
+    """/guides: every page listed in ``site.HUB_SECTIONS``, so the SPA needs one link, not a list."""
+    lines: list[str] = [site.HUB_INTRO, ""]
+    for heading, prefixes in site.HUB_SECTIONS:
+        members = [p for slug, p in pages.items() if not p.noindex and _in_section(slug, prefixes)]
+        if not members:
+            continue
+        lines += [f"## {heading}", ""]
+        lines += [f"- [{p.h1}](/{p.slug}) — {p.description}" for p in members]
+        lines.append("")
+    return Page(
+        slug=HUB_SLUG,
+        title=f"Guides and resources — {site.SITE_NAME}",
+        heading="Guides and resources",
+        description=site.HUB_INTRO,
+        body="\n".join(lines),
+        cta_label="Open the viewer",
+        cta_href=site.VIEWER_PATH,
+    )
+
+
 @lru_cache(maxsize=1)
 def all_pages() -> dict[str, Page]:
     pages: dict[str, Page] = {}
@@ -87,6 +117,7 @@ def all_pages() -> dict[str, Page]:
     for provider in _providers:
         for page in provider():
             pages.setdefault(page.slug, page)
+    pages.setdefault(HUB_SLUG, _hub(pages))
     return pages
 
 

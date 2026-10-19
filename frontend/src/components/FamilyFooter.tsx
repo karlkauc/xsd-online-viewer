@@ -30,7 +30,10 @@ export function FamilyFooter({ className }: { className?: string }) {
           )}
         </span>
       ))}
-      . Free, open source, no account, no ads.
+      . Free, open source, no account, no ads.{" "}
+      <a className="underline" href="/guides">
+        Guides and resources
+      </a>
     </p>
   );
 }

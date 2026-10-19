@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  fetchContentPages,
   ApiError,
   listFundsXmlReleases,
   type FundsXmlRelease,
@@ -35,6 +36,11 @@ function formatDate(iso: string): string {
 
 export function FundsXmlReleases({ onSelect, busy }: FundsXmlReleasesProps) {
   const [state, setState] = useState<ListState>({ kind: "loading" });
+  // Releases with a generated page (tools/build_fundsxml_pages.py); a newer one has none yet.
+  const [pages, setPages] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    void fetchContentPages().then(setPages);
+  }, []);
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
@@ -69,7 +75,10 @@ export function FundsXmlReleases({ onSelect, busy }: FundsXmlReleasesProps) {
           >
             fundsxml/schema
           </a>{" "}
-          GitHub repository. Click a row to load.
+          GitHub repository. Click a row to load.{" "}
+          <a href="/fundsxml/releases" className="text-accent hover:underline whitespace-nowrap">
+            What changed in each release →
+          </a>
         </p>
         {state.kind === "ready" && (
           <button
@@ -153,6 +162,17 @@ export function FundsXmlReleases({ onSelect, busy }: FundsXmlReleasesProps) {
                           rowSpan={release.assets.length}
                         >
                           {release.tag_name}
+                          {pages.has(`fundsxml/${release.tag_name}`) && (
+                            <a
+                              href={`/fundsxml/${release.tag_name}`}
+                              className="block font-sans text-xs text-accent hover:underline"
+                              title={`Structure of FundsXML ${release.tag_name} and its changes to the previous release`}
+                              onClick={(e) => e.stopPropagation()}
+                              onKeyDown={(e) => e.stopPropagation()}
+                            >
+                              changes
+                            </a>
+                          )}
                           {release.prerelease && (
                             <span className="ml-2 inline-block px-1.5 py-0.5 text-[10px] font-semibold uppercase rounded bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
                               pre-release

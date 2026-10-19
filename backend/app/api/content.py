@@ -7,7 +7,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from app.content.pages import home_faq
+from app.content.pages import all_pages, home_faq
 from app.content.render import markdown
 from app.rate_limit import WRITE_LIMIT, limiter
 
@@ -23,3 +23,11 @@ class FaqEntry(BaseModel):
 @limiter.limit(WRITE_LIMIT)
 async def faq(request: Request) -> list[FaqEntry]:
     return [FaqEntry(question=item.question, answer_html=markdown(item.answer)) for item in home_faq()]
+
+
+@router.get("/content/pages", response_model=list[str])
+@limiter.limit(WRITE_LIMIT)
+async def page_slugs(request: Request) -> list[str]:
+    """Slugs of the content pages, so the SPA links only to pages that exist
+    (e.g. a FundsXML release newer than the last page build has none yet)."""
+    return sorted(slug for slug, page in all_pages().items() if not page.noindex)

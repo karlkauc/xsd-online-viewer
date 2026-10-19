@@ -57,3 +57,27 @@ test("a blocked request explains itself instead of a bare HTTP 403", async ({ pa
   await page.getByRole("button", { name: /^(Parse|Load|View|Show)/ }).first().click();
   await expect(page.getByText(/blocked before it reached the XSD Viewer/)).toBeVisible();
 });
+
+test("the FundsXML releases tab and the landing page link to the release pages", async ({ page }) => {
+  await page.route("**/api/fundsxml/releases", (route) =>
+    route.fulfill({
+      json: {
+        releases: [
+          { tag_name: "4.2.11", name: "4.2.11", published_at: "2026-06-23T00:00:00Z", prerelease: false, html_url: "", assets: [{ filename: "FundsXML.xsd", download_url: "", size: 1, content_type: null }] },
+          { tag_name: "9.9.9", name: "9.9.9", published_at: "2026-10-01T00:00:00Z", prerelease: false, html_url: "", assets: [{ filename: "FundsXML.xsd", download_url: "", size: 1, content_type: null }] },
+        ],
+        cached_at: "2026-10-19T00:00:00Z",
+        ttl_seconds: 600,
+      },
+    }),
+  );
+  await page.goto("/fundsxml");
+  await expect(page.getByRole("link", { name: "What changed in each release →" })).toHaveAttribute("href", "/fundsxml/releases");
+  // A release with a generated page gets a link; one newer than the last page build does not.
+  await expect(page.getByRole("link", { name: "changes" })).toHaveCount(1);
+  await expect(page.getByRole("link", { name: "changes" })).toHaveAttribute("href", "/fundsxml/4.2.11");
+  await page.goto("/");
+  await page.getByRole("link", { name: "All guides and resources →" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Guides and resources" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /FundsXML schema releases/ })).toBeVisible();
+});

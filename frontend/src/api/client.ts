@@ -328,3 +328,14 @@ export async function fetchHealth(): Promise<HealthResponse> {
 export function pingShare(source: "url" | "fundsxml"): void {
   void fetch(`${API_BASE}/usage/share?source=${source}`, { method: "POST", keepalive: true }).catch(() => undefined);
 }
+
+let contentPages: Promise<Set<string>> | null = null;
+
+/** Slugs of the server-rendered pages (/fundsxml/4.2.11, /features/diagram …), fetched once. */
+export function fetchContentPages(): Promise<Set<string>> {
+  contentPages ??= fetch(`${API_BASE}/content/pages`)
+    .then((r) => (r.ok ? (r.json() as Promise<string[]>) : []))
+    .then((slugs) => new Set(slugs))
+    .catch(() => new Set<string>());
+  return contentPages;
+}
