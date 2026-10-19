@@ -14,6 +14,7 @@ class Settings:
     allowed_schema_hosts: tuple[re.Pattern[str], ...]
     schema_cache_ttl_min: int
     schema_cache_max_entries: int
+    cache_max_mb: int
     log_level: str
     static_dir: str
     fetch_timeout_seconds: float
@@ -72,6 +73,8 @@ def load_settings() -> Settings:
         allowed_schema_hosts=_parse_host_patterns(os.getenv("ALLOWED_SCHEMA_HOSTS", "")),
         schema_cache_ttl_min=int(os.getenv("SCHEMA_CACHE_TTL_MIN", "60")),
         schema_cache_max_entries=int(os.getenv("SCHEMA_CACHE_MAX_ENTRIES", "32")),
+        # Approximate memory budget; entry counts alone let a few huge documents fill RAM.
+        cache_max_mb=int(os.getenv("CACHE_MAX_MB", "256")),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         static_dir=os.getenv("STATIC_DIR", "/app/static"),
         fetch_timeout_seconds=float(os.getenv("FETCH_TIMEOUT_SECONDS", "10")),

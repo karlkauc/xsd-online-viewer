@@ -123,6 +123,12 @@ class TestHealth:
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
 
+    def test_api_responses_carry_security_headers(self, client: TestClient) -> None:
+        response = client.get("/api/health")
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert "sandbox" in response.headers["Content-Security-Policy"]
+        assert response.headers["Cache-Control"] == "no-store"
+
 
 class TestExport:
     def test_html_export(self, client: TestClient, simple_xsd_bytes: bytes) -> None:

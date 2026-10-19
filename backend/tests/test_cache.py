@@ -42,3 +42,17 @@ def test_least_recently_used_entry_is_evicted() -> None:
     cache.put("c", _model("c"))
     assert cache.get("b") is None
     assert cache.get("a") is not None and cache.get("c") is not None
+
+
+def test_byte_budget_evicts_the_oldest_entries() -> None:
+    cache = SchemaCache(max_entries=10, ttl_seconds=60, max_bytes=100)
+    cache.put("a", _model("a"), size=40)
+    cache.put("b", _model("b"), size=40)
+    cache.put("c", _model("c"), size=40)
+    assert cache.get("a") is None
+    assert cache.get("b") is not None and cache.get("c") is not None
+    # Replacing an entry does not count it twice; one oversized entry is still kept.
+    cache.put("c", _model("c"), size=40)
+    assert cache.get("b") is not None
+    cache.put("big", _model("big"), size=500)
+    assert len(cache) == 1 and cache.get("big") is not None

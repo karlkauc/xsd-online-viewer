@@ -183,7 +183,7 @@ def finalize_schema_response(model: SchemaModel) -> SchemaResponse:
     payload = model.model_dump_json().encode("utf-8")
     schema_id = hashlib.sha256(payload).hexdigest()[:32]
     model.schema_id = schema_id
-    schema_cache.put(schema_id, model)
+    schema_cache.put(schema_id, model, size=len(payload) * 2)
     logger.info(
         "schema parsed",
         extra={

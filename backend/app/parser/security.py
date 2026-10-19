@@ -237,19 +237,33 @@ def _host_is_allowed(host: str) -> bool:
     return any(pattern.search(host) for pattern in settings.allowed_schema_hosts)
 
 
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+# Globally routable by the registry but never a public web server: the old 6to4 relay anycast.
+_EXTRA_BLOCKED = (ipaddress.ip_network("192.88.99.0/24"),)
+
+
 def _ip_is_private(ip_text: str) -> bool:
+    """True unless ``ip_text`` is a globally routable unicast address.
+
+    An allowlist (``is_global``) instead of a list of private ranges: it also
+    covers 100.64.0.0/10 (carrier-grade NAT, where some clouds put their
+    metadata service), benchmarking and documentation ranges. IPv6 forms that
+    embed an IPv4 address (mapped, 6to4, NAT64) are judged by that address.
+    """
     try:
         ip = ipaddress.ip_address(ip_text)
     except ValueError:
         return True  # treat unparseable as unsafe
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_multicast
-        or ip.is_reserved
-        or ip.is_unspecified
-    )
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        elif ip.sixtofour is not None:
+            ip = ip.sixtofour
+        elif ip in _NAT64:
+            ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    if any(ip in net for net in _EXTRA_BLOCKED):
+        return True
+    return not ip.is_global or ip.is_multicast
 
 
 def _resolve_all_addrs(host: str) -> list[str]:
