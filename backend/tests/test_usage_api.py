@@ -40,7 +40,7 @@ def recorder() -> Iterator[ListRecorder]:
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app, headers={"user-agent": "pytest-browser", "referer": "https://ref.example/p?x=1"})
+    return TestClient(app, headers={"user-agent": "Mozilla/5.0 (pytest-browser)", "referer": "https://ref.example/p?x=1"})
 
 
 def test_upload_ok(client: TestClient, recorder: ListRecorder, simple_xsd_bytes: bytes) -> None:
@@ -52,7 +52,7 @@ def test_upload_ok(client: TestClient, recorder: ListRecorder, simple_xsd_bytes:
     assert ev.schema_name == "simple.xsd"
     assert ev.input_bytes == len(simple_xsd_bytes)
     assert ev.element_count and ev.file_count == 1 and ev.duration_ms is not None
-    assert ev.visitor_hash and ev.user_agent == "pytest-browser" and ev.device == "desktop"
+    assert ev.visitor_hash and ev.user_agent == "Mozilla/5.0 (pytest-browser)" and ev.device == "desktop"
     assert ev.referrer == "https://ref.example/p"
     assert recorder.drains == 1
 

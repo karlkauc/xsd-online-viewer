@@ -60,7 +60,7 @@ def make_store(fail: bool = False) -> tuple[FeedbackStore, FakeConn]:
 def client() -> Iterator[TestClient]:
     app.state.usage = UsageTracker(UsageRecorder("postgresql://fake"), geoip=None, hash_secret="s")
     try:
-        yield TestClient(app, headers={"user-agent": "pytest-browser"})
+        yield TestClient(app, headers={"user-agent": "Mozilla/5.0 (pytest-browser)"})
     finally:
         del app.state.usage
         if hasattr(app.state, "feedback"):
@@ -88,7 +88,7 @@ def test_submit_stores_row(client: TestClient) -> None:
     ((_, row),) = conn.rows
     assert row[:5] == ("Diagram is great", "a@b.co", "/url", None, "x")
     visitor, _country, ua, device, version = row[5:]
-    assert visitor and ua == "pytest-browser" and device == "desktop" and version
+    assert visitor and ua == "Mozilla/5.0 (pytest-browser)" and device == "desktop" and version
 
 
 def test_honeypot_is_dropped_silently(client: TestClient) -> None:

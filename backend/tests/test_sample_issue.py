@@ -451,7 +451,7 @@ def issues() -> Iterator[IssueRecorder]:
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app, headers={"user-agent": "pytest-browser"})
+    return TestClient(app, headers={"user-agent": "Mozilla/5.0 (pytest-browser)"})
 
 
 def _load(client: TestClient, xsd: bytes) -> str:

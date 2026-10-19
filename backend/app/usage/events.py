@@ -13,9 +13,13 @@ MAX_TEXT = 255
 
 _BOT_RE = re.compile(
     r"bot|crawl|spider|slurp|curl/|wget/|python-requests|python-httpx|aiohttp|go-http-client|"
-    r"headless|lighthouse|preview|facebookexternalhit|scrapy|java/|libwww|okhttp|monitor|uptime",
+    r"headless|lighthouse|preview|facebookexternalhit|scrapy|java/|libwww|okhttp|monitor|uptime|"
+    r"scan|check|validat|radar|probe|googleother|lead-research",
     re.IGNORECASE,
 )
+# Scanners like to pose as long-gone browsers (Chrome 33, Firefox 21); real visitors are far newer.
+_ENGINE_VERSION_RE = re.compile(r"\b(?:Chrome|Firefox)/(\d+)")
+_MIN_ENGINE_VERSION = 100
 _MOBILE_RE = re.compile(r"Mobile|Android|iPhone|iPad|iPod|Windows Phone|Opera Mini", re.IGNORECASE)
 
 
@@ -84,7 +88,11 @@ def visitor_hash(ip: str | None, user_agent: str | None, day: date, secret: str)
 def classify_device(user_agent: str | None) -> str:
     if not user_agent or not user_agent.strip():
         return "unknown"
-    if _BOT_RE.search(user_agent):
+    # Every real browser sends "Mozilla/5.0 (…"; bare tool names are scripts and probes.
+    if not user_agent.startswith("Mozilla/") or _BOT_RE.search(user_agent):
+        return "bot"
+    engine = _ENGINE_VERSION_RE.search(user_agent)
+    if engine and int(engine.group(1)) < _MIN_ENGINE_VERSION:
         return "bot"
     if _MOBILE_RE.search(user_agent):
         return "mobile"

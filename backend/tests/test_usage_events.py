@@ -43,6 +43,21 @@ class TestDevice:
         assert classify_device("Mozilla/5.0 (compatible; Googlebot/2.1)") == "bot"
         assert classify_device("curl/8.4.0") == "bot"
         assert classify_device("python-requests/2.32") == "bot"
+        assert classify_device("Mozilla/5.0 (Windows NT 10.0) Chrome/138.0.0.0 Safari/537.36") == "desktop"
+        assert classify_device("Mozilla/5.0 (Windows NT 6.1) Chrome/109.0.0.0 Safari/537.36") == "desktop"
+
+    def test_scanners_posing_as_browsers(self) -> None:
+        for ua in (
+            "Mozilla/5.0 (compatible; intex-v2-check/0.1)",
+            "CoinCreatorScanner/1.0 (new-zones node; +https://tx.coincreator.io)",
+            "nameserver-checker-http-validator/1.0",
+            "siteradar/0.1-contact:ops@example.org",
+            "GoogleOther",
+            "Mozilla/5.0 (compatible; ShinkiHPBot/1.0; +lead-research)",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_2) Chrome/33.0.1750.152 Safari/537.36",
+            "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:21.0) Gecko/20130331 Firefox/21.0",
+        ):
+            assert classify_device(ua) == "bot", ua
         assert classify_device("") == "unknown"
         assert classify_device(None) == "unknown"
 
