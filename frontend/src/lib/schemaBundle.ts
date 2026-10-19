@@ -1,4 +1,4 @@
-import { ApiError } from "../api/client";
+import { errorFromResponse } from "../api/client";
 import { withSchemaRetry } from "./schemaSession";
 import type { HandoffSchema } from "./xmlViewerHandoff";
 
@@ -16,14 +16,7 @@ export async function fetchSchemaBundle(): Promise<HandoffSchema> {
   return withSchemaRetry(async (schemaId) => {
     const response = await fetch(exportBundleUrl(schemaId));
     if (!response.ok) {
-      let detail = `HTTP ${response.status}`;
-      try {
-        const body = await response.json();
-        if (typeof body?.detail === "string") detail = body.detail;
-      } catch {
-        // keep the status line
-      }
-      throw new ApiError(detail, response.status);
+      throw await errorFromResponse(response);
     }
     const content = await response.arrayBuffer();
     const name = filenameFromDisposition(response.headers.get("content-disposition")) ?? "schema.xsd";

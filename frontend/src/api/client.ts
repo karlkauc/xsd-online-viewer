@@ -8,16 +8,35 @@ export class ApiError extends Error {
   }
 }
 
+// A 403/407 without our JSON error body never came from this app (it has no
+// such responses): a corporate proxy, firewall or WAF refused the request.
+// Saying so beats a bare "HTTP 403" (GitHub issue #1).
+const BLOCKED_STATUSES = new Set([403, 407]);
+
+export function blockedMessage(status: number): string {
+  return (
+    `The request was blocked before it reached the XSD Viewer (HTTP ${status}). ` +
+    "A proxy, firewall or security filter on your network probably refused it — " +
+    "try another network, or run the viewer yourself with Docker (see the GitHub README)."
+  );
+}
+
+/** ApiError for a failed response: the backend's `detail`, or what the status means. */
+export async function errorFromResponse(response: Response): Promise<ApiError> {
+  let detail: string | null = null;
+  try {
+    const body = await response.json();
+    if (typeof body?.detail === "string") detail = body.detail;
+  } catch {
+    // not our JSON: an intermediary answered, or the body was empty
+  }
+  if (detail === null) detail = BLOCKED_STATUSES.has(response.status) ? blockedMessage(response.status) : `HTTP ${response.status}`;
+  return new ApiError(detail, response.status);
+}
+
 async function handle(response: Response): Promise<SchemaResponse> {
   if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const body = await response.json();
-      if (typeof body?.detail === "string") detail = body.detail;
-    } catch {
-      // ignore parse errors; fall back to status
-    }
-    throw new ApiError(detail, response.status);
+    throw await errorFromResponse(response);
   }
   return (await response.json()) as SchemaResponse;
 }
@@ -106,28 +125,14 @@ export async function loadSchemaFromRelease(
 export async function listFundsXmlReleases(): Promise<FundsXmlReleasesResponse> {
   const response = await fetch(`${API_BASE}/fundsxml/releases`);
   if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const body = await response.json();
-      if (typeof body?.detail === "string") detail = body.detail;
-    } catch {
-      // ignore parse errors
-    }
-    throw new ApiError(detail, response.status);
+    throw await errorFromResponse(response);
   }
   return (await response.json()) as FundsXmlReleasesResponse;
 }
 
 async function handleJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const body = await response.json();
-      if (typeof body?.detail === "string") detail = body.detail;
-    } catch {
-      // ignore parse errors; fall back to status
-    }
-    throw new ApiError(detail, response.status);
+    throw await errorFromResponse(response);
   }
   return (await response.json()) as T;
 }
@@ -269,14 +274,7 @@ export async function fetchSampleXml(
   if (options.repeat && options.repeat > 1) params.set("repeat", String(options.repeat));
   const response = await fetch(`${API_BASE}/schema/${schemaId}/sample?${params.toString()}`);
   if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const body = await response.json();
-      if (typeof body?.detail === "string") detail = body.detail;
-    } catch {
-      // ignore parse errors; fall back to status
-    }
-    throw new ApiError(detail, response.status);
+    throw await errorFromResponse(response);
   }
   return {
     xml: await response.text(),
@@ -311,14 +309,7 @@ export async function sendFeedback(payload: FeedbackPayload): Promise<void> {
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
-    try {
-      const body = await response.json();
-      if (typeof body?.detail === "string") detail = body.detail;
-    } catch {
-      // ignore
-    }
-    throw new ApiError(detail, response.status);
+    throw await errorFromResponse(response);
   }
 }
 
@@ -329,6 +320,11 @@ export interface HealthResponse {
 
 export async function fetchHealth(): Promise<HealthResponse> {
   const response = await fetch(`${API_BASE}/health`);
-  if (!response.ok) throw new ApiError(`HTTP ${response.status}`, response.status);
+  if (!response.ok) throw await errorFromResponse(response);
   return (await response.json()) as HealthResponse;
+}
+
+/** Count a copied share link (the copy itself never reaches the server). Fire and forget. */
+export function pingShare(source: "url" | "fundsxml"): void {
+  void fetch(`${API_BASE}/usage/share?source=${source}`, { method: "POST", keepalive: true }).catch(() => undefined);
 }

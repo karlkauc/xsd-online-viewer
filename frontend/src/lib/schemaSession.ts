@@ -7,7 +7,7 @@
  * back unchanged — and retry the call. Twice at most: the reload and the
  * retry can land on different instances.
  */
-import { ApiError } from "../api/client";
+import { ApiError, errorFromResponse } from "../api/client";
 import { useSelection } from "../stores/selectionStore";
 import { reloadSource } from "./schemaSource";
 
@@ -54,14 +54,7 @@ export async function downloadSchemaExport(
   const blob = await withSchemaRetry(async (schemaId) => {
     const response = await fetch(pathFor(schemaId));
     if (!response.ok) {
-      let detail = `HTTP ${response.status}`;
-      try {
-        const body = await response.json();
-        if (typeof body?.detail === "string") detail = body.detail;
-      } catch {
-        // fall back to the status line
-      }
-      throw new ApiError(detail, response.status);
+      throw await errorFromResponse(response);
     }
     return response.blob();
   });
