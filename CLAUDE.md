@@ -63,7 +63,8 @@ cd frontend && npm ci && npm run dev
   For local testing only; **not** what the public site serves.
 - **Public site** — **https://www.xsd-viewer.online/**, served by Google
   Cloud Run service `xsdviewer` in project `xsd-viewer-495407`, region
-  `europe-west1`. Redeploy from the repo root — Cloud Build rebuilds
+  `europe-west1`. The apex `xsd-viewer.online` is mapped too; `main.py` redirects it to
+  `SITE_ORIGIN` (301 for GET/HEAD, 308 otherwise). Redeploy from the repo root — Cloud Build rebuilds
   from the `Dockerfile`, creates a new revision, and shifts 100 % traffic;
   existing service config (env vars, memory, scaling) is retained.
 

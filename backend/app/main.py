@@ -7,10 +7,11 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -23,7 +24,7 @@ from app.api.schema import router as schema_router
 from app.config import settings
 from app.logging_setup import configure_logging, new_request_id, request_id_var
 from app.rate_limit import limiter
-from app.spa import mount_spa
+from app.spa import SITE_ORIGIN, mount_spa
 from app.usage.context import RequestUsage, UsageTracker, bind, unbind
 from app.usage.feedback import FeedbackStore
 from app.usage.geoip import GeoIp
@@ -194,6 +195,25 @@ async def request_logging(request: Request, call_next):
     )
     response.headers["X-Request-ID"] = rid
     return response
+
+
+# The bare domain is mapped to the same Cloud Run service; send it to the
+# canonical www origin so visitors, links and the usage stats see one host.
+# Registered last, so it runs before body buffering and usage tracking.
+_site = urlsplit(SITE_ORIGIN)
+_apex_host = _site.hostname[4:] if _site.hostname and _site.hostname.startswith("www.") else None
+
+
+@app.middleware("http")
+async def redirect_apex_to_www(request: Request, call_next):
+    if _apex_host and request.headers.get("host", "").lower() == _apex_host:
+        target = SITE_ORIGIN + request.url.path
+        if request.url.query:
+            target += "?" + request.url.query
+        # 308 keeps method and body for API calls; plain page loads get the classic 301.
+        status = 301 if request.method in ("GET", "HEAD") else 308
+        return RedirectResponse(target, status_code=status)
+    return await call_next(request)
 
 
 @app.get("/api/health")
