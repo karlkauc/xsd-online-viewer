@@ -17,6 +17,7 @@ import ipaddress
 import logging
 import re
 import socket
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -259,22 +260,51 @@ def _resolve_all_addrs(host: str) -> list[str]:
     return list({info[4][0] for info in infos})
 
 
-def _verify_url(url: str) -> None:
+def _verify_url(url: str) -> tuple[str, list[str]]:
+    """Validate ``url`` (scheme, host allowlist, no private IPs) and return
+    ``(host, pinned_ips)``: the host's currently resolved public addresses,
+    IPv4 first. The fetcher connects to *those* IPs, so a DNS answer that
+    changes between this check and the connection (rebinding) cannot point the
+    request at a private address."""
     parsed = httpx.URL(url)
     if parsed.scheme not in ("http", "https"):
         raise SecurityError(f"only http(s) schemes are permitted; got {parsed.scheme!r}")
     host = parsed.host
     if not host:
         raise SecurityError(f"URL has no host: {url!r}")
+    if parsed.userinfo:
+        raise SecurityError("URLs with a user name or password are not supported")
     if not _host_is_allowed(host):
         raise SecurityError(
             f"host {host!r} is not on ALLOWED_SCHEMA_HOSTS lockdown whitelist"
         )
-    for addr in _resolve_all_addrs(host):
+    addrs = _resolve_all_addrs(host)
+    for addr in addrs:
         if _ip_is_private(addr):
             raise SecurityError(
                 f"host {host!r} resolves to a private/loopback address ({addr}); refusing to fetch"
             )
+    if not addrs:
+        raise SecurityError(f"host {host!r} did not resolve to any address")
+    addrs.sort(key=lambda a: ":" in a)
+    return host, addrs
+
+
+def _read_capped(response: httpx.Response, deadline: float) -> bytes:
+    """Read a streamed body, aborting at the size cap (before it is all in
+    memory) or at ``deadline`` (a server dripping bytes resets httpx's
+    per-read timeout forever)."""
+    cap = settings.fetch_max_response_bytes
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_bytes():
+        total += len(chunk)
+        if total > cap:
+            raise SecurityError(f"response exceeds {settings.fetch_max_response_mb} MB cap")
+        if time.monotonic() > deadline:
+            raise FetchError("the server is too slow; giving up")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _http_failure_message(url: str, status_code: int) -> str:
@@ -292,9 +322,9 @@ def fetch_schema_url(url: str) -> FetchedResource:
     form first (see ``urls.normalize_schema_url``).
     """
     url = normalize_schema_url(url)
-    _verify_url(url)
     remaining_redirects = settings.fetch_max_redirects
     current = url
+    deadline = time.monotonic() + settings.fetch_deadline_seconds
     with httpx.Client(
         follow_redirects=False,
         timeout=settings.fetch_timeout_seconds,
@@ -302,38 +332,52 @@ def fetch_schema_url(url: str) -> FetchedResource:
         headers=FETCH_HEADERS,
     ) as client:
         while True:
-            try:
-                response = client.get(current)
-            except httpx.HTTPError as exc:
-                raise FetchError(f"fetching {current!r} failed: {exc}") from exc
-            if response.is_redirect:
-                if remaining_redirects <= 0:
-                    raise SecurityError("too many HTTP redirects")
-                remaining_redirects -= 1
-                target = response.headers.get("location")
-                if not target:
-                    raise SecurityError("redirect without Location header")
-                current = str(httpx.URL(current).join(target))
-                _verify_url(current)
-                continue
-            if response.status_code >= 400:
-                raise FetchError(_http_failure_message(current, response.status_code))
-            content = response.content
-            if len(content) > settings.fetch_max_response_bytes:
-                raise SecurityError(
-                    f"response from {current!r} exceeds "
-                    f"{settings.fetch_max_response_mb} MB cap"
+            host, pinned_ips = _verify_url(current)
+            parsed = httpx.URL(current)
+            # Connect to the validated IPs (the next one on a connect failure),
+            # keeping the Host header and TLS SNI / certificate check on the name.
+            stream = None
+            for i, pinned_ip in enumerate(pinned_ips):
+                stream = client.stream(
+                    "GET",
+                    parsed.copy_with(host=pinned_ip),
+                    headers={"Host": parsed.netloc.decode("ascii")},
+                    extensions={"sni_hostname": host},
                 )
+                try:
+                    response = stream.__enter__()
+                    break
+                except httpx.ConnectError as exc:
+                    if i == len(pinned_ips) - 1:
+                        raise FetchError(f"fetching {current!r} failed: {exc}") from exc
+                except httpx.HTTPError as exc:
+                    raise FetchError(f"fetching {current!r} failed: {exc}") from exc
+            assert stream is not None
+            try:
+                if response.is_redirect:
+                    if remaining_redirects <= 0:
+                        raise SecurityError("too many HTTP redirects")
+                    remaining_redirects -= 1
+                    target = response.headers.get("location")
+                    if not target:
+                        raise SecurityError("redirect without Location header")
+                    current = str(httpx.URL(current).join(target))
+                    continue
+                if response.status_code >= 400:
+                    raise FetchError(_http_failure_message(current, response.status_code))
+                try:
+                    content = _read_capped(response, deadline)
+                except httpx.HTTPError as exc:
+                    raise FetchError(f"fetching {current!r} failed: {exc}") from exc
+                content_type = response.headers.get("content-type")
+            finally:
+                stream.__exit__(None, None, None)
             logger.info(
                 "fetched remote schema",
                 extra={
                     "ctx_url": current,
                     "ctx_size_bytes": len(content),
-                    "ctx_content_type": response.headers.get("content-type"),
+                    "ctx_content_type": content_type,
                 },
             )
-            return FetchedResource(
-                url=current,
-                content=content,
-                content_type=response.headers.get("content-type"),
-            )
+            return FetchedResource(url=current, content=content, content_type=content_type)

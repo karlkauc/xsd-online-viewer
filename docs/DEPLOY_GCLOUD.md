@@ -8,7 +8,8 @@ Diese Anleitung beschreibt, wie der XSD-Viewer-Container auf
 
 Cloud Run passt zu diesem Container, weil er **stateless** ist (in-memory
 Cache), bereits auf `$PORT` hört (`backend/app/config.py`) und proxy-aware
-gestartet wird (`Dockerfile`, `--proxy-headers --forwarded-allow-ips=*`).
+ist (`app.rate_limit.client_ip` nimmt den vom Proxy angehängten
+`X-Forwarded-For`-Eintrag, `TRUSTED_PROXY_HOPS`).
 Der Service skaliert auf Null, sodass im Idle-Betrieb keine Kosten
 anfallen.
 

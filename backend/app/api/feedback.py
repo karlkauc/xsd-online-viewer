@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app import release_version
-from app.rate_limit import limiter
+from app.rate_limit import client_ip, limiter
 from app.usage.context import current
 from app.usage.events import classify_device, truncate, visitor_hash
 from app.usage.feedback import FeedbackRow, FeedbackStore
@@ -46,7 +46,7 @@ async def submit_feedback(request: Request, payload: FeedbackPayload) -> Respons
 
     ctx = current()
     ua = ctx.user_agent if ctx else request.headers.get("user-agent")
-    ip = ctx.ip if ctx else (request.client.host if request.client else None)
+    ip = ctx.ip if ctx else client_ip(request)
     tracker = ctx.tracker if ctx else None
     row = FeedbackRow(
         message=message,

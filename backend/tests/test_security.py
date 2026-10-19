@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import httpx
 import pytest
 from lxml import etree
 
@@ -176,7 +177,7 @@ class TestFetchBehaviour:
     def _no_dns(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from app.parser import security as sec_module
 
-        monkeypatch.setattr(sec_module, "_verify_url", lambda url: None)
+        monkeypatch.setattr(sec_module, "_verify_url", lambda url: (httpx.URL(url).host, ["203.0.113.10"]))
 
     def _mock(self, monkeypatch: pytest.MonkeyPatch, handler) -> None:
         import httpx
@@ -234,6 +235,38 @@ class TestFetchBehaviour:
         with pytest.raises(FetchError, match=r"fetching 'https://example.org/slow.xsd' failed: .*timed out"):
             fetch_schema_url("https://example.org/slow.xsd")
         assert issubclass(FetchError, SecurityError)
+
+
+    def test_connects_to_the_validated_ip_keeping_the_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen: list[tuple[str, str]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append((request.url.host, request.headers["host"]))
+            return httpx.Response(200, content=self.XSD)
+
+        self._mock(monkeypatch, handler)
+        fetch_schema_url("https://example.org/a.xsd")
+        # A rebinding DNS answer after the check cannot redirect the connection.
+        assert seen == [("203.0.113.10", "example.org")]
+
+    def test_oversized_and_dripping_responses_are_cut_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.config import settings
+
+        self._mock(monkeypatch, lambda request: httpx.Response(200, content=iter([b"<x", b"/>"])))
+        monkeypatch.setattr(settings, "fetch_deadline_seconds", -1)
+        with pytest.raises(SecurityError, match="too slow"):
+            fetch_schema_url("https://example.org/a.xsd")
+        monkeypatch.setattr(settings, "fetch_deadline_seconds", 60)
+        monkeypatch.setattr(settings, "fetch_max_response_mb", 0)
+        with pytest.raises(SecurityError, match="cap"):
+            fetch_schema_url("https://example.org/a.xsd")
+
+
+def test_schema_urls_with_userinfo_are_refused() -> None:
+    from app.parser.security import _verify_url
+
+    with pytest.raises(SecurityError, match="user name or password"):
+        _verify_url("https://u:p@example.org/a.xsd")
 
 
 SPLIT_COMMENT_SUBSET = '<!ENTITY a "<!--"><!ENTITY x SYSTEM "file://{path}"><!ENTITY b "-->">'

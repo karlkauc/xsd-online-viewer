@@ -172,7 +172,7 @@ def _mock_fetch_transport(monkeypatch: pytest.MonkeyPatch, handler) -> None:
 
     from app.parser import security as sec_module
 
-    monkeypatch.setattr(sec_module, "_verify_url", lambda url: None)
+    monkeypatch.setattr(sec_module, "_verify_url", lambda url: (httpx.URL(url).host, ["203.0.113.10"]))
     transport = httpx.MockTransport(handler)
     real_client = httpx.Client
     monkeypatch.setattr(sec_module.httpx, "Client", lambda **kw: real_client(transport=transport, **kw))

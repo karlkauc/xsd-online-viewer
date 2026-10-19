@@ -55,4 +55,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     r=urllib.request.urlopen('http://127.0.0.1:'+str(__import__('os').environ.get('PORT','8080'))+'/api/health',timeout=3); \
     sys.exit(0 if r.status==200 else 1)" || exit 1
 
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips=*"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]

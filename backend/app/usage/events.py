@@ -128,7 +128,9 @@ def schema_display_name(source: str, name: str | None) -> str | None:
             parts = urlsplit(name)
         except ValueError:
             return truncate(name)
-        return truncate(urlunsplit((parts.scheme, parts.netloc, parts.path, "", "")))
+        # Never user:password@ — a pasted URL may carry credentials.
+        host = parts.netloc.rpartition("@")[2]
+        return truncate(urlunsplit((parts.scheme, host, parts.path, "", "")))
     if source in ("upload", "text"):
         return truncate(re.split(r"[\\/]", name)[-1])
     return truncate(name)

@@ -90,6 +90,10 @@ class TestSchemaName:
             == "https://h.example/x/y.xsd"
         )
 
+    def test_url_drops_credentials(self) -> None:
+        name = schema_display_name("url", "https://bob:s3cret@h.example:8443/x.xsd")
+        assert name == "https://h.example:8443/x.xsd"
+
     def test_release_and_empty(self) -> None:
         assert schema_display_name("release", "v4.2.2/FundsXML4.xsd") == "v4.2.2/FundsXML4.xsd"
         assert schema_display_name("upload", "") is None
