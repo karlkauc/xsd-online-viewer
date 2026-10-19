@@ -66,12 +66,15 @@ export interface HandoffOptions {
  * Open the XML viewer and hand `file` over once it reports ready.
  * Resolves `true` when the file was posted, `false` when the popup was blocked
  * or never answered (the tab stays open; the user can upload manually).
+ *
+ * With `file` null only the schema travels (`xml-viewer:schema`): the XML
+ * viewer loads it and waits for the visitor's document.
  */
-export async function openInXmlViewer(file: File, opts: HandoffOptions = {}): Promise<boolean> {
+export async function openInXmlViewer(file: File | null, opts: HandoffOptions = {}): Promise<boolean> {
   const target = opts.target ?? handoffUrl();
   const timeoutMs = opts.timeoutMs ?? HANDOFF_TIMEOUT_MS;
   // Read before opening so a slow disk cannot delay the reply.
-  const content = await file.arrayBuffer();
+  const content = file ? await file.arrayBuffer() : null;
 
   const popup = window.open(target, "_blank");
   if (!popup) return false;
@@ -96,6 +99,11 @@ export async function openInXmlViewer(file: File, opts: HandoffOptions = {}): Pr
       if (!data || data.type !== "xml-viewer:ready") return;
       answered = true;
       void schemaPromise.then((schema) => {
+        if (!file || !content) {
+          if (!schema) return finish(false);
+          popup.postMessage({ type: "xml-viewer:schema", schema }, targetOrigin, [schema.content]);
+          return finish(true);
+        }
         const message = schema
           ? { type: "xml-viewer:file", name: file.name, content, schema }
           : { type: "xml-viewer:file", name: file.name, content };

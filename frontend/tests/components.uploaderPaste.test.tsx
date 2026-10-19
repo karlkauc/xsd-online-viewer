@@ -28,7 +28,7 @@ describe("Uploader with pasted text", () => {
     await userEvent.click(screen.getByRole("button", { name: "Parse" }));
     await userEvent.click(await screen.findByRole("button", { name: /Open in XML Viewer/ }));
 
-    const sent = open.mock.calls[0][0];
+    const sent = open.mock.calls[0][0] as File;
     expect(sent.name).toBe("pasted.xml");
     await expect(sent.text()).resolves.toBe("<games/>");
   });

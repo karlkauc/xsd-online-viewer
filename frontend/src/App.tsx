@@ -24,6 +24,8 @@ import { useSelection, type ViewTab } from "./stores/selectionStore";
 import { exportHtmlUrl, fetchSchemaCheck, pingShare } from "./api/client";
 import { downloadSchemaExport } from "./lib/schemaSession";
 import { isShareable, shareLink } from "./lib/schemaSource";
+import { fetchSchemaBundle } from "./lib/schemaBundle";
+import { HANDOFF_UNSUPPORTED_HINT, handoffSupported, openInXmlViewer } from "./lib/xmlViewerHandoff";
 import { useCopy } from "./lib/useCopy";
 import { readHashSelection, writeHashSelection } from "./lib/deepLink";
 import { API_DOCS_DESCRIPTION, API_DOCS_PATH, API_DOCS_TITLE, isApiDocsRoute } from "./lib/modeRoute";
@@ -221,6 +223,19 @@ export default function App() {
               onClick: () => {
                 void copyLink(shareLink(source));
                 if (source && isShareable(source)) pingShare(source.kind === "release" ? "fundsxml" : "url");
+              },
+            },
+            {
+              key: "validate-xml",
+              label: "Validate XML ↗",
+              title: "Open the XML Viewer with this schema loaded and validate an XML document against it",
+              ariaLabel: "Validate an XML file against this schema in the XML Viewer",
+              onClick: () => {
+                if (!handoffSupported()) {
+                  window.alert(HANDOFF_UNSUPPORTED_HINT);
+                  return;
+                }
+                void openInXmlViewer(null, { schema: fetchSchemaBundle });
               },
             },
             {
