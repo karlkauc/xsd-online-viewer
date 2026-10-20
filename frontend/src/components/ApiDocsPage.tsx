@@ -459,7 +459,7 @@ sys.exit(0 if report["is_valid"] else 1)`}</Pre>
             ],
             [
               "Fetch by URL",
-              <span className="font-mono tabular-nums whitespace-nowrap">10 MB · 10 s · 3 redirects</span>,
+              <span className="font-mono tabular-nums whitespace-nowrap">32 MB · 10 s · 3 redirects</span>,
               <>
                 For <Code>/schema/url</Code> and <Code>/validate/url</Code>. Only <Code>http</Code>/
                 <Code>https</Code>, no private or loopback addresses. Exceeding any of these →{" "}
@@ -534,7 +534,7 @@ sys.exit(0 if report["is_valid"] else 1)`}</Pre>
             [
               <span className="font-mono">400</span>,
               <>
-                URL rejected (not http/https, private address, &gt; 3 redirects, &gt; 10 MB, &gt; 10 s) or
+                URL rejected (not http/https, private address, &gt; 3 redirects, &gt; 32 MB, &gt; 10 s) or
                 unsafe XML (external entities)
               </>,
               "Upload the file instead / remove the DOCTYPE",

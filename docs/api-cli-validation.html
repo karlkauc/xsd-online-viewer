@@ -317,7 +317,7 @@ sys.exit(0 if report["is_valid"] else 1)</code></pre>
   <div class="tbl"><table>
     <tr><th>Limit</th><th>Wert</th><th>Details</th></tr>
     <tr><td>Upload-Größe (XSD, Zip, XML)</td><td class="num">32 MB</td><td>Harte Grenze des Cloud-Run-Loadbalancers; das Backend lehnt darüber mit <code>413</code> ab. Gilt pro Request, also auch für den XML-Body bei <code>/validate/text</code> (UTF-8-kodiert). (<code>MAX_UPLOAD_MB</code>, Default 50)</td></tr>
-    <tr><td>Abruf per URL</td><td class="num">10 MB · 10 s · 3 Redirects</td><td>Bei <code>/schema/url</code> und <code>/validate/url</code>: max. 10 MB Antwort, 10 s Verbindungs-/Lese-Timeout, höchstens 3 Weiterleitungen. Nur <code>http</code>/<code>https</code>, keine privaten/lokalen Adressen. Überschreitung → <code>400</code>. (<code>FETCH_MAX_RESPONSE_MB</code>, <code>FETCH_TIMEOUT_SECONDS</code>, <code>FETCH_MAX_REDIRECTS</code>)</td></tr>
+    <tr><td>Abruf per URL</td><td class="num">32 MB · 10 s · 3 Redirects</td><td>Bei <code>/schema/url</code> und <code>/validate/url</code>: max. 32 MB Antwort, 10 s Verbindungs-/Lese-Timeout, höchstens 3 Weiterleitungen. Nur <code>http</code>/<code>https</code>, keine privaten/lokalen Adressen. Überschreitung → <code>400</code>. (<code>FETCH_MAX_RESPONSE_MB</code>, <code>FETCH_TIMEOUT_SECONDS</code>, <code>FETCH_MAX_REDIRECTS</code>)</td></tr>
     <tr><td>Request-Timeout</td><td class="num">60 s</td><td>Cloud Run bricht Anfragen nach 60 s ab (HTTP 504). Parsen und Validieren dauern normalerweise deutlich unter 1 s (gemessen: ~0,2 s pro Request für ein kleines Schema); sehr große Schemata mit vielen Includes können mehrere Sekunden brauchen. Beim ersten Request nach Inaktivität kommt ein Kaltstart von 1–3 s hinzu.</td></tr>
     <tr><td>Rate-Limit</td><td class="num">30 Requests / Minute</td><td>Pro Client-IP, für alle schreibenden Endpunkte zusammen (<code>/schema/upload|url|text</code> und alle <code>/validate/*</code>). Darüber <code>429</code>. Bei Batch-Läufen: <code>schema_id</code> wiederverwenden und ggf. <code>sleep 2</code> zwischen Validierungen.</td></tr>
     <tr><td>Gültigkeit der <code>schema_id</code></td><td class="num">60 min · 32 Einträge</td><td>Der Schema-Cache ist ein In-Memory-LRU pro Server-Instanz: Einträge verfallen 60 min nach dem Laden, und bei mehr als 32 gecachten Schemata fliegt das älteste raus. (<code>SCHEMA_CACHE_TTL_MIN</code>, <code>SCHEMA_CACHE_MAX_ENTRIES</code>)</td></tr>
@@ -340,7 +340,7 @@ sys.exit(0 if report["is_valid"] else 1)</code></pre>
   <div class="tbl"><table>
     <tr><th>HTTP</th><th>Ursache</th><th>Abhilfe</th></tr>
     <tr><td class="num">200</td><td>Validierung durchgeführt (Ergebnis in <code>is_valid</code>)</td><td>–</td></tr>
-    <tr><td class="num">400</td><td>URL abgelehnt (kein http/https, private Adresse, &gt; 3 Redirects, &gt; 10 MB, &gt; 10 s) oder unsicheres XML (z. B. externe Entities)</td><td>Datei stattdessen hochladen</td></tr>
+    <tr><td class="num">400</td><td>URL abgelehnt (kein http/https, private Adresse, &gt; 3 Redirects, &gt; 32 MB, &gt; 10 s) oder unsicheres XML (z. B. externe Entities)</td><td>Datei stattdessen hochladen</td></tr>
     <tr><td class="num">404</td><td><code>schema_id</code> unbekannt oder abgelaufen</td><td>Schritt 1 wiederholen</td></tr>
     <tr><td class="num">413</td><td>Datei zu groß (&gt; 32 MB)</td><td>Datei verkleinern / aufteilen</td></tr>
     <tr><td class="num">422</td><td>XSD konnte nicht zum Validator kompiliert werden (z. B. fehlende Imports)</td><td>Vollständiges Zip mit allen Imports hochladen</td></tr>
@@ -578,7 +578,7 @@ sys.exit(0 if report["is_valid"] else 1)</code></pre>
   <div class="tbl"><table>
     <tr><th>Limit</th><th>Value</th><th>Details</th></tr>
     <tr><td>Upload size (XSD, zip, XML)</td><td class="num">32 MB</td><td>Hard limit of the Cloud Run load balancer; the backend rejects anything larger with <code>413</code>. Applies per request, so also to the XML body of <code>/validate/text</code> (UTF-8 encoded). (<code>MAX_UPLOAD_MB</code>, default 50)</td></tr>
-    <tr><td>Fetch by URL</td><td class="num">10 MB · 10 s · 3 redirects</td><td>For <code>/schema/url</code> and <code>/validate/url</code>: max. 10 MB response, 10 s connect/read timeout, at most 3 redirects. Only <code>http</code>/<code>https</code>, no private/local addresses. Exceeding any of these → <code>400</code>. (<code>FETCH_MAX_RESPONSE_MB</code>, <code>FETCH_TIMEOUT_SECONDS</code>, <code>FETCH_MAX_REDIRECTS</code>)</td></tr>
+    <tr><td>Fetch by URL</td><td class="num">32 MB · 10 s · 3 redirects</td><td>For <code>/schema/url</code> and <code>/validate/url</code>: max. 32 MB response, 10 s connect/read timeout, at most 3 redirects. Only <code>http</code>/<code>https</code>, no private/local addresses. Exceeding any of these → <code>400</code>. (<code>FETCH_MAX_RESPONSE_MB</code>, <code>FETCH_TIMEOUT_SECONDS</code>, <code>FETCH_MAX_REDIRECTS</code>)</td></tr>
     <tr><td>Request timeout</td><td class="num">60 s</td><td>Cloud Run aborts requests after 60 s (HTTP 504). Parsing and validation normally finish well under 1 s (measured: ~0.2 s per request for a small schema); very large schemas with many includes can take several seconds. The first request after a period of inactivity adds a 1–3 s cold start.</td></tr>
     <tr><td>Rate limit</td><td class="num">30 requests / minute</td><td>Per client IP, shared by all write endpoints (<code>/schema/upload|url|text</code> and every <code>/validate/*</code>). Beyond that: <code>429</code>. For batch runs, reuse the <code>schema_id</code> and add a <code>sleep 2</code> between validations if needed.</td></tr>
     <tr><td><code>schema_id</code> lifetime</td><td class="num">60 min · 32 entries</td><td>The schema cache is an in-memory LRU per server instance: entries expire 60 min after loading, and once more than 32 schemas are cached the oldest is evicted. (<code>SCHEMA_CACHE_TTL_MIN</code>, <code>SCHEMA_CACHE_MAX_ENTRIES</code>)</td></tr>
@@ -601,7 +601,7 @@ sys.exit(0 if report["is_valid"] else 1)</code></pre>
   <div class="tbl"><table>
     <tr><th>HTTP</th><th>Cause</th><th>Fix</th></tr>
     <tr><td class="num">200</td><td>Validation ran (result in <code>is_valid</code>)</td><td>–</td></tr>
-    <tr><td class="num">400</td><td>URL rejected (not http/https, private address, &gt; 3 redirects, &gt; 10 MB, &gt; 10 s) or unsafe XML (e.g. external entities)</td><td>Upload the file instead</td></tr>
+    <tr><td class="num">400</td><td>URL rejected (not http/https, private address, &gt; 3 redirects, &gt; 32 MB, &gt; 10 s) or unsafe XML (e.g. external entities)</td><td>Upload the file instead</td></tr>
     <tr><td class="num">404</td><td><code>schema_id</code> unknown or expired</td><td>Repeat step 1</td></tr>
     <tr><td class="num">413</td><td>File too large (&gt; 32 MB)</td><td>Reduce / split the file</td></tr>
     <tr><td class="num">422</td><td>XSD could not be compiled into a validator (e.g. missing imports)</td><td>Upload a complete zip with all imports</td></tr>

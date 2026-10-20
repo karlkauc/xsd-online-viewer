@@ -128,7 +128,7 @@ Quelle der Defaults: `backend/app/config.py`. In Cloud Run per
 | `XSD11_TIMEOUT_SECONDS` | `20` | Zeitlimit für die XSD-1.1-Validierung (eigener Prozess) |
 | `SCHEMA_CHECK_LARGE_TIMEOUT_SECONDS` | `50` | Zeitlimit der Schema-Prüfung auf Anforderung (Schemas über 2 MB); muss unter `--timeout` bleiben |
 | `XSD11_MEMORY_MB` | `1024` | Adressraum-Limit des 1.1-Validators (virtuell, nicht RSS); Default beibehalten |
-| `FETCH_MAX_RESPONSE_MB` | `10` | Default beibehalten |
+| `FETCH_MAX_RESPONSE_MB` | `32` | Default beibehalten (wie `MAX_UPLOAD_MB`; FundsXML4.xsd hat schon über 10 MB) |
 | `FETCH_MAX_REDIRECTS` | `3` | Default beibehalten |
 | `CORS_ALLOW_ORIGINS` | leer | nur setzen, wenn ein separates Frontend zugreift |
 | `USAGE_DB_URL` | leer | `postgresql://xsdviewer@62.238.116.11:5432/xsdviewer_stats?sslmode=require` — leer = Statistik aus (`docs/USAGE_STATS.md`) |

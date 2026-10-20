@@ -81,7 +81,7 @@ def load_settings() -> Settings:
         fetch_timeout_seconds=float(os.getenv("FETCH_TIMEOUT_SECONDS", "10")),
         # Whole fetch incl. redirects; FETCH_TIMEOUT_SECONDS only bounds each read.
         fetch_deadline_seconds=float(os.getenv("FETCH_DEADLINE_SECONDS", "60")),
-        fetch_max_response_mb=int(os.getenv("FETCH_MAX_RESPONSE_MB", "10")),
+        fetch_max_response_mb=int(os.getenv("FETCH_MAX_RESPONSE_MB", "32")),
         fetch_max_redirects=int(os.getenv("FETCH_MAX_REDIRECTS", "3")),
         cors_allow_origins=_parse_origins(os.getenv("CORS_ALLOW_ORIGINS", "")),
         usage_db_url=os.getenv("USAGE_DB_URL", ""),
