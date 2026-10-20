@@ -30,7 +30,8 @@ URL with the raw link to your main `.xsd` (GitHub `blob` links work too; the vie
 [![Open in XSD Viewer](https://www.xsd-viewer.online/badge.svg)](https://www.xsd-viewer.online/url?src=https://raw.githubusercontent.com/OWNER/REPO/main/schema.xsd&utm_source=badge)
 ```
 
-The badge looks like this: ![Open in XSD Viewer](/badge.svg)
+The badge looks like this (it opens the FundsXML schema):
+[![Open in XSD Viewer](/badge.svg)](/url?src=https://raw.githubusercontent.com/fundsxml/schema/master/FundsXML4.xsd&utm_source=badge)
 
 Schemas that import or include other files load as long as the referenced files are reachable by relative URL.
 
