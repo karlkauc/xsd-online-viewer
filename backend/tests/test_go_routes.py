@@ -56,3 +56,20 @@ def test_share_ping_is_204() -> None:
 def test_content_faq_api() -> None:
     entries = _client().get("/api/content/faq").json()
     assert entries and all(e["question"] and e["answer_html"].startswith("<p>") for e in entries)
+
+
+def test_head_redirects_without_counting_a_page_view() -> None:
+    from app.usage.context import UsageTracker
+    from tests.test_usage_api import ListRecorder
+
+    recorder = ListRecorder()
+    app.state.usage = UsageTracker(recorder, geoip=None, hash_secret="test")
+    try:
+        response = _client().head("/go/sponsor")
+        assert response.status_code == 302
+        assert response.headers["location"] == "https://github.com/sponsors/karlkauc"
+        assert recorder.events == []
+        _client().get("/go/sponsor")
+        assert [e.event_type for e in recorder.events] == ["page_view"]
+    finally:
+        del app.state.usage

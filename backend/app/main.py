@@ -100,6 +100,35 @@ class BufferRequestBodyMiddleware:
         await self.app(scope, replay, send)
 
 
+class HeadAsGetMiddleware:
+    """Answer HEAD on pages and static files like GET, without the body.
+
+    Why: the routes are declared with ``@app.get`` only, so link checkers,
+    crawlers and uptime monitors that probe with HEAD got 405 for every page,
+    ``/sitemap.xml``, ``/robots.txt`` and ``/badge.svg``. ``/api/`` is left
+    out: some GET endpoints there do real work (fetching an ISO 20022 message
+    from GitHub). Registered first, so the outer middlewares still see HEAD
+    (``request_logging`` records no page view for it).
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or scope.get("method") != "HEAD" or scope["path"].startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_headers_only(message) -> None:
+            if message["type"] == "http.response.body":
+                if message.get("more_body", False):
+                    return
+                message = {"type": "http.response.body", "body": b"", "more_body": False}
+            await send(message)
+
+        await self.app({**scope, "method": "GET"}, receive, send_headers_only)
+
+
 def build_usage_tracker() -> UsageTracker:
     """Usage statistics — inert unless USAGE_DB_URL is set (docs/USAGE_STATS.md)."""
     recorder = UsageRecorder(settings.usage_db_url, settings.usage_db_password)
@@ -151,6 +180,7 @@ async def _rate_limit_exceeded(request: Request, exc: RateLimitExceeded) -> JSON
     )
 
 
+app.add_middleware(HeadAsGetMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(BufferRequestBodyMiddleware)
 
@@ -199,7 +229,8 @@ async def request_logging(request: Request, call_next):
             user_agent=request.headers.get("user-agent"),
             referrer=request.headers.get("referer"),
         )
-        if tracker is not None
+        # A HEAD probe is not a visit (HeadAsGetMiddleware runs the GET handler).
+        if tracker is not None and request.method != "HEAD"
         else None
     )
     usage_token = bind(usage)
