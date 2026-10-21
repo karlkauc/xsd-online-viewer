@@ -31,6 +31,8 @@ dev = [
     "pytest-cov>=5.0",
     "httpx>=0.27",
     "ruff>=0.7",
+    # tools/fundsxml_og_image.py (preview images of the FundsXML release pages)
+    "pillow>=10.4",
 ]
 
 [tool.setuptools.packages.find]

@@ -1,7 +1,7 @@
 +++
 title = "FundsXML schema releases: every version with its changes"
 description = "All FundsXML XML Schema releases from the official fundsxml/schema repository, with the changes between versions and a link to browse each schema online."
-lastmod = 2026-10-19
+lastmod = 2026-10-21
 cta_label = "Browse the latest FundsXML schema"
 cta_href = "/fundsxml"
 +++

@@ -3,6 +3,7 @@
 ``pages/features/diagram.md`` is served at ``/features/diagram``. Front matter keys:
 ``title`` (required), ``description`` (required), ``heading`` (h1, defaults to the title),
 ``lastmod`` (YYYY-MM-DD), ``cta_label``/``cta_href`` (the button into the tool), ``noindex``,
+``og_image`` (path of a 1200×630 preview image; defaults to the site's ``og-image.png``),
 and ``[[faq]]`` tables with ``q``/``a`` (Markdown) that also become FAQPage JSON-LD.
 """
 
@@ -38,6 +39,7 @@ class Page:
     cta_label: str | None = None
     cta_href: str | None = None
     noindex: bool = False
+    og_image: str | None = None
     faq: tuple[FaqItem, ...] = field(default_factory=tuple)
 
     @property
@@ -65,6 +67,7 @@ def parse_page(slug: str, text: str) -> Page:
         cta_label=meta.get("cta_label"),
         cta_href=meta.get("cta_href"),
         noindex=bool(meta.get("noindex", False)),
+        og_image=meta.get("og_image"),
         faq=_faq(meta.get("faq", [])),
     )
 

@@ -8,7 +8,9 @@ render them. Run again after a new release and deploy:
     backend/.venv/bin/python tools/build_fundsxml_pages.py
 
 Every schema is parsed with the viewer's own parser (``parse_files_map``, the
-path the "FundsXML Releases" tab uses) and compared with ``schema_diff``.
+path the "FundsXML Releases" tab uses) and compared with ``schema_diff``. Each
+release page also gets its link-preview image, ``frontend/public/og/fundsxml/<tag>.png``
+(``fundsxml_og_image.py``; needs Pillow from the backend's dev extra).
 """
 
 from __future__ import annotations
@@ -27,8 +29,12 @@ sys.path.insert(0, str(ROOT / "backend"))
 from app.parser.schema_diff import SchemaDiff, diff
 from app.parser.xsd_parser import parse_files_map, pick_main_xsd
 
+sys.path.insert(0, str(ROOT / "tools"))
+import fundsxml_og_image  # noqa: E402
+
 RELEASES_URL = "https://api.github.com/repos/fundsxml/schema/releases?per_page=100"
 OUT = ROOT / "backend" / "app" / "content" / "pages" / "fundsxml"
+OG_OUT = ROOT / "frontend" / "public" / "og" / "fundsxml"
 # Long lists help nobody on a web page; the viewer has the complete schema.
 MAX_CONTAINERS = 80
 MAX_ITEMS = 40
@@ -91,7 +97,9 @@ def _diff_markdown(d: SchemaDiff, prev: str) -> list[str]:
     return out
 
 
-def _front(title: str, description: str, cta_label: str, cta_href: str, lastmod: str) -> list[str]:
+def _front(
+    title: str, description: str, cta_label: str, cta_href: str, lastmod: str, og_image: str | None = None
+) -> list[str]:
     return [
         "+++",
         f"title = {json.dumps(title)}",
@@ -99,9 +107,27 @@ def _front(title: str, description: str, cta_label: str, cta_href: str, lastmod:
         f"lastmod = {lastmod}",
         f"cta_label = {json.dumps(cta_label)}",
         f"cta_href = {json.dumps(cta_href)}",
+        *([f"og_image = {json.dumps(og_image)}"] if og_image else []),
         "+++",
         "",
     ]
+
+
+def _og_image(tag: str, published: str, main_file: str, model, d: SchemaDiff | None, prev: str | None) -> str:
+    """Draw the release's preview image; returns its path on the site."""
+    stats = [
+        fundsxml_og_image.Stat(str(sum(1 for t in model.complex_types if t.name)), "complex types"),
+        fundsxml_og_image.Stat(str(sum(1 for t in model.simple_types if t.name)), "simple types"),
+    ]
+    subtitle = f"Released {published} · {main_file}"
+    if d is not None:
+        subtitle += f" · compared with {prev}"
+        stats += [
+            fundsxml_og_image.Stat(f"+{len(d.added_types)}", "new types"),
+            fundsxml_og_image.Stat(str(len(d.containers) + len(d.enums)), "changed types"),
+        ]
+    fundsxml_og_image.render(OG_OUT / f"{tag}.png", tag, subtitle, stats, f"xsd-viewer.online/fundsxml/{tag}")
+    return f"/og/fundsxml/{tag}.png"
 
 
 def main() -> int:
@@ -128,6 +154,7 @@ def main() -> int:
             for e in model.elements
             if e.name and (not main_ids or (e.source_ref is not None and e.source_ref.file_id in main_ids))
         ]
+        d = diff(previous[1], model) if previous else None
         lines = _front(
             f"FundsXML {tag} schema: structure and changes" + (f" since {previous[0]}" if previous else ""),
             f"FundsXML {tag} XML Schema ({main_file}), released {published}: global elements, types and "
@@ -135,6 +162,7 @@ def main() -> int:
             f"Open FundsXML {tag} in the viewer",
             f"/fundsxml?release={tag}&file={main_file}",
             date.today().isoformat(),
+            _og_image(tag, published, main_file, model, d, previous[0] if previous else None),
         )
         lines += [
             f"FundsXML {tag} was published on {published} in the "
@@ -149,8 +177,7 @@ def main() -> int:
             "",
         ]
         change_count = 0
-        if previous:
-            d = diff(previous[1], model)
+        if previous and d is not None:
             change_count = len(d.containers) + len(d.enums) + len(d.added_types) + len(d.removed_types)
             lines += [f"## Changes since FundsXML {previous[0]}", *_diff_markdown(d, previous[0]), ""]
         notes = _notes(release.get("body"))
