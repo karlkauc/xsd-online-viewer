@@ -22,6 +22,7 @@ import { buildDiagramGraph } from "./buildGraph";
 import { ElementNode } from "./ElementNode";
 import { CompositorNode } from "./CompositorNode";
 import { exportFlowAsPng, exportFlowAsSvg } from "./exportImage";
+import { pingFeature } from "../../api/client";
 import { collectExpandableElementIds } from "../../lib/expandAll";
 import { computeAnchoredViewport } from "./anchorViewport";
 import { DiagramToolbar } from "./DiagramToolbar";
@@ -213,6 +214,7 @@ function DiagramInner() {
         } else {
           await exportFlowAsPng(viewportEl, exportNodes, { filename: "schema-diagram.png" });
         }
+        pingFeature(format === "svg" ? "diagram_svg" : "diagram_png");
       } catch (err) {
         console.error(`Diagram ${format.toUpperCase()} export failed:`, err);
         const msg = err instanceof Error ? err.message : String(err);

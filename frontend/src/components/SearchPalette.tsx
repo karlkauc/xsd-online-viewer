@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSelection } from "../stores/selectionStore";
+import { pingFeature } from "../api/client";
 import { KindBadge } from "./TreeView/KindBadge";
 import { searchableText, snippetAround } from "../lib/searchText";
 import { redefinedOriginalIds } from "../lib/indexSchema";
@@ -30,6 +31,7 @@ export function SearchPalette() {
   useEffect(() => {
     const handler = () => {
       setOpen(true);
+      pingFeature("search_open", { once: true });
       setQuery("");
       setCursor(0);
     };

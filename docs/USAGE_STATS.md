@@ -20,7 +20,7 @@ One row per event in table `usage_event` (DDL: `backend/sql/usage_stats.sql`):
 
 | Column | Meaning |
 |---|---|
-| `event_type` | `page_view` (SPA shell or content page served), `schema_load`, `validate`, `export`, `share` (the Share button copied a link: `source` = `url`, `fundsxml` or `iso20022`); `schema_load` with `source=iso20022` and `schema_name` = message id is a load from the ISO 20022 tab |
+| `event_type` | `page_view` (SPA shell or content page served), `schema_load`, `validate`, `export`, `share` (the Share button copied a link: `source` = `url`, `fundsxml` or `iso20022`), `feature` (a browser-only feature was used, pinged via `POST /api/usage/feature?name=`: `source` = `diagram_png`, `diagram_svg`, `search_open`; `search_open` at most once per page load; unknown names get a 400 and no row); `schema_load` with `source=iso20022` and `schema_name` = message id is a load from the ISO 20022 tab |
 | `visitor_hash` | `sha256(daily_salt ‖ ip ‖ user-agent)[:32]`; salt = `HMAC(USAGE_HASH_SECRET, date)` ⇒ same visitor within a day, unlinkable across days, not reversible |
 | `country_code` | ISO-3166-1 alpha-2 derived server-side via MaxMind GeoLite2; NULL if unknown |
 | `user_agent`, `device` | UA string (≤255) and a cheap classification `desktop`/`mobile`/`bot`/`unknown` |
@@ -235,6 +235,9 @@ ORDER BY occurrences DESC LIMIT 20;
 SELECT e ->> 'category' AS category, e ->> 'reason' AS reason, sum(occurrences)
 FROM sample_issue, jsonb_array_elements(report -> 'entries') AS e
 GROUP BY 1, 2 ORDER BY 3 DESC;
+
+-- Browser-only features (diagram export, search palette, …)
+SELECT source, count(*), count(DISTINCT visitor_hash) FROM usage_event WHERE event_type='feature' AND device<>'bot' GROUP BY 1 ORDER BY 2 DESC;
 
 -- Size watch
 SELECT pg_size_pretty(pg_total_relation_size('usage_event')), count(*) FROM usage_event;

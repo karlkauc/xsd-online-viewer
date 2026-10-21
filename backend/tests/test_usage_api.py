@@ -275,3 +275,45 @@ def test_validate_rejections_record_the_schema_name(
     too_big_text, too_big_upload = recorder.events[-2:]
     assert (too_big_text.status_code, too_big_text.schema_name) == (413, "main.xsd")
     assert (too_big_upload.status_code, too_big_upload.schema_name) == (413, "main.xsd")
+
+
+# --- Feature pings (F1) -------------------------------------------------------
+
+
+def test_feature_ping_records_whitelisted_names(client: TestClient, recorder: ListRecorder) -> None:
+    from app.api.usage import FEATURE_NAMES
+
+    limiter.reset()
+    for name in sorted(FEATURE_NAMES):
+        r = client.post("/api/usage/feature", params={"name": name})
+        assert r.status_code == 204, (name, r.text)
+        ev = recorder.events[-1]
+        assert (ev.event_type, ev.source, ev.status_code) == ("feature", name, 204)
+    assert "search_open" in FEATURE_NAMES
+
+
+def test_feature_ping_rejects_unknown_names_without_an_event(
+    client: TestClient, recorder: ListRecorder
+) -> None:
+    limiter.reset()
+    before = len(recorder.events)
+    assert client.post("/api/usage/feature", params={"name": "anything"}).status_code == 400
+    assert client.post("/api/usage/feature", params={"name": "x" * 33}).status_code == 422
+    assert client.post("/api/usage/feature").status_code == 422
+    assert len(recorder.events) == before
+
+
+def test_feature_names_match_frontend_and_ddl() -> None:
+    import re
+    from pathlib import Path
+
+    from app.api.usage import FEATURE_NAMES
+
+    root = Path(__file__).resolve().parents[2]
+    client_ts = (root / "frontend" / "src" / "api" / "client.ts").read_text()
+    union = re.search(r"export type FeatureName =([^;]+);", client_ts)
+    assert union is not None
+    assert set(re.findall(r'"([a-z_]+)"', union.group(1))) == FEATURE_NAMES
+    ddl = (root / "backend" / "sql" / "usage_stats.sql").read_text()
+    checks = re.findall(r"CHECK \(event_type IN \(([^)]*)\)\)", ddl)
+    assert len(checks) == 2 and all("'feature'" in c for c in checks)

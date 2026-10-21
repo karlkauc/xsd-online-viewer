@@ -329,6 +329,26 @@ export function pingShare(source: "url" | "fundsxml" | "iso20022"): void {
   void fetch(`${API_BASE}/usage/share?source=${source}`, { method: "POST", keepalive: true }).catch(() => undefined);
 }
 
+/** Browser-only features counted by `POST /api/usage/feature` (F1). Keep in sync with
+ * `FEATURE_NAMES` in backend/app/api/usage.py: the server rejects any other name. */
+export type FeatureName = "diagram_png" | "diagram_svg" | "search_open";
+
+const pingedFeatures = new Set<FeatureName>();
+
+/** Count the use of a browser-only feature. Fire-and-forget like {@link pingShare}, never
+ * throws; with `once` at most one ping per page load (the search palette opens often). */
+export function pingFeature(name: FeatureName, { once = false }: { once?: boolean } = {}): void {
+  if (once) {
+    if (pingedFeatures.has(name)) return;
+    pingedFeatures.add(name);
+  }
+  try {
+    void fetch(`${API_BASE}/usage/feature?name=${name}`, { method: "POST", keepalive: true }).catch(() => undefined);
+  } catch {
+    // No fetch at all (very old browser): statistics are optional.
+  }
+}
+
 let contentPages: Promise<Set<string>> | null = null;
 
 /** Slugs of the server-rendered pages (/fundsxml/4.2.11, /features/diagram …), fetched once. */

@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS usage_event (
   event_id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   received_at      timestamptz NOT NULL DEFAULT now(),
-  event_type       text        NOT NULL CHECK (event_type IN ('page_view','schema_load','validate','export','share')),
+  event_type       text        NOT NULL CHECK (event_type IN ('page_view','schema_load','validate','export','share','feature')),
   visitor_hash     text,                 -- sha256(daily salt | ip | user-agent), first 32 hex chars; no raw IP
   country_code     char(2),              -- ISO-3166-1 alpha-2 via GeoLite2, NULL if unknown
   user_agent       text,                 -- truncated to 255
@@ -35,10 +35,11 @@ CREATE TABLE IF NOT EXISTS usage_event (
 ALTER TABLE usage_event ADD COLUMN IF NOT EXISTS utm_source text;
 ALTER TABLE usage_event ADD COLUMN IF NOT EXISTS utm_medium text;
 ALTER TABLE usage_event ADD COLUMN IF NOT EXISTS utm_campaign text;
--- 'share' (copied share link) joined the event types later; widen the check in place.
+-- 'share' (copied share link) and 'feature' (browser-only feature used, F1) joined the
+-- event types later; widen the check in place.
 ALTER TABLE usage_event DROP CONSTRAINT IF EXISTS usage_event_event_type_check;
 ALTER TABLE usage_event ADD CONSTRAINT usage_event_event_type_check
-  CHECK (event_type IN ('page_view','schema_load','validate','export','share'));
+  CHECK (event_type IN ('page_view','schema_load','validate','export','share','feature'));
 
 CREATE INDEX IF NOT EXISTS idx_usage_event_received  ON usage_event (received_at);
 CREATE INDEX IF NOT EXISTS idx_usage_event_type_time ON usage_event (event_type, received_at);
