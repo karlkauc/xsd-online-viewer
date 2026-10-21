@@ -157,8 +157,20 @@ def ingest_schema(
 
 
 async def _read_upload(
-    upload: UploadFile, *, event_type: str = "schema_load", source: str = "upload"
+    upload: UploadFile,
+    *,
+    event_type: str = "schema_load",
+    source: str = "upload",
+    schema_name: str | None = None,
 ) -> bytes:
+    """Read an upload, enforcing the size cap.
+
+    ``schema_name`` is what a rejection records; for a schema upload it
+    defaults to the uploaded file's name, for any other upload (an XML
+    document to validate) the caller passes the schema's name.
+    """
+    if schema_name is None and event_type == "schema_load":
+        schema_name = schema_display_name(source, upload.filename)
     max_bytes = settings.max_upload_bytes
     chunks: list[bytes] = []
     total = 0
@@ -173,7 +185,7 @@ async def _read_upload(
                 source,
                 413,
                 f"upload exceeds {settings.max_upload_mb} MB limit",
-                schema_name=schema_display_name(source, upload.filename),
+                schema_name=schema_name,
             )
         chunks.append(chunk)
     return b"".join(chunks)
@@ -412,6 +424,22 @@ def _record_sample_issue(
 XsdVersionChoice = Literal["1.0", "1.1"] | None
 
 
+def main_schema_name(model: SchemaModel) -> str | None:
+    """``schema_name`` of a ``validate`` event: the main schema file's name,
+    shown the way ``schema_load`` shows it (basename, or a URL without query
+    and credentials)."""
+    main = next((f for f in model.files if f.relationship == "main"), None)
+    if main is None:
+        return None
+    return schema_display_name("url" if "://" in main.filename else "upload", main.filename)
+
+
+def _cached_schema_name(schema_id: str) -> str | None:
+    """``main_schema_name`` for a rejection before validation (None if the schema expired)."""
+    model = schema_cache.get(schema_id)
+    return main_schema_name(model) if model is not None else None
+
+
 def _validate_xml_against_schema(
     schema_id: str,
     xml_bytes: bytes,
@@ -423,6 +451,7 @@ def _validate_xml_against_schema(
     model = schema_cache.get(schema_id)
     if model is None:
         raise reject("validate", source, 404, "schema not found or expired", input_bytes=len(xml_bytes))
+    schema_name = main_schema_name(model)
     try:
         result = validate_xml(model, xml_bytes, version=xsd_version)
     except ValidationSetupError as exc:
@@ -433,9 +462,13 @@ def _validate_xml_against_schema(
             # and the compiler's message is the reason.
             setup = [ValidationErrorItem(kind="schema-setup", message=str(exc))]
             _record_sample_issue("setup_error", model, sample, xml_bytes, setup)
-        raise reject("validate", source, 422, str(exc), input_bytes=len(xml_bytes)) from exc
+        raise reject(
+            "validate", source, 422, str(exc), schema_name=schema_name, input_bytes=len(xml_bytes)
+        ) from exc
     except SecurityError as exc:
-        raise reject("validate", source, 400, str(exc), input_bytes=len(xml_bytes)) from exc
+        raise reject(
+            "validate", source, 400, str(exc), schema_name=schema_name, input_bytes=len(xml_bytes)
+        ) from exc
     if sample is not None:
         kind = _sample_issue_kind(result, model, sample)
         if kind is not None:
@@ -443,6 +476,7 @@ def _validate_xml_against_schema(
     emit(
         "validate",
         source=source,
+        schema_name=schema_name,
         target_namespace=truncate(model.target_namespace),
         input_bytes=len(xml_bytes),
         error_count=len(result.errors),
@@ -458,7 +492,9 @@ def _validate_xml_against_schema(
 async def validate_xml_upload(
     request: Request, schema_id: str, file: UploadFile, xsd_version: XsdVersionChoice = None
 ) -> ValidationResponse:
-    content = await _read_upload(file, event_type="validate", source="upload")
+    content = await _read_upload(
+        file, event_type="validate", source="upload", schema_name=_cached_schema_name(schema_id)
+    )
     return _validate_xml_against_schema(schema_id, content, "upload", xsd_version=xsd_version)
 
 
@@ -472,7 +508,13 @@ async def validate_xml_text(
 ) -> ValidationResponse:
     data = utf8_bytes(payload.content)
     if len(data) > settings.max_upload_bytes:
-        raise reject("validate", payload.origin, 413, f"content exceeds {settings.max_upload_mb} MB limit")
+        raise reject(
+            "validate",
+            payload.origin,
+            413,
+            f"content exceeds {settings.max_upload_mb} MB limit",
+            schema_name=_cached_schema_name(schema_id),
+        )
     sample = payload.sample if payload.origin == "sample" else None
     return _validate_xml_against_schema(
         schema_id, data, payload.origin, sample=sample, xsd_version=xsd_version
@@ -490,7 +532,6 @@ async def validate_xml_url(
     try:
         fetched = await asyncio.to_thread(fetch_schema_url, payload.url)
     except SecurityError as exc:
-        raise reject(
-            "validate", "url", 400, str(exc), schema_name=schema_display_name("url", payload.url)
-        ) from exc
+        # schema_name is the schema's, never the URL of the document.
+        raise reject("validate", "url", 400, str(exc), schema_name=_cached_schema_name(schema_id)) from exc
     return _validate_xml_against_schema(schema_id, fetched.content, "url", xsd_version=xsd_version)

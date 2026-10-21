@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.rate_limit import limiter
 from app.usage.context import UsageTracker
 from app.usage.events import UsageEvent
 from app.usage.recorder import UsageRecorder
@@ -40,6 +41,9 @@ def recorder() -> Iterator[ListRecorder]:
 
 @pytest.fixture
 def client() -> TestClient:
+    # Every test here loads a schema; keep the shared per-client write limit
+    # from tripping in later test files.
+    limiter.reset()
     return TestClient(app, headers={"user-agent": "Mozilla/5.0 (pytest-browser)", "referer": "https://ref.example/p?x=1"})
 
 
@@ -80,6 +84,7 @@ def test_text_and_validate_and_export(
         ("export", "html", "rejected"),
     ]
     assert recorder.events[1].error_count and recorder.events[1].error_count > 0
+    assert recorder.events[1].schema_name == "s.xsd"
     assert recorder.events[3].error_detail == "schema not found or expired"
 
 
@@ -212,7 +217,7 @@ def test_url_ok_is_recorded_from_worker_thread(
     assert ev.element_count
 
 
-def test_validate_url_reject_stores_the_document_url(
+def test_validate_url_reject_stores_the_schema_not_the_document_url(
     client: TestClient, recorder: ListRecorder, simple_xsd_bytes: bytes
 ) -> None:
     files = {"file": ("simple.xsd", simple_xsd_bytes, "application/xml")}
@@ -222,4 +227,51 @@ def test_validate_url_reject_stores_the_document_url(
     assert r.status_code == 400
     (ev,) = recorder.events
     assert ev.event_type == "validate" and ev.status == "rejected" and ev.source == "url"
-    assert ev.schema_name == "http://127.0.0.1/doc.xml"
+    assert ev.schema_name == "simple.xsd"
+
+
+def test_validate_records_the_main_schema_name(
+    client: TestClient, recorder: ListRecorder, simple_xsd_bytes: bytes
+) -> None:
+    files = {"file": ("dir/main.xsd", simple_xsd_bytes, "application/xml")}
+    schema_id = client.post("/api/schema/upload", files=files).json()["schema_id"]
+    client.post(
+        f"/api/schema/{schema_id}/validate/upload",
+        files={"file": ("doc.xml", b"<Nope/>", "application/xml")},
+    )
+    ev = recorder.events[-1]
+    assert (ev.event_type, ev.source, ev.status) == ("validate", "upload", "invalid")
+    assert ev.schema_name == "main.xsd"
+
+
+def test_validate_rejections_record_the_schema_name(
+    client: TestClient,
+    recorder: ListRecorder,
+    simple_xsd_bytes: bytes,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api import schema as schema_api
+    from app.config import settings
+    from app.parser.validation import ValidationSetupError
+
+    files = {"file": ("main.xsd", simple_xsd_bytes, "application/xml")}
+    schema_id = client.post("/api/schema/upload", files=files).json()["schema_id"]
+
+    def broken(*_args: object, **_kwargs: object) -> None:
+        raise ValidationSetupError("schema does not compile")
+
+    monkeypatch.setattr(schema_api, "validate_xml", broken)
+    r = client.post(f"/api/schema/{schema_id}/validate/text", json={"content": "<Nope/>"})
+    assert r.status_code == 422
+    setup = recorder.events[-1]
+    assert (setup.status, setup.status_code, setup.schema_name) == ("rejected", 422, "main.xsd")
+
+    monkeypatch.setattr(settings, "max_upload_mb", 0)
+    client.post(f"/api/schema/{schema_id}/validate/text", json={"content": "<Nope/>"})
+    client.post(
+        f"/api/schema/{schema_id}/validate/upload",
+        files={"file": ("doc.xml", b"<Nope/>", "application/xml")},
+    )
+    too_big_text, too_big_upload = recorder.events[-2:]
+    assert (too_big_text.status_code, too_big_text.schema_name) == (413, "main.xsd")
+    assert (too_big_upload.status_code, too_big_upload.schema_name) == (413, "main.xsd")
