@@ -12,12 +12,13 @@ OG_IMAGE_ALT = "Online XSD Viewer — tree, diagram and text view of an XML Sche
 # This site's key in FAMILY; its own entry is shown without a link.
 SELF = "xsd"
 
-# Same list, same order on all three viewers. Sister links go through /go/
+# Same list, same order on all sites of the family. Sister links go through /go/
 # so clicks are counted without client-side tracking.
 FAMILY: tuple[tuple[str, str, str], ...] = (
     ("xsd", "XSD Viewer", "/go/xsd-viewer"),
     ("xml", "XML Viewer", "/go/xml-viewer"),
     ("odata", "OData Viewer", "/go/odata-viewer"),
+    ("tpt", "TPT Converter", "/go/tpt-converter"),
     ("desktop", "Desktop app", "/go/freexmltoolkit"),
 )
 

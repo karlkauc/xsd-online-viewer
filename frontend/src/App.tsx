@@ -15,7 +15,7 @@ import { ContentModelView } from "./components/ContentModelView/ContentModelView
 import { Breadcrumb } from "./components/Breadcrumb";
 import { Diagnostics } from "./components/Diagnostics";
 import { ThemeToggle } from "./components/ThemeToggle";
-import { FREEXMLTOOLKIT_GO, ODATA_VIEWER_GO, SPONSOR_GO, XML_VIEWER_GO } from "./lib/links";
+import { FREEXMLTOOLKIT_GO, ODATA_VIEWER_GO, SPONSOR_GO, TPT_CONVERTER_GO, XML_VIEWER_GO } from "./lib/links";
 import { DesktopAppCard } from "./components/DesktopAppCard";
 import { MobileNav, type MobilePane } from "./components/MobileNav";
 import { HeaderActions, type HeaderAction } from "./components/HeaderActions";
@@ -271,6 +271,14 @@ export default function App() {
         title: "Sister tool for OData services: $metadata as tree, ER diagram and live data",
         ariaLabel: "Open OData Viewer (sister tool for OData services)",
         href: ODATA_VIEWER_GO,
+        external: true,
+      },
+      {
+        key: "tpt-converter",
+        label: "TPT Converter ↗",
+        title: "Sister tool: convert Solvency II TPT (V7/V8) files to FundsXML 4 and back",
+        ariaLabel: "Open TPT ⇄ FundsXML Converter (sister tool for Solvency II TPT files)",
+        href: TPT_CONVERTER_GO,
         external: true,
       },
       {

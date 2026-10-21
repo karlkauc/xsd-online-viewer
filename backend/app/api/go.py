@@ -1,8 +1,8 @@
 """Outbound links that should be counted: ``/go/<name>`` redirects.
 
 The site promotes FreeXmlToolkit, the author's desktop app, and links to the
-author's GitHub Sponsors page, and links the sibling viewers. The frontend links to these same-origin routes
-instead of the external URLs so each click
+author's GitHub Sponsors page, and links the sister sites of the family. The
+frontend links to these same-origin routes instead of the external URLs so each click
 becomes a ``page_view`` row with ``path=/go/<name>/<target>`` and ``source=<name>`` —
 no client-side tracking, no new event type.
 """
@@ -23,13 +23,14 @@ FREEXMLTOOLKIT_TARGETS: dict[str, str] = {
 
 SPONSOR_URL = "https://github.com/sponsors/karlkauc"
 
-# The sibling viewers. utm_source tells their stats where the visitor came from
-# (the sites send no Referer). Keep the list identical on all three sites.
+# The sister sites. utm_source tells their stats where the visitor came from
+# (the sites send no Referer). Keep the list identical on all sites of the family.
 SITE_KEY = "xsd-viewer"
 SISTER_URLS: dict[str, str] = {
     "xsd-viewer": "https://www.xsd-viewer.online/",
     "xml-viewer": "https://www.xml-viewer.online/",
     "odata-viewer": "https://www.odata-viewer.online/",
+    "tpt-converter": "https://converter.status20.net/",
 }
 
 
