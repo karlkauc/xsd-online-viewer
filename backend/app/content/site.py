@@ -6,6 +6,9 @@ SITE_NAME = "Online XSD Viewer"
 # Where the "Open the viewer" button in the page header points.
 VIEWER_PATH = "/"
 LOGO_PATH = "/favicon.svg"
+# Preview image for shared links, 1200×630 (frontend/public); index.html names the same.
+OG_IMAGE_PATH = "/og-image.png"
+OG_IMAGE_ALT = "Online XSD Viewer — tree, diagram and text view of an XML Schema"
 # This site's key in FAMILY; its own entry is shown without a link.
 SELF = "xsd"
 

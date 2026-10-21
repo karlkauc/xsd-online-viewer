@@ -99,7 +99,7 @@ def _hub(pages: dict[str, Page]) -> Page:
         lines.append("")
     return Page(
         slug=HUB_SLUG,
-        title=f"Guides and resources — {site.SITE_NAME}",
+        title="Guides and resources",
         heading="Guides and resources",
         description=site.HUB_INTRO,
         body="\n".join(lines),

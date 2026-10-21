@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from pathlib import Path
@@ -13,6 +14,7 @@ from fastapi.testclient import TestClient
 import app.spa as spa_module
 from app.config import settings
 from app.content import pages as pages_module
+from app.content import site
 from app.content.pages import Page, all_pages, home_faq, parse_page
 from app.content.render import render_page
 from app.spa import SITE_ORIGIN, mount_spa, render_shell
@@ -49,6 +51,15 @@ def test_every_bundled_page_parses_and_renders() -> None:
         assert "<h1>" in doc
         for block in re.findall(r'<script type="application/ld\+json">\n(.*?)\n</script>', doc, re.S):
             json.loads(block)
+
+
+def test_pages_carry_the_preview_image_and_no_doubled_site_name() -> None:
+    for page in all_pages().values():
+        doc = render_page(page, "https://example.test")
+        assert '<meta property="og:image" content="https://example.test/og-image.png" />' in doc
+        assert '<meta name="twitter:card" content="summary_large_image" />' in doc
+        title = re.search(r"<title>(.*?)</title>", doc).group(1)
+        assert title.count(html.escape(site.SITE_NAME)) == 1, page.slug
 
 
 def test_front_matter_is_required() -> None:
