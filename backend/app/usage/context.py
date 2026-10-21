@@ -100,7 +100,8 @@ def current() -> RequestUsage | None:
     return _request_usage.get()
 
 
-def _utc_today() -> date:
+def utc_today() -> date:
+    """The day visitor hashes rotate on: UTC, independent of the server's TZ."""
     return date(*time.gmtime()[:3])
 
 
@@ -113,7 +114,7 @@ def emit(event_type: str, **fields: Any) -> bool:
         tracker = ctx.tracker
         event = UsageEvent(
             event_type=event_type,
-            visitor_hash=visitor_hash(ctx.ip, ctx.user_agent, _utc_today(), tracker.hash_secret),
+            visitor_hash=visitor_hash(ctx.ip, ctx.user_agent, utc_today(), tracker.hash_secret),
             country_code=tracker.geoip.country(ctx.ip) if tracker.geoip else None,
             user_agent=truncate(ctx.user_agent),
             device=classify_device(ctx.user_agent),
@@ -145,7 +146,7 @@ def record_issue(issue: SampleIssue) -> bool:
         if not tracker.seen_issues.check_and_add(issue.fingerprint):
             issue = issue.without_payload()
         issue.visitor_hash = visitor_hash(
-            ctx.ip, ctx.user_agent, _utc_today(), tracker.hash_secret
+            ctx.ip, ctx.user_agent, utc_today(), tracker.hash_secret
         )
         issue.country_code = tracker.geoip.country(ctx.ip) if tracker.geoip else None
         issue.device = classify_device(ctx.user_agent)

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app import release_version
 from app.rate_limit import client_ip, limiter
-from app.usage.context import current
+from app.usage.context import current, utc_today
 from app.usage.events import classify_device, truncate, visitor_hash
 from app.usage.feedback import FeedbackRow, FeedbackStore
 
@@ -54,7 +53,7 @@ async def submit_feedback(request: Request, payload: FeedbackPayload) -> Respons
         page=truncate(payload.page),
         schema_name=truncate(payload.schema_name),
         error_detail=truncate(payload.error_detail),
-        visitor_hash=visitor_hash(ip, ua, date.today(), tracker.hash_secret) if tracker else None,
+        visitor_hash=visitor_hash(ip, ua, utc_today(), tracker.hash_secret) if tracker else None,
         country_code=tracker.geoip.country(ip) if tracker and tracker.geoip else None,
         user_agent=truncate(ua),
         device=classify_device(ua),

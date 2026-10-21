@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.rate_limit import limiter
 from app.usage.context import UsageTracker
 from app.usage.feedback import FEEDBACK_INSERT_SQL, FeedbackRow, FeedbackStore
 from app.usage.recorder import UsageRecorder
@@ -59,6 +60,7 @@ def make_store(fail: bool = False) -> tuple[FeedbackStore, FakeConn]:
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     app.state.usage = UsageTracker(UsageRecorder("postgresql://fake"), geoip=None, hash_secret="s")
+    limiter.reset()  # 5/minute on /api/feedback; each test starts with a fresh budget
     try:
         yield TestClient(app, headers={"user-agent": "Mozilla/5.0 (pytest-browser)"})
     finally:
@@ -89,6 +91,27 @@ def test_submit_stores_row(client: TestClient) -> None:
     assert row[:5] == ("Diagram is great", "a@b.co", "/url", None, "x")
     visitor, _country, ua, device, version = row[5:]
     assert visitor and ua == "Mozilla/5.0 (pytest-browser)" and device == "desktop" and version
+
+
+def test_visitor_hash_uses_the_utc_day_like_emit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Feedback and usage events must hash a visitor on the same (UTC) day,
+    or they cannot be joined around midnight on a server not running in UTC."""
+    import time
+    from datetime import date
+
+    from app.usage import context
+    from app.usage.events import visitor_hash
+
+    utc_noon = time.struct_time((2026, 1, 2, 12, 0, 0, 4, 2, 0))
+    monkeypatch.setattr(context.time, "gmtime", lambda *_: utc_noon)
+    store, conn = make_store()
+    app.state.feedback = store
+    assert client.post("/api/feedback", json={"message": "hi"}).status_code == 204
+    ((_, row),) = conn.rows
+    expected = visitor_hash("testclient", "Mozilla/5.0 (pytest-browser)", date(2026, 1, 2), "s")
+    assert row[5] == expected
 
 
 def test_honeypot_is_dropped_silently(client: TestClient) -> None:
