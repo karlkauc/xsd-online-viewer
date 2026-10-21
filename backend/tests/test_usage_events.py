@@ -56,10 +56,42 @@ class TestDevice:
             "Mozilla/5.0 (compatible; ShinkiHPBot/1.0; +lead-research)",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_2) Chrome/33.0.1750.152 Safari/537.36",
             "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:21.0) Gecko/20130331 Firefox/21.0",
+            "Mozilla/5.0 (compatible; CensysInspect/1.1; +https://about.censys.io/)",
+            "Hello from Palo Alto Networks, find out more about our scans in https://docs-cortex.paloaltonetworks.com",
+            "Mozilla/5.0 (compatible; Palo Alto Networks)",
+            "Mozilla/5.0 zgrab/0.x",
+            "Mozilla/5.0 (compatible; Nuclei - Open-source project (github.com/projectdiscovery/nuclei))",
+            "Mozilla/5.0 (compatible) python-urllib3/2.2",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 "
+            "(KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/605.1.15 "
+            "(KHTML, like Gecko) Version/12.1.2 Safari/605.1.15",
         ):
             assert classify_device(ua) == "bot", ua
         assert classify_device("") == "unknown"
         assert classify_device(None) == "unknown"
+
+    def test_current_safari_stays_human(self) -> None:
+        iphone = (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS {} like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        )
+        ios17 = iphone.format("17_5") + "Version/17.5 Mobile/15E148 Safari/604.1"
+        ios18 = iphone.format("18_1") + "Version/18.1 Mobile/15E148 Safari/604.1"
+        crios = iphone.format("17_5") + "CriOS/126.0.6478.54 Mobile/15E148 Safari/604.1"
+        mac17 = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) "
+            "Version/17.4.1 Safari/605.1.15"
+        )
+        webview = (
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Version/4.0 Chrome/126.0.6478.71 Mobile Safari/537.36"
+        )
+        assert classify_device(ios17) == "mobile"
+        assert classify_device(ios18) == "mobile"
+        assert classify_device(mac17) == "desktop"
+        assert classify_device(crios) == "mobile"
+        assert classify_device(webview) == "mobile"
 
 
 class TestReferrer:

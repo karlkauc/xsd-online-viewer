@@ -13,14 +13,18 @@ from urllib.parse import urlsplit, urlunsplit
 MAX_TEXT = 255
 
 _BOT_RE = re.compile(
-    r"bot|crawl|spider|slurp|curl/|wget/|python-requests|python-httpx|aiohttp|go-http-client|"
+    r"bot|crawl|spider|slurp|curl/|wget/|python-|httpx|aiohttp|go-http-client|"
     r"headless|lighthouse|preview|facebookexternalhit|scrapy|java/|libwww|okhttp|monitor|uptime|"
-    r"scan|check|validat|radar|probe|googleother|lead-research",
+    r"scan|check|validat|radar|probe|googleother|lead-research|censys|palo alto|zgrab|nuclei",
     re.IGNORECASE,
 )
 # Scanners like to pose as long-gone browsers (Chrome 33, Firefox 21); real visitors are far newer.
 _ENGINE_VERSION_RE = re.compile(r"\b(?:Chrome|Firefox)/(\d+)")
 _MIN_ENGINE_VERSION = 100
+# Same trick with Safari (a crawler as iOS 13 Safari, one visitor per hit). Only real Safari
+# sends "Version/N … Safari/"; Chrome/Firefox on iOS (CriOS/FxiOS) and Android WebViews do not.
+_SAFARI_VERSION_RE = re.compile(r"\bVersion/(\d+)[\d.]* (?:Mobile/\S+ )?Safari/")
+_MIN_SAFARI_VERSION = 15
 _MOBILE_RE = re.compile(r"Mobile|Android|iPhone|iPad|iPod|Windows Phone|Opera Mini", re.IGNORECASE)
 
 
@@ -97,6 +101,9 @@ def classify_device(user_agent: str | None) -> str:
         return "bot"
     engine = _ENGINE_VERSION_RE.search(user_agent)
     if engine and int(engine.group(1)) < _MIN_ENGINE_VERSION:
+        return "bot"
+    safari = _SAFARI_VERSION_RE.search(user_agent)
+    if safari and int(safari.group(1)) < _MIN_SAFARI_VERSION:
         return "bot"
     if _MOBILE_RE.search(user_agent):
         return "mobile"
