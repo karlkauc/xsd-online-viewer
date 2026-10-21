@@ -5,6 +5,8 @@ Run after a deploy that added or changed content pages:
 
     python3 tools/indexnow_ping.py --key <INDEXNOW_KEY> --site https://www.xsd-viewer.online
 
+``--only /fundsxml`` submits just the URLs whose path starts with that prefix.
+
 The key must already be served at <site>/<key>.txt (env INDEXNOW_KEY on the service).
 Standard library only, so it runs anywhere deploy.sh runs.
 """
@@ -30,9 +32,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--key", required=True)
     parser.add_argument("--site", required=True, help="canonical origin, e.g. https://www.xsd-viewer.online")
+    parser.add_argument("--only", metavar="PREFIX", help="only paths starting with this, e.g. /fundsxml")
     args = parser.parse_args()
     site = args.site.rstrip("/")
     urls = sitemap_urls(site)
+    if args.only:
+        urls = [u for u in urls if urlsplit(u).path.startswith(args.only)]
     if not urls:
         print("no URLs in the sitemap", file=sys.stderr)
         return 1
