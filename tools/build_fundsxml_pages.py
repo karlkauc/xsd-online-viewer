@@ -202,7 +202,7 @@ def main() -> int:
         "regulatory reporting — between asset managers, custodians, distributors and data vendors. "
         "Each release below has a page with its structure and what changed compared with the previous one.",
         "",
-        "Need Solvency II look-through data? The [TPT ⇄ FundsXML Converter](/go/tpt-converter) "
+        "Need Solvency II look-through data? The [Fund Data Converter](/go/tpt-converter) "
         "turns FinDatEx TPT V7/V8 files into FundsXML 4 and back.",
         "",
         "| Release | Published | Main schema | Changed types and code lists |",

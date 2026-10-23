@@ -8,7 +8,7 @@ const FAMILY = [
   { key: "xsd", label: "XSD Viewer", href: XSD_VIEWER_GO },
   { key: "xml", label: "XML Viewer", href: XML_VIEWER_GO },
   { key: "odata", label: "OData Viewer", href: ODATA_VIEWER_GO },
-  { key: "tpt", label: "TPT Converter", href: TPT_CONVERTER_GO },
+  { key: "tpt", label: "Fund Data Converter", href: TPT_CONVERTER_GO },
   { key: "desktop", label: "Desktop app", href: FREEXMLTOOLKIT_GO },
 ] as const;
 

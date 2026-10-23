@@ -275,9 +275,9 @@ export default function App() {
       },
       {
         key: "tpt-converter",
-        label: "TPT Converter ↗",
+        label: "Fund Data Converter ↗",
         title: "Sister tool: convert Solvency II TPT (V7/V8) files to FundsXML 4 and back",
-        ariaLabel: "Open TPT ⇄ FundsXML Converter (sister tool for Solvency II TPT files)",
+        ariaLabel: "Open Fund Data Converter (sister tool for TPT, FundsXML and openfunds files)",
         href: TPT_CONVERTER_GO,
         external: true,
       },

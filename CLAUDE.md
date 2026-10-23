@@ -113,7 +113,7 @@ cached and a soft reload can keep showing the old UI.
 
 ## Conventions worth knowing
 
-- **Sister sites and usage stats**: links to the XML/OData viewers and the TPT converter go through
+- **Sister sites and usage stats**: links to the XML/OData viewers and the Fund Data Converter (formerly TPT converter) go through
   `/go/xml-viewer`, `/go/odata-viewer`, `/go/tpt-converter` (`app/api/go.py`), which add `utm_source=xsd-viewer` — the sites send no
   Referer. Page views store `utm_source`/`utm_medium`/`utm_campaign` (slugs only), the Share button
   pings `POST /api/usage/share` (event `share`). New `usage_event` columns must exist in the DB

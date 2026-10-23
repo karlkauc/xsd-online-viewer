@@ -18,7 +18,7 @@ FAMILY: tuple[tuple[str, str, str], ...] = (
     ("xsd", "XSD Viewer", "/go/xsd-viewer"),
     ("xml", "XML Viewer", "/go/xml-viewer"),
     ("odata", "OData Viewer", "/go/odata-viewer"),
-    ("tpt", "TPT Converter", "/go/tpt-converter"),
+    ("tpt", "Fund Data Converter", "/go/tpt-converter"),
     ("desktop", "Desktop app", "/go/freexmltoolkit"),
 )
 
