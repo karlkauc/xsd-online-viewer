@@ -30,7 +30,7 @@ SISTER_URLS: dict[str, str] = {
     "xsd-viewer": "https://www.xsd-viewer.online/",
     "xml-viewer": "https://www.xml-viewer.online/",
     "odata-viewer": "https://www.odata-viewer.online/",
-    "tpt-converter": "https://converter.status20.net/",
+    "tpt-converter": "https://www.fund-data-converter.eu/",
 }
 
 

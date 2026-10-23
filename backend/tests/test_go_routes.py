@@ -48,7 +48,7 @@ def test_sister_redirects_carry_utm_source() -> None:
     assert client.get("/go/xsd-viewer").headers["location"] == "https://www.xsd-viewer.online/"
     tpt = client.get("/go/tpt-converter")
     assert tpt.status_code == 302
-    assert tpt.headers["location"] == "https://converter.status20.net/?utm_source=xsd-viewer&utm_medium=sister"
+    assert tpt.headers["location"] == "https://www.fund-data-converter.eu/?utm_source=xsd-viewer&utm_medium=sister"
 
 
 def test_share_ping_is_204() -> None:
