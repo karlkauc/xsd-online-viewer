@@ -89,10 +89,11 @@ test("the header title links back to a clean start page", async ({ page }) => {
 
 test("header shows the secondary actions inline while there is room for them", async ({ page }) => {
   // The split between inline buttons and the "More" menu is measured, not a
-  // breakpoint: on the landing page at 1280 px only Search and the theme
+  // breakpoint: on the landing page at 1600 px only Search and the theme
   // toggle compete for space, so every secondary action — Sponsor included —
-  // stays inline and there is no menu at all (it used to fold below 1536 px).
-  await page.setViewportSize({ width: 1280, height: 800 });
+  // stays inline and there is no menu at all. (Since the OData Viewer and
+  // Fund Data Converter links joined the header, 1280 px is no longer enough.)
+  await page.setViewportSize({ width: 1600, height: 800 });
   await page.goto("/");
   const banner = page.getByRole("banner");
   await expect(banner.getByRole("link", { name: "Support this project on GitHub Sponsors" })).toBeVisible();
@@ -100,6 +101,20 @@ test("header shows the secondary actions inline while there is room for them", a
   await expect(banner.getByRole("button", { name: "More actions" })).toHaveCount(0);
   const overflow = await banner.evaluate((el) => el.scrollWidth - el.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test("header folds the trailing actions into the menu when they do not fit", async ({ page }) => {
+  // At 1280 px the trailing actions fold; they must stay reachable and the
+  // header must not overflow.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  const banner = page.getByRole("banner");
+  const overflow = await banner.evaluate((el) => el.scrollWidth - el.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  await expect(banner.getByRole("button", { name: "More actions" })).toBeVisible();
+  await expect(banner.getByRole("button", { name: "About this app" })).toHaveCount(0);
+  await banner.getByRole("button", { name: "More actions" }).click();
+  await expect(page.getByRole("menuitem", { name: "About this app" })).toBeVisible();
 });
 
 for (const width of [1024, 1280, 1440, 1600]) {
