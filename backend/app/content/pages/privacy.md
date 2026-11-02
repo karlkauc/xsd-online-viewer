@@ -90,8 +90,7 @@ These providers process data for us:
 
 - **Google Cloud** runs the site and keeps the request logs (Cloud Run, region europe-west1, Belgium). Google may
   process data outside the EU. Such transfers are covered by its data processing terms.
-- **Hetzner Online GmbH**, Germany, hosts the statistics database and a test copy of the site at
-  xsd-viewer.status20.net, whose web server also receives request data.
+- **Hetzner Online GmbH**, Germany, hosts the statistics database.
 
 We do not sell data or pass it to anyone else, unless the law requires it.
 
