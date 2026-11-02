@@ -88,8 +88,8 @@ one click away, including its `xmldsig-core-schema.xsd` companion.
 
 - **Your schemas are not stored.** Uploads are parsed in memory and dropped
   from a short-lived cache; no file persistence, no third-party analytics.
-  The public site records anonymous **aggregate usage statistics** (a daily
-  rotating visitor hash — never the raw IP —, country, browser family,
+  The public site records pseudonymous **usage statistics** (a daily
+  rotating visitor hash — the raw IP is not kept in the statistics —, country, browser family,
   referrer, the schema's file name / URL / target namespace and size, parse
   duration and outcome). Schema *files* are never written anywhere. The one
   exception: if a generated sample XML fails its schema check, the generated

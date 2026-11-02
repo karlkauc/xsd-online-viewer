@@ -511,8 +511,8 @@ sys.exit(0 if report["is_valid"] else 1)`}</Pre>
               "Privacy",
               "—",
               <>
-                Schemas and documents are processed in memory and are not stored; only anonymous
-                usage statistics (no IP address) are recorded. The exception: when a generated
+                Schemas and documents are processed in memory and are not stored; only usage
+                statistics (no raw IP address) are recorded. The exception: when a generated
                 sample XML fails its schema check, the generated document and short XSD excerpts
                 around the declarations at fault are kept so the generator can be fixed.
               </>,

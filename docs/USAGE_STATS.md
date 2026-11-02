@@ -1,9 +1,11 @@
-# Anonymous usage statistics
+# Usage statistics
 
-The public site records **aggregate, anonymous** usage so the viewer can be
+The public site records **pseudonymous** usage so the viewer can be
 improved based on real use: how many people load schemas, from where, which
 schemas, how big they are and how long they take to parse. **Schema files are
-never stored**, and the raw client IP is neither stored nor logged.
+never stored**. The application neither stores nor logs the raw client IP; Cloud Run's request logs do (30 days,
+`_Default` log bucket). The public statement is `backend/app/content/pages/privacy.md`: change it together with
+what is collected.
 
 One narrow exception exists so the sample-XML generator can be fixed: when a
 generated sample document fails its own schema check, the generated document

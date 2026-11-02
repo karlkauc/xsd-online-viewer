@@ -207,3 +207,16 @@ def test_every_page_is_reachable_from_the_guides_hub() -> None:
 def test_content_pages_link_back_to_the_hub() -> None:
     page = next(p for s, p in all_pages().items() if s != "guides")
     assert 'href="/guides"' in render_page(page, "https://example.test")
+
+
+def test_imprint_and_privacy_are_linked_but_not_indexed(client) -> None:
+    client, _ = client
+    for path, heading in (("/imprint", "Imprint and about"), ("/privacy", "Privacy policy")):
+        r = client.get(path)
+        assert r.status_code == 200
+        assert f"<h1>{heading}</h1>" in r.text
+        assert '<meta name="robots" content="noindex" />' in r.text
+        assert ">Guides</a>" not in r.text.split("<h1>")[0]
+        assert 'href="/imprint"' in r.text and 'href="/privacy"' in r.text
+    sitemap = client.get("/sitemap.xml").text
+    assert "/imprint" not in sitemap and "/privacy" not in sitemap

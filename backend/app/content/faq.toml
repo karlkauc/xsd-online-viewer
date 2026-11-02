@@ -21,7 +21,8 @@ file could be the root, it asks which one.
 q = "Is my schema stored?"
 a = """
 No. Uploads are parsed in memory and dropped from a short-lived cache; schema files are never written to disk.
-The anonymous usage statistics record the file name or URL, size and outcome, never the content.
+The usage statistics record the file name or URL, size and outcome, and the error message of a failed load, which can
+quote a short piece of the file. Failed sample documents keep a few XSD lines; see the [privacy policy](/privacy).
 To keep everything inside your network, [run the viewer with Docker](https://github.com/karlkauc/xsd-online-viewer#self-host-with-docker).
 """
 

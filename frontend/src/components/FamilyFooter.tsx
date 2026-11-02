@@ -35,6 +35,14 @@ export function FamilyFooter({ className }: { className?: string }) {
       <a className="underline" href="/guides">
         Guides and resources
       </a>
+      {" · "}
+      <a className="underline" href="/imprint" target="_blank" rel="noopener noreferrer">
+        Imprint
+      </a>
+      {" · "}
+      <a className="underline" href="/privacy" target="_blank" rel="noopener noreferrer">
+        Privacy
+      </a>
     </p>
   );
 }

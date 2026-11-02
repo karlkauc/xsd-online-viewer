@@ -208,8 +208,8 @@ export function AboutDialog() {
         </ul>
 
         <p className="mt-4 text-[11px] text-slate-500 dark:text-slate-400">
-          Uploaded schemas are parsed in memory and dropped after a short cache period. Anonymous
-          usage statistics are recorded without your IP address; your schema files are never stored.
+          Uploaded schemas are parsed in memory and dropped after a short cache period. Usage
+          statistics are recorded without your raw IP address; your schema files are never stored.
           If a generated sample XML fails its schema check, the generated document and a few lines
           of the XSD around the declarations at fault are kept so the generator can be fixed.
         </p>
