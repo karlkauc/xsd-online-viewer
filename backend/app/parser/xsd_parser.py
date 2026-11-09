@@ -435,6 +435,10 @@ def _namespace_and_local(tag: str) -> tuple[str | None, str]:
 # files on GitHub & co. frequently violate it with a stray leading newline.
 _LEADING_WS_BEFORE_DECL_RE = re.compile(rb"\A(?:\xef\xbb\xbf)?\s+(?=<\?xml)")
 
+# The declaration written twice (a template's header plus the pasted file's
+# own): everything up to the last of the leading declarations goes.
+_REPEATED_DECL_RE = re.compile(rb"\A(?:\xef\xbb\xbf)?\s*(?:<\?xml\s[^>]*\?>\s*)+(?=<\?xml\s)")
+
 
 # A Markdown code fence around the schema — what a chat assistant's answer
 # looks like when copied wholesale. The closing fence may be followed by
@@ -477,6 +481,14 @@ def _strip_browser_view(content: bytes) -> tuple[bytes, bool]:
     if _FOLDED_NODE_RE.search(body):
         return content, False
     return _FOLD_MARKER_RE.sub(rb"\1", body), True
+
+
+def _strip_repeated_xml_declaration(content: bytes) -> tuple[bytes, bool]:
+    """Keep only the last of several ``<?xml …?>`` declarations at the top."""
+    match = _REPEATED_DECL_RE.match(content)
+    if match is None:
+        return content, False
+    return content[match.end() :], True
 
 
 def _strip_whitespace_before_xml_declaration(content: bytes) -> tuple[bytes, bool]:
@@ -644,6 +656,20 @@ class XsdParser:
                         f"{filename}: this is a copy of the browser's rendered XML view; its "
                         "banner and fold markers ('-') were removed. 'View page source' "
                         "(Ctrl+U) shows the file itself."
+                    ),
+                    file_id=file_id,
+                    line=1,
+                )
+            )
+        content, repeated = _strip_repeated_xml_declaration(content)
+        if repeated:
+            self.state.diagnostics.append(
+                Diagnostic(
+                    severity="warning",
+                    message=(
+                        f"{filename}: the XML declaration (<?xml …?>) appeared more than once "
+                        "at the top; only the last one was kept. A file may carry a single "
+                        "declaration, as its very first line."
                     ),
                     file_id=file_id,
                     line=1,

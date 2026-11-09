@@ -266,6 +266,12 @@ def test_common_syntax_errors_say_what_to_do(data: bytes, libxml2_says: str, hin
     assert "line " in msg  # libxml2's position survives
 
 
+def test_misplaced_declaration_quotes_what_precedes_it() -> None:
+    data = b"<!-- generated -->\n<?xml version='1.0'?><a/>"
+    msg = humanize_syntax_error(_syntax_error(data), "x.xsd", data)
+    assert "(before it: '<!-- generated -->')" in msg and "very first thing" in msg, msg
+
+
 def test_undeclared_schema_prefix_names_the_missing_xmlns() -> None:
     data = b'<xs:element name="a"/>'
     msg = humanize_syntax_error(_syntax_error(data), "schema.xsd", data)

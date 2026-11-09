@@ -74,6 +74,26 @@ def is_binary(head: bytes) -> bool:
     return any(byte < 0x20 and byte not in _TEXT_CONTROL_BYTES for byte in head)
 
 
+_MISPLACED_DECL_MARKER = "XML declaration allowed only at the start of the document"
+
+
+def misplaced_declaration_context(message: str, content: bytes) -> str:
+    """For lxml's "XML declaration allowed only at the start", quote what
+    precedes the ``<?xml`` so the visitor sees what to delete. Empty otherwise."""
+    if _MISPLACED_DECL_MARKER not in message:
+        return ""
+    at = content.find(b"<?xml", 1)
+    if at <= 0:
+        return ""
+    before = content[:at].decode("utf-8", "replace").lstrip("\ufeff").strip()
+    if not before:
+        return ""
+    before = " ".join(before.split())
+    if len(before) > 60:
+        before = before[:57] + "…"
+    return f" (before it: {before!r})"
+
+
 def humanize_syntax_error(exc: etree.XMLSyntaxError, filename: str, content: bytes) -> str:
     """Describe a well-formedness failure of ``content`` (the file's bytes).
 
@@ -98,8 +118,9 @@ def humanize_syntax_error(exc: etree.XMLSyntaxError, filename: str, content: byt
             return f"{filename}: not an XML file — it starts with binary data ({head!r}), not text"
         return f"{filename}: not an XML file (it starts with {head!r} instead of '<')"
     message = _LXML_LOCATION_RE.sub("", str(exc))
+    context = misplaced_declaration_context(message, content)
     hint = _syntax_hint(message)
-    return f"{filename}: {message} — {hint}" if hint else f"{filename}: {message}"
+    return f"{filename}: {message}{context} — {hint}" if hint else f"{filename}: {message}{context}"
 
 
 XSD_NS = "http://www.w3.org/2001/XMLSchema"

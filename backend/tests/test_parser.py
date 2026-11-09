@@ -746,6 +746,18 @@ class TestLeadingWhitespaceBeforeXmlDeclaration:
         assert main.content.startswith("<?xml")
 
 
+class TestRepeatedXmlDeclaration:
+    """A declaration written twice (template header plus the pasted file's own)
+    is a hard parse error in lxml; the viewer keeps the last one and says so."""
+
+    def test_is_parsed_with_a_warning(self, library_xsd_bytes: bytes) -> None:
+        content = b'<?xml version="1.0" encoding="UTF-8"?>\n' + library_xsd_bytes
+        model = parse_single(content, "library.xsd")
+        assert _find_element(model, "Library") is not None
+        warnings = [d for d in model.diagnostics if d.severity == "warning"]
+        assert any("more than once" in d.message for d in warnings)
+
+
 def _find_by_name(model, name: str):
     """Best-effort: the first element anywhere in the model (top-level or
     nested in a content model) with this name."""
