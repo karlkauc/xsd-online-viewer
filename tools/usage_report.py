@@ -3,7 +3,8 @@
 
 Reads the `usage_event` table (docs/USAGE_STATS.md) on the Hetzner VPS and
 prints aggregates: volume per day, sources, visitors, countries, referrers,
-top schemas, error rate, parse-duration percentiles, feedback, DB size. No writes.
+top schemas, error rate, parse-duration percentiles, funnel, browser features,
+automatic reloads, load-failure reasons, campaigns, feedback, DB size. No writes.
 
 Connection (env-overridable; defaults match the Cloud Run deploy):
     USAGE_DB_HOST  (default 62.238.116.11)
@@ -68,6 +69,8 @@ def main() -> None:
         f"user={os.environ.get('USAGE_DB_USER', DEFAULT_USER)} "
         f"password={resolve_password()} sslmode=require"
     )
+    # The column arrived later; older databases lack it until usage_stats.sql is re-applied.
+    reload_col = "is_reload"
     scope = f"last {args.days} days" if args.days else "all time"
     print(f"Online XSD Viewer — usage overview ({scope})")
 
@@ -95,6 +98,39 @@ def main() -> None:
             SELECT source, status, count(*) n, count(DISTINCT visitor_hash) visitors,
                    round(avg(input_bytes)/1024, 1) avg_kb
             FROM usage_event WHERE event_type='export' {and_} GROUP BY 1,2 ORDER BY 1,3 DESC;"""),
+        ("Validations by source & status", f"""
+            SELECT source, status, count(*) n, count(DISTINCT visitor_hash) visitors,
+                   round(avg(duration_ms)) avg_ms
+            FROM usage_event WHERE event_type='validate' {and_} GROUP BY 1,2 ORDER BY 1,3 DESC;"""),
+        ("Funnel (visitor-days, no bots)", f"""
+            WITH v AS (
+              SELECT received_at::date d, visitor_hash,
+                     bool_or(event_type='page_view' AND path IN ('/','/url','/paste','/fundsxml','/iso20022')) app,
+                     bool_or(event_type='schema_load' AND NOT {reload_col}) loaded,
+                     bool_or(event_type='schema_load' AND status='ok') loaded_ok,
+                     bool_or(event_type='export') exported,
+                     bool_or(event_type='validate') validated,
+                     bool_or(event_type IN ('feature','share')) feature
+              FROM usage_event WHERE device <> 'bot' AND visitor_hash IS NOT NULL {and_} GROUP BY 1,2)
+            SELECT count(*) visitor_days, count(*) FILTER (WHERE app) opened_app,
+                   count(*) FILTER (WHERE loaded) loaded, count(*) FILTER (WHERE loaded_ok) loaded_ok,
+                   count(*) FILTER (WHERE exported) exported, count(*) FILTER (WHERE validated) validated,
+                   count(*) FILTER (WHERE feature) used_feature
+            FROM v;"""),
+        ("Browser features & shares", f"""
+            SELECT event_type, source, count(*) n, count(DISTINCT visitor_hash) visitors
+            FROM usage_event WHERE event_type IN ('feature','share') {and_} GROUP BY 1,2 ORDER BY 3 DESC;"""),
+        ("Automatic reloads (server lost the schema)", f"""
+            SELECT count(*) FILTER (WHERE event_type='schema_load' AND {reload_col}) reloads,
+                   count(*) FILTER (WHERE event_type='schema_load' AND NOT {reload_col}) user_loads,
+                   count(*) FILTER (WHERE status='rejected' AND error_detail='schema not found or expired') expired_404
+            FROM usage_event {where};"""),
+        ("Load failures by reason", f"""
+            SELECT left(regexp_replace(regexp_replace(error_detail, '^.*?\\.(xsd|xml|zip|txt)[^:]*: ', ''),
+                        'line [0-9]+, column [0-9]+', 'L', 'g'), 70) reason,
+                   count(*) n, count(DISTINCT visitor_hash) visitors
+            FROM usage_event WHERE event_type='schema_load' AND status <> 'ok' {and_}
+            GROUP BY 1 ORDER BY 2 DESC LIMIT 15;"""),
         ("Parse duration percentiles (ok loads)", f"""
             SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms) p50,
                    percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) p95,
@@ -110,9 +146,15 @@ def main() -> None:
         ("Countries (non-bot)", f"""
             SELECT coalesce(country_code,'??') cc, count(DISTINCT visitor_hash) visitors, count(*) events
             FROM usage_event WHERE device <> 'bot' {and_} GROUP BY 1 ORDER BY 2 DESC LIMIT 15;"""),
-        ("Referrers (page views)", f"""
+        ("Referrers (page views, own site excluded)", f"""
             SELECT coalesce(referrer,'(direct)') referrer, count(*) n
-            FROM usage_event WHERE event_type='page_view' {and_} GROUP BY 1 ORDER BY 2 DESC LIMIT 15;"""),
+            FROM usage_event WHERE event_type='page_view'
+              AND coalesce(referrer,'') !~ '^https?://(www\\.)?xsd-viewer\\.online/' {and_}
+            GROUP BY 1 ORDER BY 2 DESC LIMIT 15;"""),
+        ("Campaigns (utm_source)", f"""
+            SELECT utm_source, coalesce(utm_medium,'') medium, count(*) n, count(DISTINCT visitor_hash) visitors
+            FROM usage_event WHERE event_type='page_view' AND utm_source IS NOT NULL {and_}
+            GROUP BY 1,2 ORDER BY 3 DESC LIMIT 15;"""),
         ("Devices", f"""
             SELECT device, count(*) events, count(DISTINCT visitor_hash) visitors
             FROM usage_event {where} GROUP BY 1 ORDER BY 2 DESC;"""),
@@ -131,6 +173,11 @@ def main() -> None:
     ]
 
     with psycopg.connect(dsn, connect_timeout=20) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM information_schema.columns"
+                        " WHERE table_name='usage_event' AND column_name='is_reload'")
+            if cur.fetchone() is None:
+                queries = [(t, q.replace(reload_col, "false")) for t, q in queries]
         for title, sql in queries:
             print(f"\n### {title}")
             with conn.cursor() as cur:

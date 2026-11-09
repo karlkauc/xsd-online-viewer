@@ -88,6 +88,16 @@ def test_text_and_validate_and_export(
     assert recorder.events[3].error_detail == "schema not found or expired"
 
 
+def test_reload_header_marks_the_load(
+    client: TestClient, recorder: ListRecorder, simple_xsd_bytes: bytes
+) -> None:
+    body = {"filename": "s.xsd", "content": simple_xsd_bytes.decode()}
+    assert client.post("/api/schema/text", json=body).status_code == 200
+    assert client.post("/api/schema/text", json=body, headers={"X-Schema-Reload": "1"}).status_code == 200
+    loads = [e for e in recorder.events if e.event_type == "schema_load"]
+    assert [e.is_reload for e in loads] == [False, True]
+
+
 def test_sample_xml_is_recorded(
     client: TestClient, recorder: ListRecorder, simple_xsd_bytes: bytes
 ) -> None:

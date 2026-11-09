@@ -56,6 +56,9 @@ class UsageEvent:
     utm_source: str | None = None
     utm_medium: str | None = None
     utm_campaign: str | None = None
+    # A schema_load the browser made only because the server had lost the schema
+    # (cache TTL or another Cloud Run instance), not a load by the user.
+    is_reload: bool = False
 
     def as_row(self) -> tuple:
         return tuple(getattr(self, f.name) for f in fields(self))

@@ -20,19 +20,19 @@ export type SchemaSource =
   | { kind: "release"; tag: string; filename: string }
   | { kind: "iso20022"; id: string };
 
-/** Re-run the load that produced the current schema. */
+/** Re-run the load that produced the current schema (marked as a reload for the usage stats). */
 export function reloadSource(source: SchemaSource): Promise<SchemaResponse> {
   switch (source.kind) {
     case "upload":
-      return uploadSchemaFiles(source.files, source.mainFilename);
+      return uploadSchemaFiles(source.files, source.mainFilename, true);
     case "text":
-      return uploadSchemaText(source.content, source.filename);
+      return uploadSchemaText(source.content, source.filename, true);
     case "url":
-      return loadSchemaFromUrl(source.url);
+      return loadSchemaFromUrl(source.url, true);
     case "release":
-      return loadSchemaFromRelease(source.tag, source.filename);
+      return loadSchemaFromRelease(source.tag, source.filename, true);
     case "iso20022":
-      return loadIso20022(source.id);
+      return loadIso20022(source.id, true);
   }
 }
 

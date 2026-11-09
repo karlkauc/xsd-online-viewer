@@ -18,8 +18,9 @@ from app.usage.context import emit
 
 router = APIRouter(tags=["usage"])
 
-# What the copied link loads: a schema URL (/url?src=), a FundsXML release or an ISO 20022 message.
-SHARE_SOURCES = frozenset({"url", "fundsxml", "iso20022"})
+# What the copied link loads: a schema URL (/url?src=), a FundsXML release or an ISO 20022 message;
+# "local" is a link to an uploaded or pasted schema, which only works for someone who has the file.
+SHARE_SOURCES = frozenset({"url", "fundsxml", "iso20022", "local"})
 
 
 @router.post("/usage/share", status_code=204, include_in_schema=False)

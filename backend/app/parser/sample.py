@@ -595,6 +595,7 @@ def _generated_root(ctx: _Context, element: ElementDecl) -> etree._Element:
     namespace = _element_namespace(ctx, element, is_root=True)
     if namespace:
         ctx.prefix_for(namespace)
+    _note_invalid_name(ctx, element.name, element)
     root = etree.Element(_tag(namespace, element.name))
     ctx.emitted = 1
     ctx.open_elements.append(element.id)
@@ -728,8 +729,40 @@ def _unresolved_root(ctx: _Context, element: ElementDecl) -> etree._Element:
 
 
 def _tag(namespace: str | None, name: str | None) -> str:
-    local = name or "element"
+    local = _valid_local_name(name or "element")
     return f"{{{namespace}}}{local}" if namespace else local
+
+
+@lru_cache(maxsize=4096)
+def _is_valid_local_name(name: str) -> bool:
+    try:
+        etree.Element(name)
+    except ValueError:
+        return False
+    return ":" not in name
+
+
+@lru_cache(maxsize=1024)
+def _valid_local_name(name: str) -> str:
+    """``name`` as an XML local name a document can carry.
+
+    lxml does not check that a ``name`` attribute is an NCName, so schemas
+    declaring ``name="xdms:message"`` or ``name="Unternehmen 1"`` load fine --
+    and made the generator crash with "Invalid tag name". Such a schema
+    cannot compile anyway; the sample keeps a recognisable name instead.
+    """
+    if _is_valid_local_name(name):
+        return name
+    local = re.sub(r"[^\w.\-]", "_", name.rsplit(":", 1)[-1].strip()) or "element"
+    if not (local[0].isalpha() or local[0] == "_"):
+        local = "_" + local
+    return local if _is_valid_local_name(local) else "element"
+
+
+def _note_invalid_name(ctx: _Context, name: str | None, decl: object | None) -> None:
+    """Report a declared name that is not an NCName (see :func:`_valid_local_name`)."""
+    if name and not _is_valid_local_name(name):
+        ctx.note("invalid_name", SCHEMA_INCOMPLETE, name, decl)
 
 
 # ---------------------------------------------------------------------------
@@ -1148,6 +1181,7 @@ def _fill_attributes(
             # A restriction taking back an attribute its base declared.
             node.attrib.pop(_tag(namespace, decl.name), None)
             continue
+        _note_invalid_name(ctx, decl.name, decl)
         tag = _tag(namespace, decl.name)
         # An empty string is a value too (fixed=""), so no ``or`` chain here.
         literals = (attribute.fixed, decl.fixed, attribute.default, decl.default)
@@ -1399,6 +1433,7 @@ def _emit_element_particle(
     namespace = _element_namespace(ctx, declaration, is_root=bool(element.ref))
     if namespace:
         ctx.prefix_for(namespace)
+    _note_invalid_name(ctx, declaration.name, declaration)
     child = etree.SubElement(parent, _tag(namespace, declaration.name))
     ctx.emitted += 1
     if optional:

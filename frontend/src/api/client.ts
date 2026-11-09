@@ -46,15 +46,25 @@ async function handle(response: Response): Promise<SchemaResponse> {
  * import each other by file name. `mainFilename` names the root schema (a
  * ZIP entry path or one of the file names); omitted, the backend guesses.
  */
+/**
+ * Marks a load the app makes on its own after the server lost the schema
+ * (`lib/schemaSession.ts`), so the usage stats can tell it from a user's load.
+ */
+function reloadHeaders(reload: boolean): Record<string, string> {
+  return reload ? { "x-schema-reload": "1" } : {};
+}
+
 export async function uploadSchemaFiles(
   files: File[],
   mainFilename?: string,
+  reload = false,
 ): Promise<SchemaResponse> {
   const form = new FormData();
   for (const file of files) form.append("file", file);
   if (mainFilename) form.append("main_filename", mainFilename);
   const response = await fetch(`${API_BASE}/schema/upload`, {
     method: "POST",
+    headers: reloadHeaders(reload),
     body: form,
   });
   return handle(response);
@@ -67,19 +77,20 @@ export function uploadSchemaFile(file: File, mainFilename?: string): Promise<Sch
 export async function uploadSchemaText(
   content: string,
   filename = "schema.xsd",
+  reload = false,
 ): Promise<SchemaResponse> {
   const response = await fetch(`${API_BASE}/schema/text`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...reloadHeaders(reload) },
     body: JSON.stringify({ content, filename }),
   });
   return handle(response);
 }
 
-export async function loadSchemaFromUrl(url: string): Promise<SchemaResponse> {
+export async function loadSchemaFromUrl(url: string, reload = false): Promise<SchemaResponse> {
   const response = await fetch(`${API_BASE}/schema/url`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...reloadHeaders(reload) },
     body: JSON.stringify({ url }),
   });
   return handle(response);
@@ -110,12 +121,13 @@ export interface FundsXmlReleasesResponse {
 export async function loadSchemaFromRelease(
   tagName: string,
   mainFilename: string,
+  reload = false,
 ): Promise<SchemaResponse> {
   const response = await fetch(
     `${API_BASE}/fundsxml/releases/${encodeURIComponent(tagName)}/load`,
     {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...reloadHeaders(reload) },
       body: JSON.stringify({ main_filename: mainFilename }),
     },
   );
@@ -325,7 +337,7 @@ export async function fetchHealth(): Promise<HealthResponse> {
 }
 
 /** Count a copied share link (the copy itself never reaches the server). Fire and forget. */
-export function pingShare(source: "url" | "fundsxml" | "iso20022"): void {
+export function pingShare(source: "url" | "fundsxml" | "iso20022" | "local"): void {
   void fetch(`${API_BASE}/usage/share?source=${source}`, { method: "POST", keepalive: true }).catch(() => undefined);
 }
 
@@ -385,7 +397,10 @@ export async function listIso20022Messages(): Promise<Iso20022Catalog> {
   return (await response.json()) as Iso20022Catalog;
 }
 
-export async function loadIso20022(id: string): Promise<SchemaResponse> {
-  const response = await fetch(`${API_BASE}/iso20022/${encodeURIComponent(id)}/load`, { method: "POST" });
+export async function loadIso20022(id: string, reload = false): Promise<SchemaResponse> {
+  const response = await fetch(`${API_BASE}/iso20022/${encodeURIComponent(id)}/load`, {
+    method: "POST",
+    headers: reloadHeaders(reload),
+  });
   return handle(response);
 }

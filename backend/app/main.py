@@ -228,6 +228,7 @@ async def request_logging(request: Request, call_next):
             ip=client_ip(request),
             user_agent=request.headers.get("user-agent"),
             referrer=request.headers.get("referer"),
+            reload=request.headers.get("x-schema-reload") == "1",
         )
         # A HEAD probe is not a visit (HeadAsGetMiddleware runs the GET handler).
         if tracker is not None and request.method != "HEAD"

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
   loadIso20022,
@@ -13,6 +13,7 @@ import { FundsXmlReleases } from "./FundsXmlReleases";
 import { Iso20022Messages } from "./Iso20022Messages";
 import { UploadError } from "./UploadError";
 import { looksLikeSchema, shouldSniff, XML_VIEWER_URL } from "../lib/uploadErrors";
+import { repairSchemaText } from "../lib/schemaRepair";
 import { listZipEntries, pickMainXsd, xsdEntries } from "../lib/zipEntries";
 import { sourceFromLocation, writeSourcePath, type SchemaSource } from "../lib/schemaSource";
 import { COARSE_POINTER_QUERY, useMediaQuery } from "../lib/useMediaQuery";
@@ -61,6 +62,8 @@ export function Uploader() {
   // the XML viewer without asking the user to pick it again.
   const [lastFile, setLastFile] = useState<File | null>(null);
   const [text, setText] = useState("");
+  // The pasted text that produced the current error, for the one-click namespace fix.
+  const [failedText, setFailedText] = useState<string | null>(null);
   const [url, setUrl] = useState("");
   const [staged, setStaged] = useState<Staged | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -137,23 +140,30 @@ export function Uploader() {
     [upload],
   );
 
-  const handleText = useCallback(async () => {
+  const handleText = useCallback(async (content: string = text) => {
     setError(null);
+    setFailedText(null);
     setErrorFile(undefined);
     setPendingFile(null);
     // Pasted text has no file, but an XML document pasted here by mistake can
     // still be handed to the XML viewer as one.
-    setLastFile(new File([text], "pasted.xml", { type: "application/xml" }));
+    setLastFile(new File([content], "pasted.xml", { type: "application/xml" }));
     setBusy(true);
     try {
-      const response = await uploadSchemaText(text);
-      setSchema(response.schema_id, response.model, { kind: "text", content: text });
+      const response = await uploadSchemaText(content);
+      setSchema(response.schema_id, response.model, { kind: "text", content });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
+      setFailedText(content);
     } finally {
       setBusy(false);
     }
   }, [text, setSchema]);
+
+  const repair = useMemo(
+    () => (mode === "text" && error && failedText !== null && failedText === text ? repairSchemaText(text, error) : null),
+    [mode, error, failedText, text],
+  );
 
   const loadFromUrl = useCallback(
     async (target: string) => {
@@ -436,6 +446,17 @@ export function Uploader() {
       {error && (
         <UploadError
           message={error}
+          repair={
+            repair
+              ? {
+                  label: repair.label,
+                  onClick: () => {
+                    setText(repair.text);
+                    void handleText(repair.text);
+                  },
+                }
+              : undefined
+          }
           schemaName={errorFile}
           file={lastFile ?? undefined}
           onUploadAnyway={pendingFile ? () => void upload([pendingFile], undefined, { force: true }) : undefined}

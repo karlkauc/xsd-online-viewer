@@ -28,13 +28,16 @@ CREATE TABLE IF NOT EXISTS usage_event (
   error_detail     text,                 -- exception message, truncated to 255
   utm_source       text,                 -- page_view: ?utm_source= slug (sister sites, posts), else NULL
   utm_medium       text,
-  utm_campaign     text
+  utm_campaign     text,
+  is_reload        boolean     NOT NULL DEFAULT false -- schema_load re-submitted by the browser after the server lost the schema
 );
 
 -- Apply BEFORE deploying a release that writes them: the insert names every column.
 ALTER TABLE usage_event ADD COLUMN IF NOT EXISTS utm_source text;
 ALTER TABLE usage_event ADD COLUMN IF NOT EXISTS utm_medium text;
 ALTER TABLE usage_event ADD COLUMN IF NOT EXISTS utm_campaign text;
+-- schema_load the browser re-submitted after "schema not found or expired" (schemaSession.ts).
+ALTER TABLE usage_event ADD COLUMN IF NOT EXISTS is_reload boolean NOT NULL DEFAULT false;
 -- 'share' (copied share link) and 'feature' (browser-only feature used, F1) joined the
 -- event types later; widen the check in place.
 ALTER TABLE usage_event DROP CONSTRAINT IF EXISTS usage_event_event_type_check;

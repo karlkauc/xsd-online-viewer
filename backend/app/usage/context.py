@@ -83,6 +83,8 @@ class RequestUsage:
     user_agent: str | None
     referrer: str | None
     emitted: bool = False
+    # The browser re-submitted a schema the server had lost (X-Schema-Reload, schemaSession.ts).
+    reload: bool = False
 
 
 _request_usage: ContextVar[RequestUsage | None] = ContextVar("request_usage", default=None)
@@ -120,6 +122,7 @@ def emit(event_type: str, **fields: Any) -> bool:
             device=classify_device(ctx.user_agent),
             app_version=release_version(),
             referrer=clean_referrer(ctx.referrer),
+            is_reload=ctx.reload,
             **fields,
         )
         if event.error_detail:

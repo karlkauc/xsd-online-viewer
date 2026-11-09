@@ -9,13 +9,15 @@ interface Props {
   schemaName?: string;
   /** The uploaded file, so an XML document can be handed to the XML viewer. */
   file?: File;
+  /** A one-click fix for pasted text (`lib/schemaRepair.ts`): edit the text and load it again. */
+  repair?: { label: string; onClick: () => void };
 }
 
 export function openFeedback(detail: { errorDetail?: string; schemaName?: string } = {}) {
   window.dispatchEvent(new CustomEvent("xsdv:open-feedback", { detail }));
 }
 
-export function UploadError({ message, onUploadAnyway, schemaName, file }: Props) {
+export function UploadError({ message, onUploadAnyway, schemaName, file, repair }: Props) {
   const { kind, title } = classifyUploadError(message);
   const [handoff, setHandoff] = useState<"idle" | "sending" | "sent" | "failed" | "unsupported">("idle");
 
@@ -38,6 +40,11 @@ export function UploadError({ message, onUploadAnyway, schemaName, file }: Props
       <p className="mt-1 font-mono text-xs text-red-700/80 dark:text-red-300/80 break-words">{message}</p>
 
       <div className="mt-3 text-slate-700 dark:text-slate-300 space-y-2">
+        {repair && (
+          <button type="button" className="btn btn-primary inline-block" onClick={repair.onClick}>
+            {repair.label}
+          </button>
+        )}
         {kind === "xml-document" && (
           <>
             <p>
@@ -139,6 +146,11 @@ export function UploadError({ message, onUploadAnyway, schemaName, file }: Props
             <p className="text-xs text-slate-500 dark:text-slate-400">
               Cross-stitch patterns can only be opened in the program that created them (or a
               viewer made for that format); this viewer cannot display them.
+            </p>
+            <p lang="ru" className="text-xs text-slate-500 dark:text-slate-400">
+              Это схема для вышивки крестом (Pattern Maker, HobbyWare), а не XML Schema. Расширение{" "}
+              <code>.xsd</code> у них совпадает, но формат другой: откройте файл в программе для
+              вышивки, этот сайт показывать такие схемы не умеет.
             </p>
           </>
         )}

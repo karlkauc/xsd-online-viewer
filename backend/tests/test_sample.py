@@ -918,3 +918,25 @@ def test_a_complete_schema_misses_no_references(simple_xsd_bytes: bytes) -> None
     element = find_element(model, "element:{http://example.com/simple}Person")
     _, report = generate_sample_with_report(model, element, SampleOptions(include_optional=True))
     assert report.missing_references == []
+
+
+def test_invalid_declared_names_do_not_crash_the_generator() -> None:
+    # Seen in the usage stats: name="xdms:message", name="Unternehmen 1".
+    # lxml loads such a schema; the generator used to raise "Invalid tag name".
+    xsd = b"""<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+      <xs:element name="xdms:message">
+        <xs:complexType>
+          <xs:sequence><xs:element name="Unternehmen 1" type="xs:string"/></xs:sequence>
+          <xs:attribute name="2nd" type="xs:string" use="required"/>
+        </xs:complexType>
+      </xs:element>
+    </xs:schema>"""
+    model = parse_single(xsd, "bad-names.xsd")
+    root_decl = next(e for e in model.elements if e.name == "xdms:message")
+    document, report = generate_sample_with_report(model, root_decl)
+    root = etree.fromstring(document.encode())
+    assert root.tag == "message"
+    assert [child.tag for child in root] == ["Unternehmen_1"]
+    assert root.get("_2nd") is not None
+    invalid = [e.where for e in report.entries if e.reason == "invalid_name"]
+    assert invalid == ["xdms:message", "2nd", "Unternehmen 1"]
