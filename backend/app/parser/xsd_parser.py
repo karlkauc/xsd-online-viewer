@@ -8,12 +8,15 @@ locations) rather than the compiled post-schema validation infoset.
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import logging
 import posixpath
 import re
+import threading
 import zipfile
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from functools import partial
@@ -83,6 +86,24 @@ def _xsd(tag: str) -> str:
     return f"{{{XSD_NS}}}{tag}"
 
 
+# ``elem.find(_xsd(local))`` and ``findall`` go through ElementPath, and even
+# ``iterchildren(tag)`` costs more than a plain loop over the two or three
+# children a schema node has. These run for nearly every node.
+def _child(elem: etree._Element, local: str) -> etree._Element | None:
+    """The first ``xs:<local>`` child, as ``elem.find(_xsd(local))``."""
+    tag = _xsd(local)
+    for child in elem:
+        if child.tag == tag:
+            return child
+    return None
+
+
+def _children(elem: etree._Element, local: str) -> list[etree._Element]:
+    """Every ``xs:<local>`` child, as ``elem.findall(_xsd(local))``."""
+    tag = _xsd(local)
+    return [child for child in elem if child.tag == tag]
+
+
 _VC_ATTR_MAP: tuple[tuple[str, str], ...] = (
     ("min_version", "minVersion"),
     ("max_version", "maxVersion"),
@@ -90,6 +111,10 @@ _VC_ATTR_MAP: tuple[tuple[str, str], ...] = (
     ("type_unavailable", "typeUnavailable"),
     ("facet_available", "facetAvailable"),
     ("facet_unavailable", "facetUnavailable"),
+)
+_VC_PREFIX = f"{{{VC_NS}}}"
+_VC_ATTR_CLARK: tuple[tuple[str, str], ...] = tuple(
+    (field_name, f"{_VC_PREFIX}{local}") for field_name, local in _VC_ATTR_MAP
 )
 
 
@@ -100,9 +125,16 @@ def _vc_attrs(elem: etree._Element) -> VersionConstraints | None:
     declared in the document (unusual but spec-conformant), so we always
     look up by the Clark name ``{VC_NS}local``.
     """
+    # Called for nearly every node of the schema, and almost none carries
+    # a vc:* attribute: look at the few attribute names first.
+    for name in elem.keys():  # noqa: SIM118 (iterating an element yields its children)
+        if name.startswith(_VC_PREFIX):
+            break
+    else:
+        return None
     values: dict[str, str] = {}
-    for field_name, local in _VC_ATTR_MAP:
-        raw = elem.get(f"{{{VC_NS}}}{local}")
+    for field_name, clark in _VC_ATTR_CLARK:
+        raw = elem.get(clark)
         if raw is not None:
             values[field_name] = raw
     if not values:
@@ -165,14 +197,21 @@ def _vc_excluded(elem: etree._Element) -> bool:
     return False
 
 
+def _has_vc_attributes(root: etree._Element) -> bool:
+    """Whether any element of ``root``'s document carries a vc:* attribute.
+
+    One XPath query in libxml2 instead of a Python loop over every attribute.
+    """
+    return bool(root.xpath("boolean(//@*[namespace-uri()=$ns])", ns=VC_NS))
+
+
 def _prune_conditional(root: etree._Element) -> list[int]:
     """Remove what vc:* excludes from the tree below ``root``; the lines removed.
 
     The specification makes this a pre-processing step on the schema document:
     the element and everything in it are gone before anything else looks.
+    Only called for a document with vc:* attributes (``_has_vc_attributes``).
     """
-    if not any(VC_NS in name for elem in root.iter() for name in elem.attrib):
-        return []
     excluded = [
         elem for elem in root.iterdescendants() if isinstance(elem.tag, str) and _vc_excluded(elem)
     ]
@@ -209,22 +248,78 @@ _INNER_ANNOTATED: frozenset[str] = frozenset(
 def _foreign_attributes(elem: etree._Element) -> list[ForeignAttribute]:
     """Attributes of ``elem`` in a namespace other than XSD's, vc:* aside."""
     found: list[ForeignAttribute] = []
-    prefixes = {uri: prefix for prefix, uri in (elem.nsmap or {}).items() if prefix}
-    prefixes[XML_NS] = "xml"
-    for name, value in elem.attrib.items():
-        ns, local = _namespace_and_local(name)
-        if ns is None or ns in (XSD_NS, VC_NS):
+    # ``nsmap`` walks up the tree; only build the prefix table once an
+    # attribute actually needs one (rare: most attributes have no namespace).
+    prefixes: dict[str, str] | None = None
+    for name in elem.keys():  # noqa: SIM118 (iterating an element yields its children)
+        if not name.startswith("{"):
             continue
+        ns, local = _namespace_and_local(name)
+        if ns in (XSD_NS, VC_NS):
+            continue
+        if prefixes is None:
+            prefixes = {uri: prefix for prefix, uri in (elem.nsmap or {}).items() if prefix}
+            prefixes[XML_NS] = "xml"
         prefix = prefixes.get(ns)
         found.append(
             ForeignAttribute(
                 namespace=ns,
                 name=local,
                 qname=f"{prefix}:{local}" if prefix else local,
-                value=value,
+                value=elem.get(name),
             )
         )
     return found
+
+
+_ANNOTATION_TAG = _xsd("annotation")
+_RESTRICTION_TAG = _xsd("restriction")
+_LIST_TAG = _xsd("list")
+_UNION_TAG = _xsd("union")
+_INNER_ANNOTATED_TAGS: dict[str, str] = {_xsd(local): local for local in _INNER_ANNOTATED}
+
+
+def _collect_annotation_parts(
+    owner: etree._Element,
+    context: str | None,
+    documentation: list[DocumentationFragment],
+    appinfo: list[AppInfo],
+) -> None:
+    """The xs:documentation / xs:appinfo of ``owner``'s xs:annotation children,
+    and of those of its ``_INNER_ANNOTATED`` children (tagged with ``context``)."""
+    for child in owner:
+        tag = child.tag
+        local = _INNER_ANNOTATED_TAGS.get(tag)
+        if local is not None:
+            # A reference says which file, not just "import".
+            target = _token(child, "schemaLocation") or _token(child, "namespace")
+            _collect_annotation_parts(
+                child, f"{local} {target}" if target else local, documentation, appinfo
+            )
+            continue
+        if tag != _ANNOTATION_TAG:
+            continue
+        for sub in child:
+            if not isinstance(sub.tag, str):
+                continue
+            _, sub_local = _namespace_and_local(sub.tag)
+            if sub_local == "documentation":
+                documentation.append(
+                    DocumentationFragment(
+                        lang=sub.get(f"{{{XML_NS}}}lang"),
+                        text=_text(sub).strip(),
+                        source_uri=_token(sub, "source"),
+                        context=context,
+                    )
+                )
+            elif sub_local == "appinfo":
+                appinfo.append(
+                    AppInfo(
+                        source_uri=sub.get("source"),
+                        raw_xml=etree.tostring(sub, encoding="unicode").strip(),
+                        context=context,
+                    )
+                )
 
 
 def _local_qualified(
@@ -417,6 +512,10 @@ class _LoadedFile:
     target_ns: str | None
     relationship: Literal["main", "include", "import", "redefine", "override"]
     raw_content: bytes
+    # Whether the document carried vc:* attributes when it was loaded. Pruning
+    # leaves the tree as it was unless it removed something, and then the
+    # schema counts as 1.1 anyway (``_BuildState.conditional``).
+    has_vc_attributes: bool = False
 
     @property
     def root(self) -> etree._Element:
@@ -610,10 +709,50 @@ class _BuildState:
     extensions: list[tuple[ComplexType, etree._Element]] = field(default_factory=list)
     # (referring file id, schemaLocation as written) -> id of the file it loaded.
     reference_targets: dict[tuple[str, str], str] = field(default_factory=dict)
+    # Whether any xs:key / xs:keyref / xs:unique was parsed; without one the
+    # identity post-passes have nothing to do and need not walk the model.
+    has_identity_constraints: bool = False
 
     def next_anon(self) -> int:
         self._id_counter += 1
         return self._id_counter
+
+
+_gc_pause_lock = threading.Lock()
+_gc_pause_depth = 0
+_gc_pause_reenable = False
+
+
+@contextmanager
+def _cyclic_gc_paused() -> Iterator[None]:
+    """Keep the cyclic garbage collector out of a parse.
+
+    A big schema becomes hundreds of thousands of model objects, all of them
+    alive until the parse ends. Every collection the allocations trigger walks
+    them again and finds nothing (the parse makes no reference cycles), which
+    on CPython 3.12 was a third of the time for a 15 MB schema. Reference
+    counting still frees everything as usual.
+
+    Afterwards ``freeze``/``unfreeze`` files the survivors straight into the
+    oldest generation (a list splice, no traversal) instead of leaving them
+    young, where the next few collections would walk them all once more.
+    Nested and concurrent parses share one pause; the last one out ends it.
+    """
+    global _gc_pause_depth, _gc_pause_reenable
+    with _gc_pause_lock:
+        if _gc_pause_depth == 0:
+            _gc_pause_reenable = gc.isenabled()
+            gc.disable()
+        _gc_pause_depth += 1
+    try:
+        yield
+    finally:
+        with _gc_pause_lock:
+            _gc_pause_depth -= 1
+            if _gc_pause_depth == 0 and _gc_pause_reenable:
+                gc.freeze()
+                gc.unfreeze()
+                gc.enable()
 
 
 class XsdParser:
@@ -711,7 +850,8 @@ class XsdParser:
                 Diagnostic(severity="error", message=not_a_schema_message(filename, root.tag))
             )
             return None
-        removed = _prune_conditional(root)
+        has_vc = _has_vc_attributes(root)
+        removed = _prune_conditional(root) if has_vc else []
         if removed:
             self.state.conditional = True
             noun = "declaration was" if len(removed) == 1 else "declarations were"
@@ -736,6 +876,7 @@ class XsdParser:
             target_ns=target_ns,
             relationship=relationship,
             raw_content=content,
+            has_vc_attributes=has_vc,
         )
         self.state.files.append(loaded)
         self.state.by_key[key] = loaded
@@ -808,6 +949,10 @@ class XsdParser:
         allow (see ``_is_xsd_11``) — or when the main ``xs:schema`` carries
         ``version="1.1…"``; otherwise ``"1.0"``.
         """
+        with _cyclic_gc_paused():
+            return self._parse()
+
+    def _parse(self) -> SchemaModel:
         main = self._load(self.inp.main_filename, self.inp.main_content, "main", None)
         if main is None:
             # Main schema failed to load — every diagnostic collected so far
@@ -855,8 +1000,9 @@ class XsdParser:
         self._process_redefines(model)
         self._process_overrides(model)
         self._inherit_open_content(model)
-        resolve_constraint_refs(model, self.state.diagnostics)
-        link_keyrefs(model, self.state.diagnostics)
+        if self.state.has_identity_constraints:
+            resolve_constraint_refs(model, self.state.diagnostics)
+            link_keyrefs(model, self.state.diagnostics)
         apply_id_roles(model)
 
         model.diagnostics.extend(self.state.diagnostics)
@@ -888,7 +1034,7 @@ class XsdParser:
         redefinition that is itself redefined further up is in place first.
         """
         for loaded in reversed(self.state.files):
-            for redefine_elem in loaded.root.findall(_xsd("redefine")):
+            for redefine_elem in _children(loaded.root, "redefine"):
                 location = (redefine_elem.get("schemaLocation") or "").strip()
                 directive = RedefineDirective(
                     target_file_id=self.state.reference_targets.get(
@@ -1025,7 +1171,7 @@ class XsdParser:
         """
         by_file_id = {f.file_id: f for f in self.state.files}
         for loaded in reversed(self.state.files):
-            for override_elem in loaded.root.findall(_xsd("override")):
+            for override_elem in _children(loaded.root, "override"):
                 location = (override_elem.get("schemaLocation") or "").strip()
                 target_file_id = self.state.reference_targets.get((loaded.file_id, location))
                 target = by_file_id.get(target_file_id or "")
@@ -1177,7 +1323,7 @@ class XsdParser:
                 type_inline_complex = self._parse_complex_type(child, loaded)
 
         alternatives: list[Alternative] = []
-        for alt_elem in elem.findall(_xsd("alternative")):
+        for alt_elem in _children(elem, "alternative"):
             alternatives.append(self._parse_alternative(alt_elem, loaded))
 
         identity_constraints = self._parse_identity_constraints(elem, loaded)
@@ -1245,9 +1391,9 @@ class XsdParser:
             if not name and ref:
                 name = ref.rpartition(":")[2]
             name = name or ""
-            selector_elem = child.find(_xsd("selector"))
+            selector_elem = _child(child, "selector")
             selector = selector_elem.get("xpath", "") if selector_elem is not None else ""
-            field_elems = child.findall(_xsd("field"))
+            field_elems = _children(child, "field")
             fields = [f.get("xpath", "") for f in field_elems]
             refer = _token(child, "refer")
             qname = self._compose_qname(loaded, name)
@@ -1286,6 +1432,8 @@ class XsdParser:
                     version_constraints=_vc_attrs(child),
                 )
             )
+        if constraints:
+            self.state.has_identity_constraints = True
         return constraints
 
     def _parse_alternative(
@@ -1377,9 +1525,15 @@ class XsdParser:
         qname = self._compose_qname(loaded, name) if name else f"anon-simple-{self.state.next_anon()}"
         identifier = self._make_id("simpleType", qname)
 
-        restriction = elem.find(_xsd("restriction"))
-        list_elem = elem.find(_xsd("list"))
-        union = elem.find(_xsd("union"))
+        restriction = list_elem = union = None
+        for child in elem:
+            tag = child.tag
+            if tag == _RESTRICTION_TAG:
+                restriction = restriction if restriction is not None else child
+            elif tag == _LIST_TAG:
+                list_elem = list_elem if list_elem is not None else child
+            elif tag == _UNION_TAG:
+                union = union if union is not None else child
 
         derivation = "atomic"
         base: str | None = None
@@ -1393,23 +1547,23 @@ class XsdParser:
         if restriction is not None:
             derivation = "restriction"
             base = _token(restriction, "base")
-            inline_base = restriction.find(_xsd("simpleType"))
+            inline_base = _child(restriction, "simpleType")
             if inline_base is not None and base is None:
                 member_inline.append(self._parse_simple_type(inline_base, loaded))
             facets = self._parse_facets(restriction)
-            for assertion_elem in restriction.findall(_xsd("assertion")):
+            for assertion_elem in _children(restriction, "assertion"):
                 assertions.append(self._parse_assertion(assertion_elem, loaded))
         elif list_elem is not None:
             derivation = "list"
             item_type = _token(list_elem, "itemType")
-            inline_item = list_elem.find(_xsd("simpleType"))
+            inline_item = _child(list_elem, "simpleType")
             if inline_item is not None:
                 item_inline = self._parse_simple_type(inline_item, loaded)
         elif union is not None:
             derivation = "union"
             member_types_attr = union.get("memberTypes") or ""
             member_types = [t for t in member_types_attr.split() if t]
-            for child in union.findall(_xsd("simpleType")):
+            for child in _children(union, "simpleType"):
                 member_inline.append(self._parse_simple_type(child, loaded))
 
         return SimpleType(
@@ -1459,8 +1613,8 @@ class XsdParser:
         open_content: OpenContent | None = None
         any_attribute: Wildcard | None = None
 
-        simple_content = elem.find(_xsd("simpleContent"))
-        complex_content = elem.find(_xsd("complexContent"))
+        simple_content = _child(elem, "simpleContent")
+        complex_content = _child(elem, "complexContent")
 
         # ``xs:assert`` and ``xs:openContent`` sit at the end of the type
         # definition (after the model group and attribute uses) inside
@@ -1471,8 +1625,8 @@ class XsdParser:
 
         if simple_content is not None:
             content_kind = "simple"
-            restr = simple_content.find(_xsd("restriction"))
-            ext = simple_content.find(_xsd("extension"))
+            restr = _child(simple_content, "restriction")
+            ext = _child(simple_content, "extension")
             inner = restr if restr is not None else ext
             if inner is not None:
                 derivation = "restriction" if restr is not None else "extension"
@@ -1480,11 +1634,11 @@ class XsdParser:
                 simple_content_base = base
                 if restr is not None:
                     simple_content_facets = self._parse_facets(restr)
-                    inline_content = restr.find(_xsd("simpleType"))
+                    inline_content = _child(restr, "simpleType")
                     if inline_content is not None:
                         simple_content_inline = self._parse_simple_type(inline_content, loaded)
                     # The value assertions among the facets (XSD 1.1).
-                    for assertion_elem in restr.findall(_xsd("assertion")):
+                    for assertion_elem in _children(restr, "assertion"):
                         assertions.append(self._parse_assertion(assertion_elem, loaded))
                 attrs, groups = self._parse_attribute_children(inner, loaded)
                 attributes.extend(attrs)
@@ -1497,8 +1651,8 @@ class XsdParser:
             # ``mixed`` on xs:complexContent overrides the one on xs:complexType.
             mixed = _bool_attr(complex_content, "mixed", default=mixed)
             content_kind = "mixed" if mixed else "complex"
-            restr = complex_content.find(_xsd("restriction"))
-            ext = complex_content.find(_xsd("extension"))
+            restr = _child(complex_content, "restriction")
+            ext = _child(complex_content, "extension")
             inner = restr if restr is not None else ext
             if inner is not None:
                 derivation = "restriction" if restr is not None else "extension"
@@ -1521,13 +1675,13 @@ class XsdParser:
             any_attribute = self._parse_any_attribute(elem)
             assert_parent = elem
 
-        for assertion_elem in assert_parent.findall(_xsd("assert")):
+        for assertion_elem in _children(assert_parent, "assert"):
             assertions.append(self._parse_assertion(assertion_elem, loaded))
 
         # ``xs:openContent`` is the first child of the type definition's
         # body (sibling to the model group) per the 1.1 spec; we look it up
         # at the same parent as assertions for consistency.
-        open_content_elem = assert_parent.find(_xsd("openContent"))
+        open_content_elem = _child(assert_parent, "openContent")
         if open_content_elem is not None:
             open_content = self._parse_open_content(open_content_elem, loaded)
         elif content_kind != "simple":
@@ -1702,7 +1856,7 @@ class XsdParser:
         )
 
     def _parse_any_attribute(self, parent: etree._Element) -> Wildcard | None:
-        elem = parent.find(_xsd("anyAttribute"))
+        elem = _child(parent, "anyAttribute")
         return self._parse_wildcard(elem) if elem is not None else None
 
     def _parse_attribute_children(
@@ -1746,7 +1900,7 @@ class XsdParser:
         """The ``xs:defaultOpenContent`` of ``loaded``; it reaches that file's types only."""
         key = id(loaded.tree)  # an override block reads the overridden file's
         if key not in self.state.default_open_content:
-            elem = loaded.root.find(_xsd("defaultOpenContent"))
+            elem = _child(loaded.root, "defaultOpenContent")
             self.state.default_open_content[key] = (
                 None if elem is None else self._parse_open_content(elem, loaded)
             )
@@ -1760,7 +1914,7 @@ class XsdParser:
         The wildcard child (``xs:any``) is mandatory unless ``mode="none"``;
         we still tolerate its absence for robustness on partial schemas.
         """
-        any_elem = elem.find(_xsd("any"))
+        any_elem = _child(elem, "any")
         wildcard = self._parse_wildcard(any_elem) if any_elem is not None else None
         mode_raw = _token(elem, "mode", "interleave")
         mode = mode_raw if mode_raw in ("interleave", "suffix", "none") else "interleave"
@@ -1821,57 +1975,26 @@ class XsdParser:
         """
         documentation: list[DocumentationFragment] = []
         appinfo: list[AppInfo] = []
-
-        def collect(owner: etree._Element, context: str | None) -> None:
-            for child in owner:
-                if not isinstance(child.tag, str):
-                    continue
-                ns, local = _namespace_and_local(child.tag)
-                if ns != XSD_NS:
-                    continue
-                if local in _INNER_ANNOTATED:
-                    # A reference says which file, not just "import".
-                    target = _token(child, "schemaLocation") or _token(child, "namespace")
-                    collect(child, f"{local} {target}" if target else local)
-                if local != "annotation":
-                    continue
-                for sub in child:
-                    if not isinstance(sub.tag, str):
-                        continue
-                    _, sub_local = _namespace_and_local(sub.tag)
-                    if sub_local == "documentation":
-                        documentation.append(
-                            DocumentationFragment(
-                                lang=sub.get(f"{{{XML_NS}}}lang"),
-                                text=_text(sub).strip(),
-                                source_uri=_token(sub, "source"),
-                                context=context,
-                            )
-                        )
-                    elif sub_local == "appinfo":
-                        appinfo.append(
-                            AppInfo(
-                                source_uri=sub.get("source"),
-                                raw_xml=etree.tostring(sub, encoding="unicode").strip(),
-                                context=context,
-                            )
-                        )
-
-        collect(elem, None)
+        _collect_annotation_parts(elem, None, documentation, appinfo)
         comments: list[str] = []
         prev = elem.getprevious()
         while prev is not None and isinstance(prev, etree._Comment):
             comments.append(prev.text or "")
             prev = prev.getprevious()
         comments.reverse()
-        annotation = Annotation(
+        xml_id = _token(elem, "id")
+        attributes = _foreign_attributes(elem)
+        # Runs for nearly every node and most have nothing written about them:
+        # only build the model when there is something (``Annotation.is_empty``).
+        if not (documentation or appinfo or comments or xml_id or attributes):
+            return None
+        return Annotation(
             documentation=documentation,
             appinfo=appinfo,
             comments=comments,
-            xml_id=_token(elem, "id"),
-            attributes=_foreign_attributes(elem),
+            xml_id=xml_id,
+            attributes=attributes,
         )
-        return None if annotation.is_empty else annotation
 
     # ---- identifier helpers -------------------------------------------
 
@@ -1928,6 +2051,7 @@ _XSD_1_1_ONLY_ATTRS: dict[str, tuple[str, ...]] = {
     "anyAttribute": ("notNamespace", "notQName"),
 }
 _TYPE_REFERENCES = ("type", "base", "itemType", "memberTypes")
+_GLOBAL_PARENT_TAGS = (_xsd("schema"), _xsd("override"))
 
 
 def _is_xsd_11(elem: etree._Element) -> bool:
@@ -1941,10 +2065,10 @@ def _is_xsd_11(elem: etree._Element) -> bool:
     if any(name in attrib for name in _XSD_1_1_ONLY_ATTRS.get(local, ())):
         return True
     if local in ("element", "attribute"):
-        parent = elem.getparent()
-        is_global = parent is not None and parent.tag in (_xsd("schema"), _xsd("override"))
-        if "targetNamespace" in attrib and not is_global:
-            return True
+        if "targetNamespace" in attrib:
+            parent = elem.getparent()
+            if parent is None or parent.tag not in _GLOBAL_PARENT_TAGS:
+                return True
         if len((attrib.get("substitutionGroup") or "").split()) > 1:
             return True
     if local in ("key", "keyref", "unique") and "ref" in attrib:
@@ -1959,29 +2083,55 @@ def _is_xsd_11(elem: etree._Element) -> bool:
                 "1",
             ):
                 return True
-    nsmap = elem.nsmap or {}
+    nsmap: dict | None = None  # walks up the tree: only for a candidate name
     for name in _TYPE_REFERENCES:
         for qname in (attrib.get(name) or "").split():
             prefix, sep, type_local = qname.rpartition(":")
-            if type_local in _XSD_1_1_ONLY_TYPES and (
-                nsmap.get(prefix) if sep else nsmap.get(None)
-            ) == XSD_NS:
+            if type_local not in _XSD_1_1_ONLY_TYPES:
+                continue
+            if nsmap is None:
+                nsmap = elem.nsmap or {}
+            if (nsmap.get(prefix) if sep else nsmap.get(None)) == XSD_NS:
                 return True
     return False
 
 
+# Version detection looks at a few nodes rather than all of them (libxml2 does
+# the picking, which a big schema notices). Together these cover every element
+# ``_is_xsd_11`` can say yes to; keep them in step with it.
+#
+# The elements whose tag or own attributes it inspects …
+_XSD_11_CHECKED_TAGS: tuple[str, ...] = tuple(
+    sorted(
+        _XSD_1_1_ONLY_TAGS
+        | {
+            _xsd(local)
+            for local in (*_XSD_1_1_ONLY_ATTRS, "element", "attribute", "key", "keyref", "unique", "all")
+        }
+    )
+)
+# … and the XSD elements naming a 1.1-only built-in type: a superset, by substring.
+_XSD_11_TYPE_REFERENCES = etree.XPath(
+    " | ".join(
+        f"//xs:*/@{attr}[{' or '.join(f'contains(., {name!r})' for name in sorted(_XSD_1_1_ONLY_TYPES))}]"
+        for attr in _TYPE_REFERENCES
+    ),
+    namespaces={"xs": XSD_NS},
+)
+
+
 def _detect_xsd_version(files: list[_LoadedFile], main: _LoadedFile) -> XsdVersion:
     """Heuristic detection — see ``XsdParser.parse`` for the full rule chain."""
-    vc_prefix = f"{{{VC_NS}}}"
     for loaded in files:
-        for elem in loaded.root.iter():
-            if not isinstance(elem.tag, str):
-                continue
+        if loaded.has_vc_attributes:
+            return "1.1"
+        root = loaded.root
+        for elem in root.iter(*_XSD_11_CHECKED_TAGS):
             if _is_xsd_11(elem):
                 return "1.1"
-            for attr_name in elem.attrib:
-                if isinstance(attr_name, str) and attr_name.startswith(vc_prefix):
-                    return "1.1"
+        for value in _XSD_11_TYPE_REFERENCES(root):
+            if _is_xsd_11(value.getparent()):
+                return "1.1"
     explicit = main.root.get("version")
     if explicit and explicit.startswith("1.1"):
         return "1.1"

@@ -25,7 +25,7 @@ from app.parser.model import (
     SchemaModel,
     SimpleType,
 )
-from app.parser.walk import iter_attributes, iter_elements
+from app.parser.walk import _iter_declarations
 
 
 def expand_qname(qname: str, namespaces: dict[str, str]) -> str:
@@ -217,7 +217,10 @@ def apply_id_roles(model: SchemaModel) -> None:
     anywhere in the model, including after the point where it's used.
     """
     index = _build_index(model, XSD_NS)
-    for element in iter_elements(model):
-        element.id_role = _classify_element(element, index)
-    for attribute in iter_attributes(model):
-        attribute.id_role = _classify_attribute(attribute, index)
+    # One walk for both kinds (what ``iter_elements`` and ``iter_attributes``
+    # each yield); no classification reads another declaration's ``id_role``.
+    for decl in _iter_declarations(model):
+        if isinstance(decl, ElementDecl):
+            decl.id_role = _classify_element(decl, index)
+        elif isinstance(decl, AttributeDecl):
+            decl.id_role = _classify_attribute(decl, index)

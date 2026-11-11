@@ -1516,6 +1516,15 @@ class TestXsd11Detection:
             '<xs:complexType name="t"><xs:all><xs:any/></xs:all></xs:complexType>',
             '<xs:complexType name="t"><xs:sequence>'
             '<xs:element name="a" targetNamespace="urn:other"/></xs:sequence></xs:complexType>',
+            '<xs:complexType name="t"><xs:attribute name="a" targetNamespace="urn:other"/>'
+            "</xs:complexType>",
+            '<xs:element name="e"><xs:key ref="k"/></xs:element>',
+            '<xs:simpleType name="t"><xs:list itemType="xs:anyAtomicType"/></xs:simpleType>',
+            # Deep in a content model, after a long run of plain 1.0 declarations.
+            '<xs:complexType name="t"><xs:sequence>'
+            + '<xs:element name="p" type="xs:string"/>' * 50
+            + '<xs:element name="q"><xs:simpleType><xs:restriction base="xs:error"/>'
+            "</xs:simpleType></xs:element></xs:sequence></xs:complexType>",
         ],
     )
     def test_features_without_an_element_of_their_own(self, body: str) -> None:
@@ -1715,3 +1724,68 @@ class TestIdentityConstraintReferences:
         warnings = [d.message for d in model.diagnostics if "missing" in d.message]
         assert warnings == ["unique reference 't:missing' names no xs:unique the loaded files declare"]
         assert model.xsd_version == "1.1"
+
+
+class TestLargeSchemaCost:
+    """What a big schema costs beyond its size (production: 15–20 s for 7–13 MB)."""
+
+    @staticmethod
+    def _schema(count: int) -> bytes:
+        types = "".join(
+            f'<xs:element name="E{i}" minOccurs="0"><xs:annotation><xs:documentation>doc {i}'
+            '</xs:documentation></xs:annotation><xs:simpleType><xs:restriction base="xs:string">'
+            '<xs:maxLength value="35"/><xs:enumeration value="A"/></xs:restriction></xs:simpleType>'
+            "</xs:element>"
+            for i in range(count)
+        )
+        return (
+            '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="Root">'
+            f"<xs:complexType><xs:sequence>{types}</xs:sequence></xs:complexType></xs:element>"
+            "</xs:schema>"
+        ).encode()
+
+    def test_no_cyclic_gc_runs_during_a_parse(self) -> None:
+        # Every collection would walk all the model objects built so far and
+        # find nothing to free: a third of the time on CPython 3.12.
+        import gc
+
+        runs: list[int] = []
+
+        def count(phase: str, info: dict) -> None:
+            if phase == "start":
+                runs.append(info["generation"])
+
+        content = self._schema(3000)
+        gc.collect()
+        gc.callbacks.append(count)
+        try:
+            model = parse_single(content, "big.xsd")
+        finally:
+            gc.callbacks.remove(count)
+        assert runs == []
+        assert gc.isenabled()
+        assert len(model.elements[0].type_inline_complex.particle.children) == 3000
+
+    def test_gc_left_as_found_after_a_failed_parse_or_when_off(self) -> None:
+        import gc
+
+        with pytest.raises(ValueError):
+            parse_single(b"<not-a-schema/>", "x.xsd")
+        assert gc.isenabled()
+        gc.disable()
+        try:
+            parse_single(self._schema(3), "small.xsd")
+            assert not gc.isenabled()
+        finally:
+            gc.enable()
+
+    def test_unannotated_nodes_carry_no_annotation(self) -> None:
+        # Annotations are only built for nodes with something written about them.
+        model = parse_single(self._schema(2), "small.xsd")
+        root = model.elements[0]
+        assert root.annotation is None
+        assert root.type_inline_complex.annotation is None
+        leaf = root.type_inline_complex.particle.children[1].element
+        assert [d.text for d in leaf.annotation.documentation] == ["doc 1"]
+        assert leaf.type_inline_simple.annotation is None
+        assert all(facet.annotation is None for facet in leaf.type_inline_simple.facets)
