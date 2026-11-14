@@ -229,7 +229,8 @@ async def load_release_schema(
             raise reject("schema_load", "release", 400, str(exc), schema_name=schema_name) from exc
         files[asset.filename] = fetched.content
 
-    return ingest_schema(
+    return await asyncio.to_thread(
+        ingest_schema,
         source="release",
         schema_name=schema_name,
         input_bytes=sum(len(content) for content in files.values()),

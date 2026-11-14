@@ -21,6 +21,7 @@ class Settings:
     fetch_deadline_seconds: float
     fetch_max_response_mb: int
     fetch_max_redirects: int
+    import_fetch_budget_seconds: float
     cors_allow_origins: tuple[str, ...]
     usage_db_url: str
     usage_db_password: str
@@ -83,6 +84,8 @@ def load_settings() -> Settings:
         fetch_deadline_seconds=float(os.getenv("FETCH_DEADLINE_SECONDS", "60")),
         fetch_max_response_mb=int(os.getenv("FETCH_MAX_RESPONSE_MB", "32")),
         fetch_max_redirects=int(os.getenv("FETCH_MAX_REDIRECTS", "3")),
+        # All imports of one URL-loaded schema together; below the request timeout (Cloud Run: 60 s).
+        import_fetch_budget_seconds=float(os.getenv("IMPORT_FETCH_BUDGET_SECONDS", "40")),
         cors_allow_origins=_parse_origins(os.getenv("CORS_ALLOW_ORIGINS", "")),
         usage_db_url=os.getenv("USAGE_DB_URL", ""),
         usage_db_password=os.getenv("USAGE_DB_PASSWORD", ""),

@@ -14,6 +14,7 @@ import logging
 import posixpath
 import re
 import threading
+import time
 import zipfile
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -26,6 +27,7 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from lxml import etree
 
+from app.config import settings
 from app.parser import w3c
 from app.parser.errors import (
     humanize_syntax_error,
@@ -71,6 +73,7 @@ from app.parser.model import (
 )
 from app.parser.security import (
     FetchedResource,
+    FetchSession,
     SecurityError,
     fetch_schema_url,
     parse_bytes,
@@ -440,11 +443,27 @@ class ZipResolver(SchemaResolver):
         return None
 
 
+class ImportBudgetError(ValueError):
+    """The imports of a URL-loaded schema took longer than IMPORT_FETCH_BUDGET_SECONDS."""
+
+
 @dataclass
 class UrlResolver(SchemaResolver):
-    """Fetches references via HTTP(S), SSRF-hardened."""
+    """Fetches references via HTTP(S), SSRF-hardened.
+
+    Each URL is fetched once per parse: large schema sets reference the same
+    file from dozens of others (NeTEx v2.0: 1,598 references to 426 files),
+    and ``XsdParser._load`` only notices the duplicate after the download.
+    The connections stay open for the next file (``FetchSession``), and all
+    fetches together get IMPORT_FETCH_BUDGET_SECONDS: a load that cannot
+    finish before the platform's request timeout stops, instead of fetching
+    on for a client that already got a 504 (and is retrying in parallel).
+    """
 
     base_url: str | None = None
+    _session: FetchSession = field(default_factory=FetchSession, init=False, repr=False)
+    _fetched: dict[str, FetchedResource | SecurityError] = field(default_factory=dict, init=False, repr=False)
+    _deadline: float | None = field(default=None, init=False, repr=False)
 
     def resolve(self, base_location: str | None, location: str) -> tuple[str, bytes] | None:
         base = base_location or self.base_url
@@ -454,15 +473,36 @@ class UrlResolver(SchemaResolver):
         absolute = urljoin(base, location.replace("\\", "/"))
         if urlparse(absolute).scheme not in ("http", "https"):
             return None
-        try:
-            fetched: FetchedResource = fetch_schema_url(absolute)
-        except SecurityError as exc:
-            logger.info(
-                "url resolution rejected",
-                extra={"ctx_url": absolute, "ctx_reason": str(exc)},
+        known = self._fetched.get(absolute)
+        if known is None:
+            self._check_budget()
+            try:
+                known = fetch_schema_url(absolute, session=self._session)
+            except SecurityError as exc:
+                logger.info(
+                    "url resolution rejected",
+                    extra={"ctx_url": absolute, "ctx_reason": str(exc)},
+                )
+                known = exc
+            self._fetched[absolute] = known
+        if isinstance(known, SecurityError):
+            raise known
+        return known.url, known.content
+
+    def _check_budget(self) -> None:
+        budget = settings.import_fetch_budget_seconds
+        now = time.monotonic()
+        if self._deadline is None:
+            self._deadline = now + budget
+        elif now > self._deadline:
+            raise ImportBudgetError(
+                f"loading the files this schema imports took longer than {budget:g} s "
+                f"({len(self._fetched)} fetched so far); download the schema set as a "
+                "ZIP archive and upload it instead"
             )
-            raise
-        return fetched.url, fetched.content
+
+    def close(self) -> None:
+        self._session.close()
 
 
 class W3cResolver(SchemaResolver):
@@ -490,8 +530,13 @@ class ChainedResolver(SchemaResolver):
                 return result
         return None
 
+    def close(self) -> None:
+        for resolver in self.resolvers:
+            if isinstance(resolver, UrlResolver):
+                resolver.close()
 
-def _build_resolver(files: dict[str, bytes], base_url: str | None) -> SchemaResolver:
+
+def _build_resolver(files: dict[str, bytes], base_url: str | None) -> ChainedResolver:
     """Standard chain: uploaded/fetched files, then bundled W3C schemas, then the network."""
     resolvers: list[SchemaResolver] = [ZipResolver(files=files), W3cResolver()]
     if base_url is not None:
@@ -2284,7 +2329,10 @@ def parse_url(url: str) -> SchemaModel:
             base_url=fetched.url,
         )
     )
-    return parser.parse()
+    try:
+        return parser.parse()
+    finally:
+        resolver.close()
 
 
 def parse_with_url_fallback(
@@ -2321,4 +2369,7 @@ def parse_with_url_fallback(
             base_url=base_url,
         )
     )
-    return parser.parse()
+    try:
+        return parser.parse()
+    finally:
+        resolver.close()

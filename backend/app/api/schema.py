@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import threading
 import time
 from collections.abc import Callable
 from typing import Annotated, Literal
@@ -117,12 +118,39 @@ def _parse_error_detail(exc: Exception) -> str:
     )
 
 
+# A large schema holds a few hundred MB while it is parsed and serialised
+# (NeTEx v2.0: ~340 MB); two at once next to a full cache exceeded the 1 GiB
+# instance (13.11.: a load cut off by the request timeout kept fetching while
+# the visitor's retry parsed the same schema). A single CPU gains nothing from
+# parallel parses, so they queue; nobody waits longer than PARSE_WAIT_SECONDS.
+_PARSE_SLOT = threading.Lock()
+PARSE_WAIT_SECONDS = 30.0
+
+
 def ingest_schema(
     *, source: str, schema_name: str | None, input_bytes: int, parse: Callable[[], SchemaModel]
 ) -> SchemaResponse:
-    """Run a parser callable, cache the result and emit one ``schema_load`` usage event."""
-    started = time.perf_counter()
+    """Run a parser callable, cache the result and emit one ``schema_load`` usage event.
+
+    Blocking (it waits for the parse slot): async routes call it via ``asyncio.to_thread``.
+    """
     name = schema_display_name(source, schema_name)
+    if not _PARSE_SLOT.acquire(timeout=PARSE_WAIT_SECONDS):
+        raise reject(
+            "schema_load",
+            source,
+            503,
+            "the server is busy loading another large schema; please try again in a minute",
+            schema_name=name,
+        )
+    try:
+        return _ingest(source=source, name=name, input_bytes=input_bytes, parse=parse)
+    finally:
+        _PARSE_SLOT.release()
+
+
+def _ingest(*, source: str, name: str, input_bytes: int, parse: Callable[[], SchemaModel]) -> SchemaResponse:
+    started = time.perf_counter()
     try:
         model = parse()
     except (SecurityError, ValueError) as exc:
@@ -191,11 +219,17 @@ async def _read_upload(
     return b"".join(chunks)
 
 
+# Memory a cached model takes per byte of its JSON: measured 5.0 for NeTEx v2.0
+# (137 MB of objects, 27.6 MB of JSON). The cache's CACHE_MAX_MB budget is only
+# as good as this estimate; at 2 it let the cache grow to ~2.5x its budget.
+MODEL_BYTES_PER_JSON_BYTE = 5
+
+
 def finalize_schema_response(model: SchemaModel) -> SchemaResponse:
     payload = model.model_dump_json().encode("utf-8")
     schema_id = hashlib.sha256(payload).hexdigest()[:32]
     model.schema_id = schema_id
-    schema_cache.put(schema_id, model, size=len(payload) * 2)
+    schema_cache.put(schema_id, model, size=len(payload) * MODEL_BYTES_PER_JSON_BYTE)
     logger.info(
         "schema parsed",
         extra={
@@ -244,7 +278,8 @@ async def upload_schema(
                 )
             files[part.filename or f"file{len(files) + 1}.xsd"] = content
         main = main_filename or pick_main_xsd(files) or next(iter(files))
-        return ingest_schema(
+        return await asyncio.to_thread(
+            ingest_schema,
             source="upload",
             schema_name=main,
             input_bytes=total,
@@ -255,7 +290,8 @@ async def upload_schema(
     content = await _read_upload(single)
     name = single.filename or "schema.xsd"
     if name.lower().endswith(".zip") or (single.content_type or "").endswith("zip"):
-        return ingest_schema(
+        return await asyncio.to_thread(
+            ingest_schema,
             source="upload",
             schema_name=main_filename or name,
             input_bytes=len(content),
@@ -263,7 +299,8 @@ async def upload_schema(
                 zip_bytes=content, main_filename=main_filename, main_bytes=None, base_url=None
             ),
         )
-    return ingest_schema(
+    return await asyncio.to_thread(
+        ingest_schema,
         source="upload",
         schema_name=name,
         input_bytes=len(content),
@@ -317,7 +354,8 @@ async def load_schema_from_text(request: Request, payload: TextPayload) -> Schem
             f"content exceeds {settings.max_upload_mb} MB limit",
             schema_name=schema_display_name("text", payload.filename),
         )
-    return ingest_schema(
+    return await asyncio.to_thread(
+        ingest_schema,
         source="text",
         schema_name=payload.filename,
         input_bytes=len(data),

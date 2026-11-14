@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -180,6 +181,12 @@ async def _rate_limit_exceeded(request: Request, exc: RateLimitExceeded) -> JSON
     )
 
 
+# A large schema's model is tens of MB of JSON (NeTEx v2.0: 27.6 MB, 1.5 MB
+# gzipped). Cloud Run refuses responses over 32 MiB, so such a load failed
+# with 500 after the work was done, and the visitor's retry parsed it again
+# alongside: the out-of-memory kills of 23./27./29.10. Images, archives and
+# Range responses are left as they are.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 app.add_middleware(HeadAsGetMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(BufferRequestBodyMiddleware)

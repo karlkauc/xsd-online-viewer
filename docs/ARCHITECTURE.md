@@ -171,6 +171,11 @@ through a chain of `SchemaResolver`s:
   `parser/security.py` (only `http(s)`, no localhost, no link-local, no
   private ranges, redirect cap, size cap, timeout). Hosts are allowed by
   default; setting `ALLOWED_SCHEMA_HOSTS` switches to a strict whitelist.
+  Each URL is fetched once per parse, over connections kept open per host
+  (`FetchSession`), and all imports of one load share
+  `IMPORT_FETCH_BUDGET_SECONDS` (40 s): NeTEx v2.0 references its 426 files
+  1,598 times, which at a fresh connection per reference (~290 ms) ran past
+  the 60 s request timeout and kept fetching after the 504.
 - `ChainedResolver` — tries resolvers in order and records diagnostics on miss.
 
 The tree walk produces a flat `SchemaModel` — one list per declaration kind —
@@ -363,6 +368,13 @@ Defaults: 32 entries, 60-minute TTL counted from the last use. Keys are the SHA-
 serialized model, so identical uploads collapse to one entry. There is **no
 persistence**: restarting the container evicts everything, which is fine given
 the upload-driven UX.
+
+`CACHE_MAX_MB` (256) bounds the cache by the models' estimated footprint:
+`MODEL_BYTES_PER_JSON_BYTE` (5, measured) times the size of their JSON. Schema
+loads (`ingest_schema`) run one at a time in a worker thread; a large one holds
+a few hundred MB while it is parsed, and a second waits up to 30 s, then gets
+503. Responses are gzipped (`GZipMiddleware`): a large model is tens of MB of
+JSON, and Cloud Run refuses responses over 32 MiB.
 
 ## Frontend
 

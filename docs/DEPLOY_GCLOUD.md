@@ -130,6 +130,7 @@ Quelle der Defaults: `backend/app/config.py`. In Cloud Run per
 | `XSD11_MEMORY_MB` | `1024` | Adressraum-Limit des 1.1-Validators (virtuell, nicht RSS); Default beibehalten |
 | `FETCH_MAX_RESPONSE_MB` | `32` | Default beibehalten (wie `MAX_UPLOAD_MB`; FundsXML4.xsd hat schon über 10 MB) |
 | `FETCH_MAX_REDIRECTS` | `3` | Default beibehalten |
+| `IMPORT_FETCH_BUDGET_SECONDS` | `40` | Zeit für alle Importe eines per URL geladenen Schemas zusammen; muss unter `--timeout` bleiben, sonst lädt die Instanz nach dem 504 weiter |
 | `CORS_ALLOW_ORIGINS` | leer | nur setzen, wenn ein separates Frontend zugreift |
 | `USAGE_DB_URL` | leer | `postgresql://xsdviewer@62.238.116.11:5432/xsdviewer_stats?sslmode=require` — leer = Statistik aus (`docs/USAGE_STATS.md`) |
 | `USAGE_DB_PASSWORD` | leer | per `--update-secrets` aus Secret `xsdviewer-usage-db-password` |

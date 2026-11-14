@@ -336,69 +336,106 @@ def _http_failure_message(url: str, status_code: int) -> str:
     return message
 
 
-def fetch_schema_url(url: str) -> FetchedResource:
+class FetchSession:
+    """The HTTP clients of one schema load, one per host name.
+
+    A schema set that imports hundreds of files from one server (NeTEx: ~430
+    from raw.githubusercontent.com) then reuses its TLS connections instead of
+    paying a DNS lookup and handshake per file. One client per *host*, never
+    one for all: the pool is keyed by the pinned IP, and a connection opened
+    with one host's SNI and certificate must not carry another host's request.
+    Not thread-safe; a session belongs to one parse.
+    """
+
+    def __init__(self) -> None:
+        self._clients: dict[str, httpx.Client] = {}
+
+    def client(self, host: str) -> httpx.Client:
+        client = self._clients.get(host)
+        if client is None:
+            client = httpx.Client(
+                follow_redirects=False,
+                timeout=settings.fetch_timeout_seconds,
+                limits=httpx.Limits(max_connections=4),
+                headers=FETCH_HEADERS,
+            )
+            self._clients[host] = client
+        return client
+
+    def close(self) -> None:
+        for client in self._clients.values():
+            client.close()
+        self._clients.clear()
+
+    def __enter__(self) -> FetchSession:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+
+def fetch_schema_url(url: str, session: FetchSession | None = None) -> FetchedResource:
     """Fetch a schema document by URL, enforcing all SSRF mitigations.
 
     GitHub/GitLab/Bitbucket *browse* URLs are rewritten to their raw-content
-    form first (see ``urls.normalize_schema_url``).
+    form first (see ``urls.normalize_schema_url``). ``session`` keeps
+    connections open for further fetches; without one, they close on return.
     """
+    if session is None:
+        with FetchSession() as own:
+            return fetch_schema_url(url, session=own)
     url = normalize_schema_url(url)
     remaining_redirects = settings.fetch_max_redirects
     current = url
     deadline = time.monotonic() + settings.fetch_deadline_seconds
-    with httpx.Client(
-        follow_redirects=False,
-        timeout=settings.fetch_timeout_seconds,
-        limits=httpx.Limits(max_connections=4),
-        headers=FETCH_HEADERS,
-    ) as client:
-        while True:
-            host, pinned_ips = _verify_url(current)
-            parsed = httpx.URL(current)
-            # Connect to the validated IPs (the next one on a connect failure),
-            # keeping the Host header and TLS SNI / certificate check on the name.
-            stream = None
-            for i, pinned_ip in enumerate(pinned_ips):
-                stream = client.stream(
-                    "GET",
-                    parsed.copy_with(host=pinned_ip),
-                    headers={"Host": parsed.netloc.decode("ascii")},
-                    extensions={"sni_hostname": host},
-                )
-                try:
-                    response = stream.__enter__()
-                    break
-                except httpx.ConnectError as exc:
-                    if i == len(pinned_ips) - 1:
-                        raise FetchError(f"fetching {current!r} failed: {exc}") from exc
-                except httpx.HTTPError as exc:
-                    raise FetchError(f"fetching {current!r} failed: {exc}") from exc
-            assert stream is not None
-            try:
-                if response.is_redirect:
-                    if remaining_redirects <= 0:
-                        raise SecurityError("too many HTTP redirects")
-                    remaining_redirects -= 1
-                    target = response.headers.get("location")
-                    if not target:
-                        raise SecurityError("redirect without Location header")
-                    current = str(httpx.URL(current).join(target))
-                    continue
-                if response.status_code >= 400:
-                    raise FetchError(_http_failure_message(current, response.status_code))
-                try:
-                    content = _read_capped(response, deadline)
-                except httpx.HTTPError as exc:
-                    raise FetchError(f"fetching {current!r} failed: {exc}") from exc
-                content_type = response.headers.get("content-type")
-            finally:
-                stream.__exit__(None, None, None)
-            logger.info(
-                "fetched remote schema",
-                extra={
-                    "ctx_url": current,
-                    "ctx_size_bytes": len(content),
-                    "ctx_content_type": content_type,
-                },
+    while True:
+        host, pinned_ips = _verify_url(current)
+        client = session.client(host)
+        parsed = httpx.URL(current)
+        # Connect to the validated IPs (the next one on a connect failure),
+        # keeping the Host header and TLS SNI / certificate check on the name.
+        stream = None
+        for i, pinned_ip in enumerate(pinned_ips):
+            stream = client.stream(
+                "GET",
+                parsed.copy_with(host=pinned_ip),
+                headers={"Host": parsed.netloc.decode("ascii")},
+                extensions={"sni_hostname": host},
             )
-            return FetchedResource(url=current, content=content, content_type=content_type)
+            try:
+                response = stream.__enter__()
+                break
+            except httpx.ConnectError as exc:
+                if i == len(pinned_ips) - 1:
+                    raise FetchError(f"fetching {current!r} failed: {exc}") from exc
+            except httpx.HTTPError as exc:
+                raise FetchError(f"fetching {current!r} failed: {exc}") from exc
+        assert stream is not None
+        try:
+            if response.is_redirect:
+                if remaining_redirects <= 0:
+                    raise SecurityError("too many HTTP redirects")
+                remaining_redirects -= 1
+                target = response.headers.get("location")
+                if not target:
+                    raise SecurityError("redirect without Location header")
+                current = str(httpx.URL(current).join(target))
+                continue
+            if response.status_code >= 400:
+                raise FetchError(_http_failure_message(current, response.status_code))
+            try:
+                content = _read_capped(response, deadline)
+            except httpx.HTTPError as exc:
+                raise FetchError(f"fetching {current!r} failed: {exc}") from exc
+            content_type = response.headers.get("content-type")
+        finally:
+            stream.__exit__(None, None, None)
+        logger.info(
+            "fetched remote schema",
+            extra={
+                "ctx_url": current,
+                "ctx_size_bytes": len(content),
+                "ctx_content_type": content_type,
+            },
+        )
+        return FetchedResource(url=current, content=content, content_type=content_type)

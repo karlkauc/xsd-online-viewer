@@ -75,7 +75,8 @@ async def load_message(request: Request, message_id: str) -> SchemaResponse:
         fetched = await asyncio.to_thread(fetch_schema_url, message_url(message))
     except SecurityError as exc:
         raise reject("schema_load", "iso20022", 400, str(exc), schema_name=message.id) from exc
-    return ingest_schema(
+    return await asyncio.to_thread(
+        ingest_schema,
         source="iso20022",
         schema_name=message.id,
         input_bytes=len(fetched.content),
