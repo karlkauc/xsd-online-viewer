@@ -599,3 +599,80 @@ def test_an_internal_error_of_libxml2_is_not_a_server_error() -> None:
         assert "defect of the validator" in str(exc)
     else:  # the other validator had an answer
         assert result.validator == "xmlschema"
+
+
+# --- XSD 1.1: compiled schemas reused across workers ---------------------------
+
+
+def _key(model) -> str:  # noqa: ANN001
+    with validation._materialised(model) as files:
+        return validation._compiled_key(model, files)
+
+
+def _wait_for_compiled(key: str) -> bytes:
+    deadline = time.monotonic() + 30
+    while (blob := validation._compiled_schemas.get(key)) is None:
+        assert time.monotonic() < deadline, "the worker never stored the compiled schema"
+        time.sleep(0.05)
+    return blob
+
+
+def test_the_first_xsd_11_validation_leaves_a_compiled_schema_the_next_one_loads() -> None:
+    validation._compiled_schemas.clear()
+    model = parse_single(_RANGE_XSD, "range.xsd")
+    first = validate_xml(model, b"<Range><Min>5</Min><Max>2</Max></Range>")
+    _wait_for_compiled(_key(model))
+
+    again = validate_xml(model, b"<Range><Min>5</Min><Max>2</Max></Range>")
+
+    assert again == first and not again.is_valid
+    assert validate_xml(model, b"<Range><Min>1</Min><Max>2</Max></Range>").is_valid
+
+
+def test_the_worker_validates_against_the_compiled_schema_it_is_given() -> None:
+    # Proof the pickle is what the worker uses: one of another schema answers
+    # for this one (never the case in use, where the key is the files' content).
+    import pickle
+
+    import xmlschema
+
+    validation._compiled_schemas.clear()
+    model = parse_single(_RANGE_XSD, "range.xsd")
+    other = xmlschema.XMLSchema11(
+        '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="Other"/></xs:schema>'
+    )
+    validation._compiled_schemas.put(_key(model), pickle.dumps(other))
+
+    result = validate_xml(model, b"<Other/>")
+
+    assert result.is_valid
+
+
+def test_a_broken_compiled_schema_is_compiled_afresh() -> None:
+    validation._compiled_schemas.clear()
+    model = parse_single(_RANGE_XSD, "range.xsd")
+    validation._compiled_schemas.put(_key(model), b"not a pickle")
+
+    result = validate_xml(model, b"<Range><Min>5</Min><Max>2</Max></Range>")
+
+    assert not result.is_valid and result.validator == "xmlschema"
+
+
+def test_the_compiled_key_follows_the_files_and_the_main_file() -> None:
+    a = b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="A"/></xs:schema>'
+    b = b'<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="B"/></xs:schema>'
+    both = {"a.xsd": a, "b.xsd": b}
+    assert _key(parse_files_map(both, "a.xsd")) != _key(parse_files_map(both, "b.xsd"))
+    assert _key(parse_single(a, "a.xsd")) != _key(parse_single(b, "a.xsd"))
+    assert _key(parse_single(a, "a.xsd")) == _key(parse_single(a, "a.xsd"))
+
+
+def test_the_compiled_cache_keeps_to_its_budget() -> None:
+    cache = validation._CompiledSchemas(max_bytes=10)
+    cache.put("a", b"12345")
+    cache.put("b", b"12345")
+    assert cache.get("a") is not None  # now the newest use
+    cache.put("c", b"123")
+    assert cache.get("b") is None and cache.get("a") and cache.get("c")
+    cache.put("big", b"x" * 11)
+    assert cache.get("big") is None

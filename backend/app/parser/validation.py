@@ -11,19 +11,22 @@ the frontend shows back to the user.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
+from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path, PurePosixPath
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, mkdtemp
 from typing import Literal
 from urllib.parse import quote
 
@@ -781,29 +784,149 @@ def check_schema(model: SchemaModel, *, on_demand: bool = False) -> SchemaCheckR
     return answer("findings" if findings else "ok", findings=findings, more=int(reply.get("more") or 0))
 
 
-def _run_worker(files: _Materialised, pretty: bytes) -> list[dict]:
-    """Validate ``pretty`` against the materialised schema as XSD 1.1; the raw error records."""
+class _CompiledSchemas:
+    """Pickled XSD 1.1 schemas by schema id (content hash), LRU within a byte budget.
+
+    A worker compiles a large schema in seconds (FundsXML: about 7 s) and loads
+    it pickled in a fraction of that, so the second document validated against
+    the same schema skips the compile. The server only passes the bytes along:
+    workers write these pickles and workers read them.
+    """
+
+    def __init__(self, max_bytes: int) -> None:
+        self._max_bytes = max_bytes
+        self._store: OrderedDict[str, bytes] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key: str) -> bytes | None:
+        with self._lock:
+            blob = self._store.get(key)
+            if blob is not None:
+                self._store.move_to_end(key)
+            return blob
+
+    def put(self, key: str, blob: bytes) -> None:
+        if len(blob) > self._max_bytes:
+            return
+        with self._lock:
+            self._store.pop(key, None)
+            self._store[key] = blob
+            while sum(map(len, self._store.values())) > self._max_bytes:
+                self._store.popitem(last=False)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._store.clear()
+
+
+# FundsXML pickles to 13 MB; the server has 1 GiB and two workers of its own.
+_compiled_schemas = _CompiledSchemas(max_bytes=48 * 1024 * 1024)
+
+
+def _compiled_key(model: SchemaModel, files: _Materialised) -> str:
+    """What the compiled schema depends on: every file as written for the worker.
+
+    Not the schema id: a model that never went through the API (tools, tests)
+    has none of its own.
+    """
+    digest = hashlib.sha256(f"main={files.main.relative_to(files.root)}\0".encode())
+    for path in sorted(files.names_by_path):
+        digest.update(path.removeprefix(str(files.root)).encode() + b"\0")
+        digest.update(Path(path).read_bytes() + b"\0")
+    for namespace, path in sorted(files.by_namespace.items()):
+        digest.update(f"{namespace}={path.relative_to(files.root)}\0".encode())
+    for url, path in sorted(files.by_url.items()):
+        digest.update(f"{url}={path.relative_to(files.root)}\0".encode())
+    return digest.hexdigest()
+
+
+def _collect_compiled(proc: subprocess.Popen, scratch: Path, key: str, timeout: float) -> None:
+    """Wait for a worker to pickle the schema it compiled, keep the pickle, clean up."""
+    timer = threading.Timer(timeout, proc.kill)
+    timer.start()
+    try:
+        proc.wait()
+        out = scratch / "out.pickle"
+        if proc.returncode == 0 and out.is_file():
+            _compiled_schemas.put(key, out.read_bytes())
+    except Exception:  # noqa: BLE001 - only a missed speed-up
+        logger.warning("could not keep the compiled XSD 1.1 schema", exc_info=True)
+    finally:
+        timer.cancel()
+        shutil.rmtree(scratch, ignore_errors=True)
+        _WORKER_SLOTS.release()
+
+
+def _run_worker(files: _Materialised, pretty: bytes, cache_key: str | None = None) -> list[dict]:
+    """Validate ``pretty`` against the materialised schema as XSD 1.1; the raw error records.
+
+    With ``cache_key`` (the schema id) the worker loads the schema compiled by an
+    earlier one, or, after replying, pickles the one it compiled for the next.
+    """
     timeout = settings.xsd11_timeout_seconds
     request = _worker_request(files) | {"xml": pretty.decode("utf-8")}
-    with _WORKER_SLOTS:
-        try:
+    scratch = Path(mkdtemp(prefix="xsd11-"))
+    compiled = _compiled_schemas.get(cache_key) if cache_key else None
+    if compiled is not None:
+        (scratch / "in.pickle").write_bytes(compiled)
+        request["compiled"] = str(scratch / "in.pickle")
+    elif cache_key:
+        request["store"] = str(scratch / "out.pickle")
+    _WORKER_SLOTS.acquire()
+    released = False
+    try:
+        with (scratch / "stderr").open("wb") as stderr:
             # -I: no user site, no PYTHON* variables, and not the directory the
             # script is in on sys.path. The empty environment keeps the server's
             # secrets out of a process that evaluates the schema author's XPath.
-            done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            proc = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
                 [sys.executable, "-I", str(_WORKER)],
-                input=json.dumps(request).encode("utf-8"),
-                capture_output=True,
-                timeout=timeout,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=stderr,
                 env={},
                 cwd=str(files.root),
-                check=False,
             )
-        except subprocess.TimeoutExpired as exc:
+        timed_out = threading.Event()
+
+        def _stop() -> None:
+            timed_out.set()
+            proc.kill()
+
+        timer = threading.Timer(timeout, _stop)
+        timer.start()
+        try:
+            assert proc.stdin is not None and proc.stdout is not None  # noqa: S101 - PIPE above
+            try:
+                proc.stdin.write(json.dumps(request).encode("utf-8"))
+                proc.stdin.close()
+            except BrokenPipeError:
+                pass  # died at once; the empty reply says so below
+            # EOF comes with the reply: the worker closes stdout before it pickles.
+            stdout = proc.stdout.read()
+            proc.stdout.close()
+        finally:
+            timer.cancel()
+        if timed_out.is_set() and not stdout:
+            proc.wait()
             raise ValidationSetupError(
                 f"validating against this XSD 1.1 schema took longer than {timeout:g} s and "
                 "was stopped; the schema or the document is too large to check here"
-            ) from exc
+            )
+        if "store" in request and stdout:
+            # The worker goes on pickling; it finishes off the request path.
+            threading.Thread(
+                target=_collect_compiled, args=(proc, scratch, cache_key, timeout), daemon=True
+            ).start()
+            released = True
+        else:
+            proc.wait()
+        stderr_tail = (scratch / "stderr").read_bytes()[-2000:]
+    finally:
+        if not released:
+            shutil.rmtree(scratch, ignore_errors=True)
+            _WORKER_SLOTS.release()
+    done = subprocess.CompletedProcess(proc.args, proc.returncode, stdout, stderr_tail)
     try:
         reply = json.loads(done.stdout)
     except ValueError as exc:
@@ -859,7 +982,7 @@ def _xsd11_errors(records: list[dict], model: SchemaModel) -> list[ValidationErr
 def _validate_xsd11(
     model: SchemaModel, files: _Materialised, pretty: bytes
 ) -> ValidationResponse:
-    errors = _xsd11_errors(_run_worker(files, pretty), model)
+    errors = _xsd11_errors(_run_worker(files, pretty, _compiled_key(model, files)), model)
     return ValidationResponse(
         schema_id=model.schema_id,
         is_valid=not errors,

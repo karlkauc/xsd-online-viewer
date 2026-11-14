@@ -17,6 +17,12 @@ Protocol: a JSON request on stdin, a JSON reply on stdout.
     {"status": "unavailable", "message": text}
     {"status": "validator-error", "message": text}   (xmlschema itself failed)
 
+Compiling a large schema is most of the work (FundsXML, 8 MB: about 7 s;
+loading it pickled: 0.3 s). ``"compiled": path`` names a pickle of the schema
+a previous worker wrote; ``"store": path`` asks for one, written after the
+reply, so the caller has its answer before the pickling starts. Only workers
+read these pickles, and only workers write them.
+
 A request with ``"check": "1.0" | "1.1"`` and no ``xml`` asks what is wrong with
 the schema itself, read as that version:
 
@@ -25,7 +31,10 @@ the schema itself, read as that version:
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import pickle
 import resource
 import sys
 from io import BytesIO
@@ -119,11 +128,7 @@ def check(request: dict) -> dict:
         from lxml import etree
     except ImportError as exc:
         return {"status": "unavailable", "message": str(exc)}
-    urls: dict[str, str] = request.get("urls") or {}
-
-    def mapper(uri: str) -> str:
-        return urls.get(_url_key(uri), uri) if "://" in uri and not uri.startswith("file:") else uri
-
+    mapper = _UriMapper(request.get("urls") or {})
     reader = xmlschema.XMLSchema11 if request["check"] == "1.1" else xmlschema.XMLSchema10
     try:
         schema = reader(
@@ -162,6 +167,43 @@ def check(request: dict) -> dict:
     }
 
 
+class _UriMapper:
+    """An absolute schemaLocation names the URL the file was fetched from; the
+    copy on disk is the only one this process may read. A class, not a closure:
+    the compiled schema keeps it, and is pickled with it."""
+
+    def __init__(self, urls: dict[str, str]) -> None:
+        self.urls = urls
+
+    def __call__(self, uri: str) -> str:
+        return self.urls.get(_url_key(uri), uri) if "://" in uri and not uri.startswith("file:") else uri
+
+
+# The schema this process compiled, for ``_store_compiled`` after the reply.
+_COMPILED: list = []
+
+
+def _load_compiled(path: str | None):  # noqa: ANN202 - an xmlschema.XMLSchema11
+    if not path:
+        return None
+    try:
+        with open(path, "rb") as fh:
+            return pickle.load(fh)  # noqa: S301 - written by a worker like this one
+    except Exception:  # noqa: BLE001 - any broken pickle: compile instead
+        return None
+
+
+def _store_compiled(path: str | None) -> None:
+    if not path or not _COMPILED:
+        return
+    try:
+        with open(path + ".part", "wb") as fh:
+            pickle.dump(_COMPILED[0], fh, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(path + ".part", path)
+    except Exception:  # noqa: BLE001 - only a missed speed-up; the reply is out
+        pass
+
+
 def run(request: dict) -> dict:
     _limit(request)
     if request.get("check"):
@@ -172,23 +214,20 @@ def run(request: dict) -> dict:
     except ImportError as exc:
         return {"status": "unavailable", "message": str(exc)}
 
-    urls: dict[str, str] = request.get("urls") or {}
-
-    def mapper(uri: str) -> str:
-        # An absolute schemaLocation names the URL the file was fetched from;
-        # the copy on disk is the only one this process may read.
-        return urls.get(_url_key(uri), uri) if "://" in uri and not uri.startswith("file:") else uri
-
-    try:
-        schema = xmlschema.XMLSchema11(
-            request["main"],
-            locations=[tuple(pair) for pair in request.get("locations") or ()],
-            base_url=request["root"],
-            allow="sandbox",
-            uri_mapper=mapper,
-        )
-    except (xmlschema.XMLSchemaException, etree.LxmlError, OSError, ValueError, SyntaxError) as exc:
-        return _schema_error(exc)
+    mapper = _UriMapper(request.get("urls") or {})
+    schema = _load_compiled(request.get("compiled"))
+    if schema is None:
+        try:
+            schema = xmlschema.XMLSchema11(
+                request["main"],
+                locations=[tuple(pair) for pair in request.get("locations") or ()],
+                base_url=request["root"],
+                allow="sandbox",
+                uri_mapper=mapper,
+            )
+        except (xmlschema.XMLSchemaException, etree.LxmlError, OSError, ValueError, SyntaxError) as exc:
+            return _schema_error(exc)
+        _COMPILED.append(schema)
 
     parser = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False, huge_tree=False)
     tree = etree.parse(BytesIO(request["xml"].encode("utf-8")), parser)
@@ -202,4 +241,12 @@ def run(request: dict) -> dict:
 
 
 if __name__ == "__main__":
-    json.dump(run(json.load(sys.stdin)), sys.stdout)
+    request = json.load(sys.stdin)
+    reply = run(request)
+    json.dump(reply, sys.stdout)
+    if reply.get("status") == "ok":
+        # Closing stdout hands the caller its answer; the pickle comes after.
+        sys.stdout.close()
+        with contextlib.suppress(OSError):
+            os.close(1)  # the std streams leave their descriptor open
+        _store_compiled(request.get("store"))

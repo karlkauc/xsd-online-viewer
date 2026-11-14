@@ -279,6 +279,15 @@ URLs are mapped onto the copies), and XPath 2.0 as elementpath implements it
 has no function that reads a file or URL. The app itself still never imports
 `xmlschema`.
 
+Compiling is most of a worker's time for a large schema (FundsXML, 8 MB: about
+7 s; validating the document: milliseconds). After it has replied, a worker
+pickles the schema it compiled; the server keeps these pickles by the content
+of the materialised files (`_compiled_key`, 48 MB LRU) and hands the next worker
+for the same schema the pickle to load (0.3 s) instead. The server only passes
+the bytes on: workers write them and workers read them, and a pickle that does
+not load is compiled afresh. The validate endpoints run in a worker thread, so a
+first, compiling validation does not hold up other requests.
+
 The same worker gives a second opinion on the schema itself
 (`validation.check_schema`, `GET /api/schema/{id}/check`). libxml2 compiles
 many schemas that are not valid XSD — in the W3C test suite 451 of them:

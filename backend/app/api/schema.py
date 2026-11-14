@@ -495,7 +495,10 @@ async def validate_xml_upload(
     content = await _read_upload(
         file, event_type="validate", source="upload", schema_name=_cached_schema_name(schema_id)
     )
-    return _validate_xml_against_schema(schema_id, content, "upload", xsd_version=xsd_version)
+    # Off the event loop: an XSD 1.1 schema's first validation compiles it (FundsXML: ~7 s).
+    return await asyncio.to_thread(
+        _validate_xml_against_schema, schema_id, content, "upload", xsd_version=xsd_version
+    )
 
 
 @router.post("/schema/{schema_id}/validate/text", response_model=ValidationResponse)
@@ -516,8 +519,8 @@ async def validate_xml_text(
             schema_name=_cached_schema_name(schema_id),
         )
     sample = payload.sample if payload.origin == "sample" else None
-    return _validate_xml_against_schema(
-        schema_id, data, payload.origin, sample=sample, xsd_version=xsd_version
+    return await asyncio.to_thread(
+        _validate_xml_against_schema, schema_id, data, payload.origin, sample=sample, xsd_version=xsd_version
     )
 
 
@@ -534,4 +537,6 @@ async def validate_xml_url(
     except SecurityError as exc:
         # schema_name is the schema's, never the URL of the document.
         raise reject("validate", "url", 400, str(exc), schema_name=_cached_schema_name(schema_id)) from exc
-    return _validate_xml_against_schema(schema_id, fetched.content, "url", xsd_version=xsd_version)
+    return await asyncio.to_thread(
+        _validate_xml_against_schema, schema_id, fetched.content, "url", xsd_version=xsd_version
+    )
