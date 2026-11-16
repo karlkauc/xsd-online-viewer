@@ -40,7 +40,12 @@ class FetchError(SecurityError):
     Not a policy violation, but raised as a ``SecurityError`` subclass so every
     caller that already turns policy rejections into a 400 / import warning
     handles network failures the same way instead of surfacing a 500.
+    ``unreachable_host`` names the host when no connection could be opened at all.
     """
+
+    def __init__(self, message: str, unreachable_host: str | None = None) -> None:
+        super().__init__(message)
+        self.unreachable_host = unreachable_host
 
 
 # Some hosts (w3schools, for one) answer 403 to httpx's default User-Agent.
@@ -355,7 +360,9 @@ class FetchSession:
         if client is None:
             client = httpx.Client(
                 follow_redirects=False,
-                timeout=settings.fetch_timeout_seconds,
+                timeout=httpx.Timeout(
+                    settings.fetch_timeout_seconds, connect=settings.fetch_connect_timeout_seconds
+                ),
                 limits=httpx.Limits(max_connections=4),
                 headers=FETCH_HEADERS,
             )
@@ -407,7 +414,10 @@ def fetch_schema_url(url: str, session: FetchSession | None = None) -> FetchedRe
                 break
             except httpx.ConnectError as exc:
                 if i == len(pinned_ips) - 1:
-                    raise FetchError(f"fetching {current!r} failed: {exc}") from exc
+                    raise FetchError(f"fetching {current!r} failed: {exc}", unreachable_host=host) from exc
+            except httpx.ConnectTimeout as exc:
+                # Not the next IP: each would wait the full connect timeout again.
+                raise FetchError(f"fetching {current!r} failed: {exc}", unreachable_host=host) from exc
             except httpx.HTTPError as exc:
                 raise FetchError(f"fetching {current!r} failed: {exc}") from exc
         assert stream is not None

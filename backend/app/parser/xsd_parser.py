@@ -73,6 +73,7 @@ from app.parser.model import (
 )
 from app.parser.security import (
     FetchedResource,
+    FetchError,
     FetchSession,
     SecurityError,
     fetch_schema_url,
@@ -463,6 +464,9 @@ class UrlResolver(SchemaResolver):
     base_url: str | None = None
     _session: FetchSession = field(default_factory=FetchSession, init=False, repr=False)
     _fetched: dict[str, FetchedResource | SecurityError] = field(default_factory=dict, init=False, repr=False)
+    # Hosts that took no connection in this parse: their other files fail at once
+    # instead of each waiting out the connect timeout again.
+    _unreachable: dict[str, FetchError] = field(default_factory=dict, init=False, repr=False)
     _deadline: float | None = field(default=None, init=False, repr=False)
 
     def resolve(self, base_location: str | None, location: str) -> tuple[str, bytes] | None:
@@ -475,10 +479,20 @@ class UrlResolver(SchemaResolver):
             return None
         known = self._fetched.get(absolute)
         if known is None:
+            dead = self._unreachable.get(urlparse(absolute).hostname or "")
+            if dead is not None:
+                known = FetchError(
+                    f"fetching {absolute!r} skipped: {dead.unreachable_host} took no connection",
+                    unreachable_host=dead.unreachable_host,
+                )
+        if known is None:
             self._check_budget()
             try:
                 known = fetch_schema_url(absolute, session=self._session)
             except SecurityError as exc:
+                if isinstance(exc, FetchError) and exc.unreachable_host:
+                    self._unreachable[exc.unreachable_host] = exc
+                    self._unreachable.setdefault(urlparse(absolute).hostname or "", exc)
                 logger.info(
                     "url resolution rejected",
                     extra={"ctx_url": absolute, "ctx_reason": str(exc)},

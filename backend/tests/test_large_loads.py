@@ -172,3 +172,42 @@ def test_cache_counts_the_models_real_footprint(
     # Measured before the schema id is filled in, hence approx.
     json_bytes = len(response.model.model_dump_json().encode())
     assert sizes == [pytest.approx(json_bytes * schema_api.MODEL_BYTES_PER_JSON_BYTE, rel=0.01)]
+
+
+def test_a_host_that_takes_no_connection_is_tried_once_per_parse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """crd.gov.pl (11/2026): every further file of a dead host would wait out the connect timeout again."""
+    from app.parser.security import FetchError
+
+    dead = "https://dead.example.net/xsd/"
+    served = {
+        BASE + "main.xsd": _xsd("Main", dead + "a.xsd", dead + "b.xsd", "common.xsd"),
+        BASE + "common.xsd": _xsd("Common"),
+    }
+    seen: Counter[str] = Counter()
+
+    def fake_fetch(url: str, session: FetchSession | None = None) -> FetchedResource:
+        seen[url] += 1
+        if url.startswith(dead):
+            raise FetchError(f"fetching {url!r} failed: timed out", unreachable_host="dead.example.net")
+        return FetchedResource(url=url, content=served[url], content_type="text/xml")
+
+    monkeypatch.setattr(xsd_parser, "fetch_schema_url", fake_fetch)
+    model = parse_with_url_fallback(
+        zip_bytes=None,
+        main_filename=BASE + "main.xsd",
+        main_bytes=served[BASE + "main.xsd"],
+        base_url=BASE + "main.xsd",
+    )
+    assert {e.name for e in model.elements} == {"Main", "Common"}
+    assert sum(n for url, n in seen.items() if url.startswith(dead)) == 1
+    # Both missing files are still reported to the visitor.
+    messages = " ".join(d.message for d in model.diagnostics)
+    assert "a.xsd" in messages and "b.xsd" in messages
+
+
+def test_a_plain_http_error_does_not_mark_the_host_dead(fetches: Counter[str]) -> None:
+    _load_main()
+    # missing.xsd answers 404; the other files of the same host still load.
+    assert fetches[BASE + "common.xsd"] == 1

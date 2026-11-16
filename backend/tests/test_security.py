@@ -232,9 +232,33 @@ class TestFetchBehaviour:
             raise httpx.ConnectTimeout("timed out", request=request)
 
         self._mock(monkeypatch, handler)
-        with pytest.raises(FetchError, match=r"fetching 'https://example.org/slow.xsd' failed: .*timed out"):
+        expected = r"fetching 'https://example.org/slow.xsd' failed: .*timed out"
+        with pytest.raises(FetchError, match=expected) as info:
             fetch_schema_url("https://example.org/slow.xsd")
         assert issubclass(FetchError, SecurityError)
+        assert info.value.unreachable_host == "example.org"
+
+    def test_read_timeout_is_not_an_unreachable_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import httpx
+
+        from app.parser.security import FetchError
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("timed out", request=request)
+
+        self._mock(monkeypatch, handler)
+        with pytest.raises(FetchError) as info:
+            fetch_schema_url("https://example.org/slow.xsd")
+        assert info.value.unreachable_host is None
+
+    def test_connecting_has_its_own_shorter_timeout(self) -> None:
+        from app.config import settings
+        from app.parser.security import FetchSession
+
+        with FetchSession() as session:
+            timeout = session.client("example.org").timeout
+        assert timeout.connect == settings.fetch_connect_timeout_seconds < settings.fetch_timeout_seconds
+        assert timeout.read == settings.fetch_timeout_seconds
 
 
     def test_connects_to_the_validated_ip_keeping_the_host(self, monkeypatch: pytest.MonkeyPatch) -> None:

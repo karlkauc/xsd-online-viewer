@@ -18,6 +18,7 @@ class Settings:
     log_level: str
     static_dir: str
     fetch_timeout_seconds: float
+    fetch_connect_timeout_seconds: float
     fetch_deadline_seconds: float
     fetch_max_response_mb: int
     fetch_max_redirects: int
@@ -80,6 +81,9 @@ def load_settings() -> Settings:
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         static_dir=os.getenv("STATIC_DIR", "/app/static"),
         fetch_timeout_seconds=float(os.getenv("FETCH_TIMEOUT_SECONDS", "10")),
+        # Opening the connection only: a host that takes no connections (crd.gov.pl, 11/2026)
+        # fails after this instead of FETCH_TIMEOUT_SECONDS; slow but reachable servers keep the latter.
+        fetch_connect_timeout_seconds=float(os.getenv("FETCH_CONNECT_TIMEOUT_SECONDS", "4")),
         # Whole fetch incl. redirects; FETCH_TIMEOUT_SECONDS only bounds each read.
         fetch_deadline_seconds=float(os.getenv("FETCH_DEADLINE_SECONDS", "60")),
         fetch_max_response_mb=int(os.getenv("FETCH_MAX_RESPONSE_MB", "32")),
